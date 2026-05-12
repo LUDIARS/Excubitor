@@ -219,11 +219,22 @@ code {
 .af-trigger, .af-expand { padding: 1px 6px; font-size: 11px; line-height: 1.3; }
 .expand-row td { background: var(--bg); padding: 8px 12px; }
 .af-runs { display: flex; flex-direction: column; gap: 6px; }
-.af-run { padding: 6px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
-.af-run-head { display: flex; gap: 12px; align-items: center; margin-bottom: 2px; }
+.af-run { padding: 8px 12px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.af-run-head { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
 .af-run.af-succeeded { border-color: var(--ok); }
 .af-run.af-failed { border-color: var(--err); }
-.af-error { color: var(--err); font-family: var(--mono); font-size: 11px; margin-top: 4px; white-space: pre-wrap; }
+.af-meta { margin-bottom: 4px; }
+.af-error { color: var(--err); font-family: var(--mono); font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.af-error-details summary { color: var(--err); cursor: pointer; font-size: 11px; }
+.af-detail-btn { font-size: 10px; padding: 1px 6px; }
+.af-detail { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.af-detail details summary { font-size: 11px; color: var(--fg-muted); cursor: pointer; }
+.af-detail pre { font-family: var(--mono); font-size: 10.5px; background: var(--bg); padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; max-height: 240px; overflow: auto; margin: 4px 0 0; }
+.af-stderr { color: var(--err); }
+.af-stdout { color: var(--fg); }
+.af-prompt { color: var(--fg-muted); }
+.verify-ok { color: var(--ok); }
+.verify-health_failed, .verify-still_crashing { color: var(--err); }
 
 /* ─────────────── Infisical ─────────────── */
 .infisical-page { display: flex; flex-direction: column; gap: 20px; }

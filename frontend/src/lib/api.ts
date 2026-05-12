@@ -67,6 +67,9 @@ export interface AutoFixRun {
   verify_result: string | null;
   exit_code: number | null;
   error_message: string | null;
+  stdout_tail: string | null;
+  stderr_tail: string | null;
+  prompt: string | null;
   started_at: string | null;
   finished_at: string | null;
 }

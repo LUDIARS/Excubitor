@@ -76,9 +76,9 @@ services:
     infisical:
       project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
       environment: dev
-      inject: false
+      inject: true
     auto_fix:
-      enabled: true
+      enabled: false  # pnpm v10 構成のハマりで暴走中、 手動で main を安定化させてから再有効化
       agent: claude-code
       max_auto_attempts: 3
       working_dir: E:/Document/Ars/Cernere
