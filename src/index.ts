@@ -19,6 +19,7 @@ import { startErrorDetector, setCatalogProvider } from './log/error-detector.js'
 import * as infisical from './infisical/client.js';
 import { seedDefaultRules } from './auto_fix/seed.js';
 import { runAutoFix } from './auto_fix/runner.js';
+import { buildReviewsRouter } from './reviews/router.js';
 
 const logger = pino({ name: 'excubitor' });
 const port = Number(process.env.EXCUBITOR_PORT ?? 17331);
@@ -55,6 +56,8 @@ app.get('/health', (c) =>
     version: '0.1.0',
   }),
 );
+
+app.route('/', buildReviewsRouter());
 
 app.get('/api/v1/services', async (c) => {
   const rows = await db.execute(drizzleSql`

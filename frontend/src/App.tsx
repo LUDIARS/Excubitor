@@ -2,19 +2,21 @@ import { useEffect, useState } from 'react';
 import Dashboard from './pages/Dashboard';
 import Errors from './pages/Errors';
 import Infisical from './pages/Infisical';
+import Reviews from './pages/Reviews';
 
-type Tab = 'dashboard' | 'errors' | 'infisical';
+type Tab = 'dashboard' | 'errors' | 'infisical' | 'reviews';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Services' },
   { id: 'errors', label: 'Errors' },
   { id: 'infisical', label: 'Infisical' },
+  { id: 'reviews', label: 'Reviews' },
 ];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return (['dashboard', 'errors', 'infisical'] as Tab[]).includes(h) ? h : 'dashboard';
+    return (['dashboard', 'errors', 'infisical', 'reviews'] as Tab[]).includes(h) ? h : 'dashboard';
   });
 
   useEffect(() => {
@@ -42,6 +44,7 @@ export default function App() {
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'errors' && <Errors />}
         {tab === 'infisical' && <Infisical />}
+        {tab === 'reviews' && <Reviews />}
       </main>
     </div>
   );
