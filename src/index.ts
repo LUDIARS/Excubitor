@@ -19,7 +19,7 @@ import { startErrorDetector, setCatalogProvider } from './log/error-detector.js'
 import * as infisical from './infisical/client.js';
 import { seedDefaultRules } from './auto_fix/seed.js';
 import { runAutoFix } from './auto_fix/runner.js';
-import { buildReviewsRouter } from './reviews/router.js';
+import { runInvestigation } from './auto_fix/investigate.js';
 
 const logger = pino({ name: 'excubitor' });
 const port = Number(process.env.EXCUBITOR_PORT ?? 17331);
@@ -398,9 +398,11 @@ app.get('/api/v1/auto-fix/runs', async (c) => {
   return c.json({ runs: rows });
 });
 
-app.post('/api/v1/error-tasks/:id/auto-fix', async (c) => {
-  const taskId = c.req.param('id');
-  // task + service を取得
+// task + service lookup の共通処理
+async function resolveTaskAndService(taskId: string): Promise<
+  | { error: string; status: 400 | 404 }
+  | { task: Record<string, unknown>; service: NonNullable<ReturnType<typeof findService>> }
+> {
   const taskRows = await db.execute(drizzleSql`
     SELECT et.id, et.summary, et.log_excerpt, s.code AS service_code, s.catalog_snapshot
     FROM error_tasks et
@@ -410,14 +412,22 @@ app.post('/api/v1/error-tasks/:id/auto-fix', async (c) => {
     LIMIT 1
   `);
   const arr = taskRows as unknown as Array<Record<string, unknown>>;
-  if (arr.length === 0) return c.json({ error: 'not_found' }, 404);
+  if (arr.length === 0) return { error: 'not_found', status: 404 };
   const t = arr[0]!;
   const svcCode = t.service_code as string | null;
-  if (!svcCode) return c.json({ error: 'no_service' }, 400);
+  if (!svcCode) return { error: 'no_service', status: 400 };
   const svc = findService(svcCode);
-  if (!svc) return c.json({ error: 'service_not_in_catalog' }, 400);
-  if (!svc.auto_fix?.enabled) return c.json({ error: 'auto_fix_disabled' }, 400);
+  if (!svc) return { error: 'service_not_in_catalog', status: 400 };
+  if (!svc.auto_fix?.enabled) return { error: 'auto_fix_disabled', status: 400 };
+  return { task: t, service: svc };
+}
 
+// 「修正」: 既存の auto-fix flow。 branch 切って claude が修正 → commit → push → PR。
+app.post('/api/v1/error-tasks/:id/auto-fix', async (c) => {
+  const taskId = c.req.param('id');
+  const resolved = await resolveTaskAndService(taskId);
+  if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+  const { task: t, service: svc } = resolved;
   const actor = c.req.header('x-excubitor-actor') ?? 'manual';
   try {
     const result = await runAutoFix({
@@ -430,6 +440,29 @@ app.post('/api/v1/error-tasks/:id/auto-fix', async (c) => {
     return c.json({ ok: true, ...result });
   } catch (err) {
     return c.json({ error: 'auto_fix_failed', message: (err as Error).message }, 500);
+  }
+});
+
+// 「調査」: claude に解析のみ依頼する。 ファイル / git / shell 状態変更は禁止。
+// 結果は auto_fix_runs に action_type='investigate' で保存される (= 同じ run リスト
+// に並ぶので UI 側は同じ展開コンポーネントで読める)。
+app.post('/api/v1/error-tasks/:id/investigate', async (c) => {
+  const taskId = c.req.param('id');
+  const resolved = await resolveTaskAndService(taskId);
+  if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+  const { task: t, service: svc } = resolved;
+  const actor = c.req.header('x-excubitor-actor') ?? 'manual';
+  try {
+    const result = await runInvestigation({
+      errorTaskId: taskId,
+      service: svc,
+      triggeredBy: actor,
+      summary: t.summary as string,
+      logExcerpt: (t.log_excerpt as string | null) ?? '',
+    });
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    return c.json({ error: 'investigate_failed', message: (err as Error).message }, 500);
   }
 });
 

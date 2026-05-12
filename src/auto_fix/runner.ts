@@ -58,10 +58,11 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
     throw new Error(`no working_dir resolvable for ${code}`);
   }
 
-  // run row 作成
+  // run row 作成。 action_type='fix' を明示 — DB のデフォルト値と一致するが、
+  // investigate と並ぶ系統であることを SQL 上で明確にする。
   const rows = await db.execute(sql`
-    INSERT INTO auto_fix_runs (error_task_id, service_code, agent, state, triggered_by, started_at)
-    VALUES (${ctx.errorTaskId}::uuid, ${code}, 'claude-code', 'running', ${ctx.triggeredBy}, now())
+    INSERT INTO auto_fix_runs (error_task_id, service_code, agent, state, action_type, triggered_by, started_at)
+    VALUES (${ctx.errorTaskId}::uuid, ${code}, 'claude-code', 'running', 'fix', ${ctx.triggeredBy}, now())
     RETURNING id
   `);
   const runId = (rows as unknown as Array<{ id: string }>)[0]!.id;

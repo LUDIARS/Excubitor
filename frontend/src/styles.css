@@ -210,7 +210,27 @@ code {
 .task-actions button { padding: 2px 8px; }
 
 /* auto-fix cell */
-.af-cell { display: flex; gap: 4px; align-items: center; }
+.af-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.af-cell .af-buttons { display: flex; gap: 4px; }
+.af-cell .af-summary { display: flex; gap: 4px; flex-wrap: wrap; }
+.af-investigate, .af-fix { font-size: 11px; padding: 2px 8px; line-height: 1.3; }
+.af-investigate { background: var(--bg-elev); border-color: var(--info); color: var(--info); }
+.af-investigate:hover:not(:disabled) { background: var(--info); color: var(--bg); }
+.af-fix { background: var(--bg-elev); border-color: var(--warn); color: var(--warn); }
+.af-fix:hover:not(:disabled) { background: var(--warn); color: var(--bg); }
+.af-investigate:disabled, .af-fix:disabled { opacity: 0.5; cursor: not-allowed; }
+.af-action-badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: var(--border); color: var(--fg-muted);
+  font-weight: 600;
+}
+.af-action-badge.af-action-investigate { background: var(--info); color: var(--bg); }
+.af-action-badge.af-action-fix { background: var(--warn); color: var(--bg); }
+.af-investigate-result { margin-top: 6px; }
+.af-investigate-result summary { font-size: 11px; color: var(--info); cursor: pointer; font-weight: 600; }
+.af-investigate-result pre { font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 8px 10px; border-radius: 4px; white-space: pre-wrap; max-height: 480px; overflow: auto; margin: 4px 0 0; border-left: 2px solid var(--info); color: var(--fg); }
+.af-run.af-action-investigate { border-left: 3px solid var(--info); }
+.af-run.af-action-fix { border-left: 3px solid var(--warn); }
 .af-state { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--border); color: var(--fg-muted); }
 .af-state.af-succeeded { background: var(--ok); color: black; }
 .af-state.af-failed { background: var(--err); color: white; }
