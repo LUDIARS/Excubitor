@@ -1,0 +1,58 @@
+import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+export interface GitInfo {
+  branch: string | null;
+  hash: string | null;
+  dirty: boolean | null;
+  package_version: string | null;
+}
+
+/**
+ * catalog.cwd の git/package 情報を取得する。
+ * - 取得失敗 (cwd 無い / git 無い) は null を返す
+ * - 子プロセスの timeout は 5 秒
+ */
+export async function readGitInfo(cwd: string): Promise<GitInfo> {
+  const [branch, hash, dirty, version] = await Promise.all([
+    safeExec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
+    safeExec('git', ['rev-parse', '--short=12', 'HEAD'], cwd),
+    safeExec('git', ['status', '--porcelain'], cwd).then((s) => s !== null ? s.length > 0 : null),
+    readPackageVersion(cwd),
+  ]);
+
+  return {
+    branch: branch?.trim() || null,
+    hash: hash?.trim() || null,
+    dirty,
+    package_version: version,
+  };
+}
+
+async function readPackageVersion(cwd: string): Promise<string | null> {
+  try {
+    const raw = await readFile(resolve(cwd, 'package.json'), 'utf8');
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeExec(cmd: string, args: string[], cwd: string): Promise<string | null> {
+  return new Promise((resolveP) => {
+    const proc = spawn(cmd, args, { cwd, shell: false });
+    let stdout = '';
+    const timeout = setTimeout(() => {
+      try { proc.kill('SIGTERM'); } catch { /* noop */ }
+      resolveP(null);
+    }, 5000);
+    proc.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
+    proc.on('error', () => { clearTimeout(timeout); resolveP(null); });
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      resolveP(code === 0 ? stdout : null);
+    });
+  });
+}

@@ -1,0 +1,264 @@
+# Excubitor v0.1 service catalog
+#
+# 本ファイルが source of truth。 起動時 / file watch で DB の services テーブルに
+# snapshot として格納する。
+
+services:
+  # ─────────────── LUDIARS 共有インフラ (monitor_only) ───────────────
+  - code: infra-postgres
+    name: infra Postgres
+    project_code: infra
+    component: postgres
+    port: 5432
+    monitor_only: true
+    repo: LUDIARS/infra
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    services: [postgres]
+    container_names: [infra-postgres-1]
+    autostart: false
+
+  - code: infra-redis
+    name: infra Redis
+    project_code: infra
+    component: redis
+    port: 6379
+    monitor_only: true
+    repo: LUDIARS/infra
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    services: [redis]
+    container_names: [infra-redis-1]
+    autostart: false
+
+  - code: infra-minio
+    name: infra MinIO
+    project_code: infra
+    component: minio
+    port: 9000
+    monitor_only: true
+    repo: LUDIARS/infra
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    services: [minio]
+    container_names: [infra-minio-1]
+    autostart: false
+
+  - code: infra-mailpit
+    name: infra Mailpit
+    project_code: infra
+    component: mailpit
+    port: 8025
+    monitor_only: true
+    repo: LUDIARS/infra
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    services: [mailpit]
+    container_names: [infra-mailpit-1]
+    autostart: false
+
+  # ─────────────── Cernere (認証基盤) ───────────────
+  - code: cernere-backend-dev
+    name: Cernere backend
+    project_code: cernere
+    component: backend
+    port: 8080
+    repo: LUDIARS/Cernere
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Cernere/docker-compose.yaml
+    services: [backend-dev]
+    container_names: [cernere-backend-dev]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8080/health
+      interval_sec: 30
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: false
+    auto_fix:
+      enabled: true
+      agent: claude-code
+      max_auto_attempts: 3
+      working_dir: E:/Document/Ars/Cernere
+      branch_prefix: excubitor/auto-fix/
+      create_pr: true
+      pr_draft: true
+
+  - code: cernere-frontend-dev
+    name: Cernere frontend
+    project_code: cernere
+    component: frontend
+    port: 5173
+    repo: LUDIARS/Cernere
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Cernere/docker-compose.yaml
+    services: [frontend-dev]
+    container_names: [cernere-frontend-dev]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5173
+      interval_sec: 30
+
+  # ─────────────── Custos (リモートテストランナー) ───────────────
+  - code: custos
+    name: Custos
+    project_code: custos
+    component: server
+    port: 8765
+    repo: LUDIARS/Custos
+    runtime: dev-process-md
+    cwd: E:/Document/Ars/Custos
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8765/health
+      interval_sec: 30
+
+  # ─────────────── Memoria (Web ブクマ + RAG + 日記) ───────────────
+  # 個人ローカル開発用 server (runtime: node、 port 5180)。
+  - code: memoria-server
+    name: Memoria server (local)
+    project_code: memoria
+    component: server
+    port: 5180
+    repo: LUDIARS/Memoria
+    runtime: node
+    cwd: E:/Document/Ars/Memoria/server
+    command: npm run dev
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5180/api/health
+      interval_sec: 30
+
+  # Memoria Hub (シェアサーバ) — server/multi/docker-compose.yml で
+  # Postgres + Hub コンテナを起動。 host port 5280。
+  - code: memoria-hub
+    name: Memoria Hub
+    project_code: memoria
+    component: hub
+    port: 5280
+    repo: LUDIARS/Memoria
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Memoria/server/multi/docker-compose.yml
+    services: [hub]
+    container_names: [multi-hub-1]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5280/healthz
+      interval_sec: 30
+
+  - code: memoria-hub-pg
+    name: Memoria Hub Postgres
+    project_code: memoria
+    component: hub-pg
+    monitor_only: true
+    repo: LUDIARS/Memoria
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Memoria/server/multi/docker-compose.yml
+    services: [postgres]
+    container_names: [multi-postgres-1]
+    autostart: false
+
+  # ─────────────── Actio (予定 + タスク プラットフォーム) ───────────────
+  - code: actio-backend
+    name: Actio backend
+    project_code: actio
+    component: backend
+    port: 3000
+    repo: LUDIARS/Actio
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Actio/docker-compose.yaml
+    services: [backend]
+    container_names: [actio-backend-1]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:3000/api/health
+      interval_sec: 30
+
+  - code: actio-frontend
+    name: Actio frontend
+    project_code: actio
+    component: frontend
+    port: 8080
+    repo: LUDIARS/Actio
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Actio/docker-compose.yaml
+    services: [frontend]
+    container_names: [actio-frontend-1]
+    autostart: false
+
+  # ─────────────── Imperativus (音声コマンドルーター + Iv) ───────────────
+  - code: imperativus-app
+    name: Imperativus app
+    project_code: imperativus
+    component: app
+    port: 5963
+    repo: LUDIARS/Imperativus
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    services: [app]
+    container_names: [imperativus-app]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5963/health
+      interval_sec: 30
+
+  - code: imperativus-stt
+    name: Imperativus STT (faster-whisper)
+    project_code: imperativus
+    component: stt
+    monitor_only: true  # 内部 gRPC、 source 自管理だが health endpoint なし
+    repo: LUDIARS/Imperativus
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    services: [stt]
+    container_names: [imperativus-stt]
+    autostart: false
+
+  - code: imperativus-mosquitto
+    name: Imperativus Mosquitto
+    project_code: imperativus
+    component: mosquitto
+    port: 1883
+    monitor_only: true
+    repo: LUDIARS/Imperativus
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    services: [mosquitto]
+    container_names: [imperativus-mosquitto]
+    autostart: false
+
+  # ─────────────── Nuntius (統合通知・メッセージング基盤) ───────────────
+  - code: nuntius-api
+    name: Nuntius API
+    project_code: nuntius
+    component: api
+    port: 3100
+    repo: LUDIARS/Nuntius
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Nuntius/docker-compose.yaml
+    services: [api]
+    container_names: [nuntius-api-1]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:3100/api/health
+      interval_sec: 30
+
+  - code: nuntius-worker
+    name: Nuntius Worker
+    project_code: nuntius
+    component: worker
+    repo: LUDIARS/Nuntius
+    runtime: docker-compose
+    compose_file: E:/Document/Ars/Nuntius/docker-compose.yaml
+    services: [worker]
+    container_names: [nuntius-worker-1]
+    autostart: false
