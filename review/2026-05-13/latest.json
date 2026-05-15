@@ -1,0 +1,63 @@
+{
+  "date": "2026-05-13",
+  "repo": "Excubitor",
+  "weighted_score": "B-",
+  "scores": {
+    "design": "B",
+    "vulnerability": "C",
+    "implementation": "B",
+    "missing_features": "C",
+    "quality": "B"
+  },
+  "critical_count": 0,
+  "high_count": 3,
+  "medium_count": 5,
+  "low_count": 6,
+  "autofix_count": 0,
+  "fix_pr": null,
+  "files": [
+    "REVIEW.md",
+    "REVIEW_DESIGN.md",
+    "REVIEW_VULNERABILITY.md",
+    "REVIEW_IMPLEMENTATION.md",
+    "REVIEW_MISSING_FEATURES.md",
+    "REVIEW_QUALITY.md",
+    "AUTOFIX.md"
+  ],
+  "highlights": [
+    "認可ミドルウェア未配線 — 17331 が plaintext HTTP + actor 自己申告 (V-1, src/index.ts 全 mutation route)",
+    "auto-fix の prompt-injection 余地 + 自動 push 経路 (V-2, src/auto_fix/runner.ts:193-228)",
+    "audit_log / control 応答に Infisical secret 値が混入し得る (V-3, src/control/manager.ts:55-70)",
+    "MVP §11 達成 11/18 — liveness_history INSERT 無し / health probe 無し / docker-compose secret inject 未実装"
+  ],
+  "target_commit": "d2ac911",
+  "files_reviewed": [
+    "README.md",
+    "spec/v0.1-design.md",
+    "package.json",
+    "migrations/001_initial.sql",
+    "migrations/003_auto_fix.sql",
+    "catalog/services.yaml",
+    "src/index.ts",
+    "src/process/manager.ts",
+    "src/process/autostart.ts",
+    "src/process/inject.ts",
+    "src/process/dev-process-md.ts",
+    "src/auto_fix/runner.ts",
+    "src/auto_fix/investigate.ts",
+    "src/auto_fix/trigger.ts",
+    "src/auto_fix/config.ts",
+    "src/control/manager.ts",
+    "src/control/docker-compose.ts",
+    "src/infisical/client.ts",
+    "src/infisical/filter.ts",
+    "src/log/bus.ts",
+    "src/log/docker-tail.ts",
+    "src/log/error-detector.ts",
+    "src/scanner/loop.ts",
+    "src/reviews/router.ts",
+    "src/catalog/loader.ts",
+    "src/db/client.ts",
+    "frontend/config.ts"
+  ]
+}
