@@ -11,7 +11,10 @@ import pino from 'pino';
 import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
 import type { Service } from '../catalog/loader.js';
-import { maybeTriggerAutoFix } from '../auto_fix/trigger.js';
+// 自動 trigger は v0.2 で廃止。 error_task は記録するだけ、 「調査」 「修正」 は
+// ユーザが UI 上のボタンから手動で叩く。 maybeTriggerAutoFix は将来戻す可能性
+// があるので関数自体は残してある (現在は呼ばれない)。
+// import { maybeTriggerAutoFix } from '../auto_fix/trigger.js';
 
 const logger = pino({ name: 'excubitor.errors' });
 
@@ -126,18 +129,10 @@ async function recordHit(rule: Rule, line: LogLine): Promise<void> {
     SELECT id, is_new FROM existing
     LIMIT 1
   `);
+  // error_task は記録するだけ。 「調査」 「修正」 はユーザが UI から手動で
+  // 起動する (= POST /api/v1/error-tasks/:id/investigate or /auto-fix)。
   const arr = rows as unknown as Array<{ id: string; is_new: boolean }>;
-  const hit = arr[0];
-  if (!hit?.is_new || !catalogProvider) return;
-
-  const svc = catalogProvider().services.find((s) => s.code === line.service_code);
-  if (!svc) return;
-  await maybeTriggerAutoFix({
-    errorTaskId: hit.id,
-    service: svc,
-    summary,
-    logExcerpt: line.line,
-  });
+  void arr;
 }
 
 export async function startErrorDetector(): Promise<void> {

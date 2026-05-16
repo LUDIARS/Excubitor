@@ -5,6 +5,7 @@ import { type Service } from '../catalog/loader.js';
 import { controlDockerCompose, type ControlAction, type ControlResult } from './docker-compose.js';
 import { spawnService, killService, getRunningProcess } from '../process/manager.js';
 import { resolveInjectEnv } from '../process/inject.js';
+import { ensureTail } from '../log/docker-tail.js';
 
 const logger = pino({ name: 'excubitor.control' });
 
@@ -25,7 +26,21 @@ export async function controlService(
 
   if (svc.runtime === 'docker-compose') {
     logger.info({ code: svc.code, action, actor }, 'control invoke (compose)');
-    result = await controlDockerCompose(svc, action, env);
+    // catalog.infisical.inject=true なら Infisical から secret を fetch して
+    // docker compose 子プロセスの env として渡す。 compose 内の `${VAR}` 展開で
+    // container env まで伝播する (docker-compose.yaml に該当 env の expose が必要)。
+    let composeEnv: Record<string, string> = env;
+    try {
+      const injected = await resolveInjectEnv(svc);
+      composeEnv = { ...injected, ...env };
+    } catch (err) {
+      return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveInjectEnv' };
+    }
+    result = await controlDockerCompose(svc, action, composeEnv);
+    if (result.ok && (action === 'start' || action === 'restart')) {
+      const primary = svc.container_names?.[0];
+      if (primary) ensureTail(svc.code, primary);
+    }
   } else if (svc.runtime === 'node' || svc.runtime === 'dev-process-md') {
     logger.info({ code: svc.code, action, actor }, 'control invoke (process)');
     result = await controlProcess(svc, action, env);

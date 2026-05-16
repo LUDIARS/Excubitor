@@ -58,10 +58,11 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
     throw new Error(`no working_dir resolvable for ${code}`);
   }
 
-  // run row 作成
+  // run row 作成。 action_type='fix' を明示 — DB のデフォルト値と一致するが、
+  // investigate と並ぶ系統であることを SQL 上で明確にする。
   const rows = await db.execute(sql`
-    INSERT INTO auto_fix_runs (error_task_id, service_code, agent, state, triggered_by, started_at)
-    VALUES (${ctx.errorTaskId}::uuid, ${code}, 'claude-code', 'running', ${ctx.triggeredBy}, now())
+    INSERT INTO auto_fix_runs (error_task_id, service_code, agent, state, action_type, triggered_by, started_at)
+    VALUES (${ctx.errorTaskId}::uuid, ${code}, 'claude-code', 'running', 'fix', ${ctx.triggeredBy}, now())
     RETURNING id
   `);
   const runId = (rows as unknown as Array<{ id: string }>)[0]!.id;
@@ -91,6 +92,26 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
 
     if (cli.exitCode !== 0) {
       throw new Error(`claude CLI exit ${cli.exitCode}: ${cli.stderr.slice(-500)}`);
+    }
+
+    // 2.5) safeguard — branch に「危険なファイル」が含まれていないか検査。
+    //      .env / *.bak / *.pem / *.key 等の secret-risk file は push を許可せず人間判断へ。
+    const allChanged = await collectChangedFiles(workingDir);
+    const unsafe = pickUnsafeFiles(allChanged);
+    if (unsafe.length > 0) {
+      const reason = `unsafe files in branch (refuse push, escalating to human): ${unsafe.slice(0, 10).join(', ')}`;
+      logger.warn({ code, runId, unsafe }, reason);
+      await db.execute(sql`
+        UPDATE auto_fix_runs
+        SET state = 'failed', error_message = ${reason}, finished_at = now()
+        WHERE id = ${runId}::uuid
+      `);
+      await db.execute(sql`
+        UPDATE error_tasks
+        SET auto_fix_state = 'awaiting_human', auto_fix_run_id = ${runId}::uuid, updated_at = now()
+        WHERE id = ${ctx.errorTaskId}::uuid
+      `);
+      return { runId, state: 'failed' };
     }
 
     // 3) diff 確認 + commit + push + PR (claude が既にやってる場合もあるが、 補完で実施)
@@ -189,10 +210,19 @@ function buildPrompt(ctx: AutoFixContext, branch: string, af: NonNullable<Servic
     `## Task`,
     ``,
     `1. Diagnose the root cause from the log.`,
-    `2. Apply a minimal fix in this directory (do not refactor beyond what is needed).`,
+    `2. Apply the SMALLEST possible fix in this directory (do not refactor beyond what is needed).`,
     `3. Commit the change with a clear message.`,
     `4. Push to origin and${af.create_pr ? ` open a${af.pr_draft ? ' draft' : ''} PR with title "auto-fix(${ctx.service.code}): <summary>".` : ' do NOT open a PR.'}`,
     `5. Print a short summary of what you changed and why.`,
+    ``,
+    `## Hard rules (must obey strictly)`,
+    ``,
+    `- Make the SMALLEST possible diff. Touch only files directly required to fix the error.`,
+    `- DO NOT create backup files. Forbidden patterns (case-insensitive): \`*.bak\`, \`*.bak.*\`, \`*.orig\`, \`*.before-*\`, \`*.backup\`, \`*~\`.`,
+    `- DO NOT touch \`.env\`, \`.env.*\`, or any file containing secrets, tokens, passwords, OAuth client secrets, API keys, certificates, or private keys (\`*.pem\`, \`*.key\`, \`*.p12\`).`,
+    `- DO NOT include secret values in any commit. GitHub secret-scanning will block the push and the fix will fail.`,
+    `- If you have already created any such file in this branch, REMOVE it with \`git rm\` and \`rm\` before committing.`,
+    `- If the only viable fix requires editing \`.env\` or committing secrets, STOP. Do not commit. Print "REQUIRES_HUMAN: <reason>" and exit non-zero so a human can take over.`,
     `Do NOT delete or rewrite unrelated files. Stay strictly within the scope of fixing the reported error.${extra}`,
   ].join('\n');
 }
@@ -231,6 +261,49 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
       logger.warn({ err: (err as Error).message }, 'failed to write prompt to stdin');
     }
   });
+}
+
+// branch に含まれる変更ファイル (未 commit + commit 済み) を集める
+async function collectChangedFiles(cwd: string): Promise<string[]> {
+  const out = new Set<string>();
+  // 未 commit (staged / unstaged / untracked)
+  try {
+    const r = await execCapture('git', ['status', '--porcelain'], cwd);
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const path = line.slice(3).trim();
+      if (path) out.add(path);
+    }
+  } catch { /* noop */ }
+  // 現 branch と main の diff (commit 済みの変更)
+  for (const base of ['main', 'master']) {
+    try {
+      const r = await execCapture('git', ['diff', '--name-only', `${base}...HEAD`], cwd);
+      for (const f of r.stdout.split(/\r?\n/)) {
+        const t = f.trim();
+        if (t) out.add(t);
+      }
+      break;
+    } catch { /* try next base */ }
+  }
+  return Array.from(out);
+}
+
+const UNSAFE_PATTERNS: RegExp[] = [
+  /(^|\/)\.env(\..+)?$/i,                  // .env, .env.local, .env.production etc.
+  /\.bak(\..*)?$/i,                        // .bak, .bak.something
+  /\.orig$/i,
+  /\.backup$/i,
+  /\.before-.+/i,                          // .env.bak.before-smoke 等
+  /(^|\/)[^/]+~$/,                         // editor backups
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /(^|\/)credentials?(\.json|\.yaml|\.yml)?$/i,
+  /(^|\/)secrets?(\.json|\.yaml|\.yml)?$/i,
+];
+
+function pickUnsafeFiles(files: string[]): string[] {
+  return files.filter((f) => UNSAFE_PATTERNS.some((re) => re.test(f)));
 }
 
 async function execCapture(
