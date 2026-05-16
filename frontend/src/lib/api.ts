@@ -55,11 +55,15 @@ export interface ErrorTask {
   auto_fix_run_id: string | null;
 }
 
+export type AutoFixActionType = 'fix' | 'investigate';
+
 export interface AutoFixRun {
   id: string;
   error_task_id: string;
   service_code: string;
   state: string;
+  /** 'fix' = branch + commit + push + PR、 'investigate' = 解析のみ (= 既定 'fix') */
+  action_type: AutoFixActionType;
   triggered_by: string | null;
   branch: string | null;
   commit_hash: string | null;
@@ -67,6 +71,9 @@ export interface AutoFixRun {
   verify_result: string | null;
   exit_code: number | null;
   error_message: string | null;
+  stdout_tail: string | null;
+  stderr_tail: string | null;
+  prompt: string | null;
   started_at: string | null;
   finished_at: string | null;
 }
@@ -146,6 +153,13 @@ export function triageErrorTask(id: string, body: { state?: string; note?: strin
 export function triggerAutoFix(id: string) {
   return postJSON<{ ok: boolean; runId?: string; state?: string; error?: string; message?: string }>(
     `/api/v1/error-tasks/${id}/auto-fix`,
+    {},
+  );
+}
+
+export function triggerInvestigate(id: string) {
+  return postJSON<{ ok: boolean; runId?: string; state?: string; error?: string; message?: string }>(
+    `/api/v1/error-tasks/${id}/investigate`,
     {},
   );
 }
