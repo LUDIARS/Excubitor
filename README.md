@@ -1,4 +1,19 @@
-# Excubitor
+# Excubitor (obsolete — 2026-05-17)
+
+> **このリポジトリは 2026-05-17 をもって obsolete です.** 機能はすべて
+> [LUDIARS/Concordia](https://github.com/LUDIARS/Concordia) に集約されました.
+>
+> - catalog / scanner / control / process manager / log bus / error detector / auto-fix / reviews →
+>   `Concordia/src/observability/` 配下に移管
+> - Infisical-relay は持ち越さず、 各サービスが自前で Infisical fetch する設計に変更
+> - 旧 port (17331 / 17332) は空きに. Concordia は引き続き 17330 (backend) / 17333 (web)
+>
+> 詳細は Concordia 側の `CLAUDE.md` (本リポ) または auto-memory
+> `project_concordia_absorbs_excubitor` を参照してください.
+>
+> 過去の `review/` データはアーカイブ目的でこのリポに残置しています.
+
+---
 
 LUDIARS 全サービスの可観測性 + 復旧操作 + 集中設定の中央サーバ。
 
