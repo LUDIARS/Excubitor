@@ -55,8 +55,38 @@ export function summarizeServices(rows: ServiceStateRow[], openErrors: number): 
   };
 }
 
-export function buildHubRouter(): Hono {
+/**
+ * Corpus service manifest (`/.well-known/corpus-service.json`)。
+ *
+ * Corpus は discovery (local probe) でこの manifest を読み、 集約データ
+ * エンドポイント / health / 認証方式を知る (Corpus manifest.ts / 規約 corpusApi=1)。
+ * Corpus 本体はドメインを持たず port を probe するだけなので、 Excubitor 側が
+ * 自己申告するこの形が正しい連携経路 (index.ts への直登録は Corpus 規約違反)。
+ *
+ * pure: バージョン文字列を引数に取り、 DB 非依存で manifest を組む。
+ */
+export function excubitorManifest(version: string): Record<string, unknown> {
+  return {
+    service: 'excubitor',
+    displayName: 'Excubitor (運用コア)',
+    version,
+    corpusApi: 1,
+    health: '/api/hub/health',
+    data: [
+      { id: 'summary', path: '/api/hub/summary', scope: 'multi', title: '運用サマリ' },
+      { id: 'services', path: '/api/hub/services', scope: 'multi', title: 'サービス一覧' },
+      { id: 'errors', path: '/api/hub/errors', scope: 'multi', title: 'エラータスク' },
+    ],
+    panels: [],
+    auth: 'none',
+  };
+}
+
+export function buildHubRouter(version = process.env.npm_package_version ?? '0.1.0'): Hono {
   const app = new Hono();
+
+  // Corpus discovery 用マニフェスト (認証不要)。
+  app.get('/.well-known/corpus-service.json', (c) => c.json(excubitorManifest(version)));
 
   // connector の health probe 用 (Corpus HttpServiceConnector の healthPath)。
   app.get('/api/hub/health', (c) => c.json({ status: 'up', service: 'excubitor' }));
