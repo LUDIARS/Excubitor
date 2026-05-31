@@ -266,3 +266,166 @@ services:
     services: [worker]
     container_names: [nuntius-worker-1]
     autostart: false
+
+  # ─────────────── dev.ps1 ローカル開発サービス群 (設計書 §6.1) ───────────────
+  # dev.bat / dev.ps1 が `cd <repo> && npm run dev` で別ウィンドウ起動している
+  # 開発サーバを catalog に全登録する。Excubitor が dev.bat を置き換える布石。
+  # command は各リポ自身の `npm run dev` に委譲 (内部の concurrently / npm
+  # workspace 構成は各リポが持つので Excubitor 側では再現しない)。
+  # autostart は当面 false (Excubitor の autostart 検証が済むまで手動起動のまま)。
+  # health は port への tcp 接続で liveness を見る (HTTP path は各サービス差異が
+  # あるため、 universal に効く tcp probe を既定とする)。
+
+  - code: corpus
+    name: Corpus (Hub framework)
+    project_code: corpus
+    component: server
+    port: 5185
+    repo: LUDIARS/Corpus
+    runtime: node
+    cwd: E:/Document/Ars/Corpus
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: schedula
+    name: Schedula (予定基盤)
+    project_code: schedula
+    component: backend
+    port: 3000
+    repo: LUDIARS/Schedula
+    runtime: node
+    cwd: E:/Document/Ars/Schedula
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: aedilis
+    name: Aedilis (施設予約)
+    project_code: aedilis
+    component: server
+    port: 17502
+    repo: LUDIARS/Aedilis
+    runtime: node
+    cwd: E:/Document/Ars/Aedilis
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: bibliotheca
+    name: Bibliotheca (貸出台帳)
+    project_code: bibliotheca
+    component: server
+    port: 17501
+    repo: LUDIARS/Bibliotheca
+    runtime: node
+    cwd: E:/Document/Ars/Bibliotheca
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: concordia
+    name: Concordia (AI 協調)
+    project_code: concordia
+    component: backend
+    port: 17330
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: E:/Document/Ars/Concordia
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: conciliator
+    name: Conciliator (衝突検知)
+    project_code: conciliator
+    component: backend
+    port: 17340
+    repo: LUDIARS/Conciliator
+    runtime: node
+    cwd: E:/Document/Ars/Conciliator
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: quaestor
+    name: Quaestor (個人会計)
+    project_code: quaestor
+    component: backend
+    port: 17400
+    repo: LUDIARS/Quaestor
+    runtime: node
+    cwd: E:/Document/Ars/Quaestor
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: praeforma
+    name: Praeforma (仕様↔実装)
+    project_code: praeforma
+    component: server
+    port: 8889
+    repo: LUDIARS/Praeforma
+    runtime: node
+    cwd: E:/Document/Ars/Praeforma
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: signum
+    name: Signum (コンテンツ署名)
+    project_code: signum
+    component: backend
+    port: 3200
+    repo: LUDIARS/Signum
+    runtime: node
+    cwd: E:/Document/Ars/Signum
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: ludellus
+    name: Ludellus server (知育)
+    project_code: ludellus
+    component: server
+    port: 5380
+    repo: LUDIARS/Ludellus-Server
+    runtime: node
+    cwd: E:/Document/Ars/Ludellus-Server
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+
+  - code: vantanhub
+    name: VantanHub (学校 hub)
+    project_code: vantanhub
+    component: server
+    port: 5186
+    repo: LUDIARS/VantanHub
+    runtime: node
+    cwd: E:/Document/Ars/VantanHub
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
