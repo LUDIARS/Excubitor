@@ -3,7 +3,7 @@ import type { Project, Component, ControlAction } from '../lib/api';
 import { fetchProjects, controlService } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 
-export default function Dashboard() {
+export default function Monitor() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logsOpenFor, setLogsOpenFor] = useState<string | null>(null);

@@ -1,4 +1,4 @@
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { type Service } from '../catalog/loader.js';
@@ -7,14 +7,14 @@ import { spawnService, killService, getRunningProcess } from '../process/manager
 import { resolveInjectEnv } from '../process/inject.js';
 import { ensureTail } from '../log/docker-tail.js';
 
-const logger = pino({ name: 'excubitor.control' });
+const logger = createNamedLogger('excubitor.control');
 
 /**
- * runtime に応じた control 呼び出しを dispatch する。
+ * runtime に応じぁEcontrol 呼び出しを dispatch する、E
  *
  * - docker-compose: docker compose up/stop/restart
  * - node / dev-process-md: ProcessManager spawn / kill
- * - docker (raw): v0.2 で対応予定
+ * - docker (raw): v0.2 で対応予宁E
  */
 export async function controlService(
   svc: Service,
@@ -26,9 +26,6 @@ export async function controlService(
 
   if (svc.runtime === 'docker-compose') {
     logger.info({ code: svc.code, action, actor }, 'control invoke (compose)');
-    // catalog.infisical.inject=true なら Infisical から secret を fetch して
-    // docker compose 子プロセスの env として渡す。 compose 内の `${VAR}` 展開で
-    // container env まで伝播する (docker-compose.yaml に該当 env の expose が必要)。
     let composeEnv: Record<string, string> = env;
     try {
       const injected = await resolveInjectEnv(svc);
@@ -45,14 +42,14 @@ export async function controlService(
     logger.info({ code: svc.code, action, actor }, 'control invoke (process)');
     result = await controlProcess(svc, action, env);
   } else {
-    const message = `runtime=${svc.runtime} の control は v0.1 では未実装`;
+    const message = `runtime=${svc.runtime} control is not implemented in v0.1`;
     logger.warn({ code: svc.code, runtime: svc.runtime, action }, message);
     result = { ok: false, stdout: '', stderr: message, exit_code: -1, command: '(not implemented)' };
   }
 
   logger.info({ code: svc.code, action, ok: result.ok, exit_code: result.exit_code }, 'control complete');
 
-  await db.execute(sql`
+  db().run(sql`
     INSERT INTO audit_log (actor, action, target_type, target_id, payload)
     VALUES (
       ${actor},
@@ -65,7 +62,7 @@ export async function controlService(
         command: result.command,
         stdout_tail: result.stdout.slice(-500),
         stderr_tail: result.stderr.slice(-500),
-      })}::jsonb
+      })}
     )
   `);
 
@@ -128,3 +125,7 @@ async function controlProcess(
     }
   }
 }
+
+
+
+

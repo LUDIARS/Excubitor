@@ -62,7 +62,7 @@ export interface AutoFixRun {
   error_task_id: string;
   service_code: string;
   state: string;
-  /** 'fix' = branch + commit + push + PR、 'investigate' = 解析のみ (= 既定 'fix') */
+  /** 'fix' = branch + commit + push + PR、E'investigate' = 解析�Eみ (= 既宁E'fix') */
   action_type: AutoFixActionType;
   triggered_by: string | null;
   branch: string | null;
@@ -76,18 +76,6 @@ export interface AutoFixRun {
   prompt: string | null;
   started_at: string | null;
   finished_at: string | null;
-}
-
-export interface InfisicalStatus {
-  bootstrapped: boolean;
-  site_url?: string;
-  expires_at?: string;
-  expires_in_sec?: number;
-}
-
-export interface InfisicalSecret {
-  secretKey: string;
-  secretValue: string;
 }
 
 // ─────────────── API helpers ───────────────
@@ -112,20 +100,6 @@ async function patchJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return (await res.json()) as T;
-}
-
-async function putJSON<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return (await res.json()) as T;
-}
-
-async function del<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: 'DELETE' });
   return (await res.json()) as T;
 }
 
@@ -169,42 +143,7 @@ export function fetchAutoFixRuns(errorTaskId?: string): Promise<AutoFixRun[]> {
   return getJSON<{ runs: AutoFixRun[] }>(`/api/v1/auto-fix/runs${q}`).then((d) => d.runs);
 }
 
-export function fetchInfisicalStatus(): Promise<InfisicalStatus> {
-  return getJSON<InfisicalStatus>('/api/v1/infisical/status');
-}
-
-export function infisicalBootstrap(body: { site_url: string; client_id: string; client_secret: string }) {
-  return postJSON<{ ok: boolean } & InfisicalStatus>('/api/v1/infisical/bootstrap', body);
-}
-
-export function infisicalForget() {
-  return postJSON<{ ok: boolean }>('/api/v1/infisical/forget', {});
-}
-
-export function fetchInfisicalSecrets(workspaceId: string, environment: string) {
-  const q = new URLSearchParams({ workspaceId, environment }).toString();
-  return getJSON<{ secrets: InfisicalSecret[] }>(`/api/v1/infisical/secrets?${q}`);
-}
-
-export function upsertInfisicalSecret(body: {
-  workspaceId: string;
-  environment: string;
-  secretName: string;
-  secretValue: string;
-}) {
-  return putJSON<{ ok: boolean }>('/api/v1/infisical/secrets', body);
-}
-
-export function deleteInfisicalSecret(args: {
-  workspaceId: string;
-  environment: string;
-  secretName: string;
-}) {
-  const q = new URLSearchParams(args).toString();
-  return del<{ ok: boolean }>(`/api/v1/infisical/secrets?${q}`);
-}
-
-// SSE log stream を購読する。 unsubscribe 関数を返す。
+// SSE log stream を購読する、Eunsubscribe 関数を返す、E
 export function subscribeLogs(
   code: string,
   onLine: (line: { channel: string; ts: string; line: string }) => void,
@@ -219,3 +158,4 @@ export function subscribeLogs(
   });
   return () => es.close();
 }
+

@@ -1,24 +1,25 @@
 /**
- * ProcessManager — runtime=node / dev-process-md のサービスを Excubitor server から
- * spawn して監視する。
+ * ProcessManager  Eruntime=node / dev-process-md のサービスめEExcubitor server から
+ * spawn して監視する、E
  *
- * v0.1 (this file) でやること:
- *   - spawn (env injection 対応)
+ * v0.1 (this file) でめE��こと:
+ *   - spawn (env injection 対忁E
  *   - stdout / stderr の line バッファリング + line-by-line ハンドラ
  *   - exit 検知 + restart_policy 適用
- *   - 状態を service_instances テーブルに反映
+ *   - 状態を service_instances チE�Eブルに反映
  *
- * spawn 出力のログ蓄積 (process_logs テーブル) と error detector は別 module で。
+ * spawn 出力�Eログ蓁E��E(process_logs チE�Eブル) と error detector は別 module で、E
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
 
-const logger = pino({ name: 'excubitor.process' });
+const logger = createNamedLogger('excubitor.process');
 
 export interface SpawnedProcess {
   code: string;
@@ -46,12 +47,12 @@ export function listRunningProcesses(): SpawnedProcess[] {
 }
 
 export interface SpawnOptions {
-  /** env を上書き (Infisical secret inject 等)。 process.env にマージされる。 */
+  /** env を上書ぁE(secret secret inject 筁E、Eprocess.env にマ�Eジされる、E*/
   env?: Record<string, string>;
-  /** restart_policy / max_restart は service catalog 値を使うが、 外部から渡しても良い。 */
+  /** restart_policy / max_restart は service catalog 値を使ぁE��、E外部から渡しても良ぁE��E*/
   restartPolicy?: 'no' | 'on-failure' | 'always';
   maxRestart?: number;
-  /** 以前の restartCount を引き継いで spawn する (restart のため)。 */
+  /** 以前�E restartCount を引き継いで spawn する (restart のため)、E*/
   initialRestartCount?: number;
 }
 
@@ -70,16 +71,24 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   let args: string[];
   if (svc.runtime === 'node') {
     if (!svc.command) throw new Error(`service ${svc.code} has no command`);
-    [cmd, ...args] = splitCommand(svc.command);
+    const parts = splitCommand(svc.command);
+    const first = parts.shift();
+    if (!first) throw new Error(`service ${svc.code} command is empty`);
+    cmd = first;
+    args = parts;
   } else {
     // dev-process-md
     const parsed = await resolveDevProcessCommand(svc.cwd);
-    [cmd, ...args] = splitCommand(parsed);
+    const parts = splitCommand(parsed);
+    const first = parts.shift();
+    if (!first) throw new Error(`service ${svc.code} command is empty`);
+    cmd = first;
+    args = parts;
   }
 
   const child = spawn(cmd, args, {
     cwd: svc.cwd,
-    shell: true, // Windows での npm 等の解決を簡単にするため shell 経由
+    shell: true, // Windows での npm 等�E解決を簡単にするため shell 経由
     env: { ...process.env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -113,7 +122,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
 export async function killService(code: string, signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
   const p = processes.get(code);
   if (!p) return false;
-  // Windows では SIGTERM が即 kill にならないため、 short timeout で SIGKILL fallback
+  // Windows では SIGTERM が即 kill にならなぁE��め、Eshort timeout で SIGKILL fallback
   try { p.child.kill(signal); } catch { /* noop */ }
   setTimeout(() => {
     if (processes.has(code)) {
@@ -145,7 +154,7 @@ async function onExit(
   if (prevRestartCount + 1 > max) {
     logger.warn(
       { code: svc.code, restartCount: prevRestartCount + 1, max },
-      'restart limit reached — opening error_task',
+      'restart limit reached  Eopening error_task',
     );
     await raiseRestartLimitError(svc, code ?? -1, signal, max);
     return;
@@ -193,7 +202,7 @@ function emitLine(svc: Service, channel: 'stdout' | 'stderr', line: string): voi
 }
 
 function splitCommand(input: string): string[] {
-  // ナイーブ split; quote 内のスペースは未対応。 catalog で sensible な command を書く前提。
+  // ナイーチEsplit; quote 冁E�Eスペ�Eスは未対応、Ecatalog で sensible な command を書く前提、E
   return input.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((s) => s.replace(/^"|"$/g, '')) ?? [input];
 }
 
@@ -203,16 +212,16 @@ async function updateState(
   pid: number | null,
   exit_code?: number,
 ): Promise<void> {
-  await db.execute(sql`
-    UPDATE service_instances si
+  // PG の UPDATE ... FROM 構文は SQLite に無ぁE�Eで、Eservice_id めEsubquery で解決する、E
+  db().run(sql`
+    UPDATE service_instances
     SET state = ${state},
         pid = ${pid},
-        last_seen_at = now(),
-        started_at = CASE WHEN ${state} = 'running' THEN now() ELSE si.started_at END,
+        last_seen_at = unixepoch() * 1000,
+        started_at = CASE WHEN ${state} = 'running' THEN unixepoch() * 1000 ELSE started_at END,
         exit_code = ${exit_code ?? null},
-        updated_at = now()
-    FROM services s
-    WHERE si.service_id = s.id AND s.code = ${code}
+        updated_at = unixepoch() * 1000
+    WHERE service_id IN (SELECT id FROM services WHERE code = ${code})
   `);
 }
 
@@ -222,9 +231,10 @@ async function raiseRestartLimitError(
   signal: NodeJS.Signals | null,
   max: number,
 ): Promise<void> {
-  await db.execute(sql`
-    INSERT INTO error_tasks (service_instance_id, severity, summary, log_excerpt)
-    SELECT si.id, 'fatal',
+  const newId = randomUUID();
+  db().run(sql`
+    INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt)
+    SELECT ${newId}, si.id, 'fatal',
            ${'restart limit reached (max=' + max + ', exit_code=' + exitCode + ', signal=' + (signal ?? 'none') + ')'},
            NULL
     FROM service_instances si
@@ -233,3 +243,8 @@ async function raiseRestartLimitError(
     LIMIT 1
   `);
 }
+
+
+
+
+

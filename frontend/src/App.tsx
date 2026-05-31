@@ -1,22 +1,20 @@
 import { useEffect, useState } from 'react';
-import Dashboard from './pages/Dashboard';
+import Monitor from './pages/Monitor';
+import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
-import Infisical from './pages/Infisical';
-import Reviews from './pages/Reviews';
 
-type Tab = 'dashboard' | 'errors' | 'infisical' | 'reviews';
+type Tab = 'monitor' | 'catalog' | 'errors';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Services' },
+  { id: 'monitor', label: 'Monitor' },
+  { id: 'catalog', label: 'Catalog' },
   { id: 'errors', label: 'Errors' },
-  { id: 'infisical', label: 'Infisical' },
-  { id: 'reviews', label: 'Reviews' },
 ];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return (['dashboard', 'errors', 'infisical', 'reviews'] as Tab[]).includes(h) ? h : 'dashboard';
+    return (['monitor', 'catalog', 'errors'] as Tab[]).includes(h) ? h : 'monitor';
   });
 
   useEffect(() => {
@@ -30,21 +28,16 @@ export default function App() {
         <span className="badge">v0.1</span>
         <nav className="tabs">
           {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={tab === t.id ? 'active' : ''}
-              onClick={() => setTab(t.id)}
-            >
+            <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
               {t.label}
             </button>
           ))}
         </nav>
       </header>
       <main className="container">
-        {tab === 'dashboard' && <Dashboard />}
+        {tab === 'monitor' && <Monitor />}
+        {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}
-        {tab === 'infisical' && <Infisical />}
-        {tab === 'reviews' && <Reviews />}
       </main>
     </div>
   );

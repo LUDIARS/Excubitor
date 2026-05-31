@@ -1,4 +1,4 @@
-/* Excubitor v0.1 — minimal styling (Foundation UI 風 CSS variables) */
+/* Excubitor v0.1  Eminimal styling (Foundation UI 風 CSS variables) */
 
 :root {
   --bg:           #0e0f12;
@@ -257,14 +257,6 @@ code {
 .verify-health_failed, .verify-still_crashing { color: var(--err); }
 
 /* ─────────────── Infisical ─────────────── */
-.infisical-page { display: flex; flex-direction: column; gap: 20px; }
-.infisical-page section {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px 18px;
-}
-.infisical-page h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
 
 .bootstrap-form { display: flex; flex-direction: column; gap: 10px; max-width: 480px; }
 .bootstrap-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-muted); }
@@ -334,3 +326,4 @@ code {
   .error-table th, .error-table td { padding: 6px 4px; font-size: 11px; }
   .task-summary { max-width: 200px; }
 }
+

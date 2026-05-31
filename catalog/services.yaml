@@ -100,6 +100,10 @@ services:
     health:
       type: http
       url: http://localhost:5173
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: true
       interval_sec: 30
 
   # ─────────────── Custos (リモートテストランナー) ───────────────

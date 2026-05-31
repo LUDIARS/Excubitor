@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import { syncDockerInstances } from './sync.js';
 import { type Catalog } from '../catalog/loader.js';
 import { ensureTail, stopTail, isTailingService } from '../log/docker-tail.js';
 
-const logger = pino({ name: 'excubitor.scanner' });
+const logger = createNamedLogger('excubitor.scanner');
 
 const DEFAULT_INTERVAL_MS = 10_000;  // 10s
 
@@ -23,12 +23,12 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
       const { scanned, matched } = await syncDockerInstances(catalog);
       logger.debug({ scanned, matched }, 'docker scan complete');
 
-      // running 中の docker サービスだけに docker logs -f を張る (DB の state を見る)
-      const runningRows = await db.execute(sql`
+      // running 中の docker サービスだけに docker logs -f を張めE(DB の state を見る)
+      const runningRows = db().all(sql`
         SELECT s.code
         FROM services s
         JOIN service_instances si ON si.service_id = s.id
-        WHERE s.is_active = TRUE AND si.state = 'running'
+        WHERE s.is_active = 1 AND si.state = 'running'
       `);
       const runningCodes = new Set(
         (runningRows as unknown as Array<{ code: string }>).map((r) => r.code),
@@ -53,7 +53,7 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
     }
   };
 
-  // 起動直後に 1 回 + 以後 interval
+  // 起動直後に 1 囁E+ 以征Einterval
   void tick();
 
   return {
@@ -63,3 +63,5 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
     },
   };
 }
+
+
