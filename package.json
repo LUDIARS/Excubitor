@@ -5,9 +5,9 @@
   "description": "LUDIARS service liveness, log aggregation, error triage, and centralized config (Infisical) — central monitor server.",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

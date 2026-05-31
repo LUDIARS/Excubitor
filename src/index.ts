@@ -20,9 +20,10 @@ import * as infisical from './infisical/client.js';
 import { seedDefaultRules } from './auto_fix/seed.js';
 import { runAutoFix } from './auto_fix/runner.js';
 import { runInvestigation } from './auto_fix/investigate.js';
+import { buildReviewsRouter } from './reviews/router.js';
 
 const logger = pino({ name: 'excubitor' });
-const port = Number(process.env.EXCUBITOR_PORT ?? 17331);
+const port = Number(process.env.EXCUBITOR_PORT ?? 17332);
 
 // ─────────────── boot: catalog → DB sync ───────────────
 // catalog はメモリ上で reload 可能にしておく (control API が svc を引くため)

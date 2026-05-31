@@ -30,13 +30,13 @@ export const config = {
    * frontend dev server の listen port。
    * 変更時は dev-process.md / Concordia 等の参照側も更新すること。
    */
-  port: 17332,
+  port: 17333,
 
   /**
    * `/api/*` を proxy する backend (Excubitor server) の URL。
    * 同一ホスト上で server を動かしている前提 (LUDIARS standard)。
    */
-  backendUrl: 'http://localhost:17331',
+  backendUrl: 'http://localhost:17332',
 } as const;
 
 /**

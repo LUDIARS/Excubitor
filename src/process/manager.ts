@@ -70,11 +70,15 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   let args: string[];
   if (svc.runtime === 'node') {
     if (!svc.command) throw new Error(`service ${svc.code} has no command`);
-    [cmd, ...args] = splitCommand(svc.command);
+    const parts = splitCommand(svc.command);
+    cmd = parts[0] ?? svc.command;
+    args = parts.slice(1);
   } else {
     // dev-process-md
     const parsed = await resolveDevProcessCommand(svc.cwd);
-    [cmd, ...args] = splitCommand(parsed);
+    const parts = splitCommand(parsed);
+    cmd = parts[0] ?? parsed;
+    args = parts.slice(1);
   }
 
   const child = spawn(cmd, args, {
