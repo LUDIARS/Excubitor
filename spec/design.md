@@ -1,0 +1,328 @@
+# Excubitor 再稼働 設計書 (v0.2)
+
+> 本書は 2026-05-31 起草。 2026-05-17 に obsolete 化し Concordia へ吸収された Excubitor を、
+> **「LUDIARS サービス監視・運用コア」専用サービス** として再稼働させるための設計。
+> 旧 `spec/v0.1-design.md` (Postgres + Infisical-relay 時代) の設計は破棄し、本書を正本とする。
+
+---
+
+## 1. 背景と目的
+
+### 1.1 きっかけ
+
+現状 LUDIARS のローカル開発では `E:/Document/Ars/dev.bat` → `dev.ps1` で対象サービスを選択し、
+各サービスを別ウィンドウで `npm run dev` 起動している (16 サービスのトグル選択 UI)。
+これは「並べて起動するだけ」で、以下が手作業 / 不在のまま:
+
+- 起動後の死活確認 (落ちたウィンドウを目視)
+- ログの集約 (ウィンドウを個別に見る)
+- エラー検知・通知 (なし)
+- 再起動 (ウィンドウを閉じて起動し直す)
+- 一括起動順序 / 依存 (なし)
+
+Corpus が大規模 Hub の役割を担っていくにあたり、**サービスの起動 / 再起動 / ログ集約 /
+エラー検知 / 死活モニターを 1 か所に集約する運用コア**が必要、という判断。
+
+### 1.2 責務分割の決定 (2026-05-31)
+
+ユーザ判断により責務を明確に分離する:
+
+| サービス | 責務 |
+|---|---|
+| **Concordia** | **AI 協調支援に専念** — multi-agent session の協調・記録・chat・persona・report・delegation。LLM セッションの世界。 |
+| **Excubitor** (本書) | **サービス監視・運用コア** — catalog / 死活監視 / ログ集約 / エラー検知 / 起動・再起動 / 自動修正。インフラ・SRE の世界。 |
+| **Corpus** | 大規模 Hub。 Excubitor にコネクタ接続し、運用情報を集約フロントに載せる。 |
+
+→ 2026-05-17 に Concordia へ吸収した observability 層を **Concordia から抜いて Excubitor に戻す**。
+ただし**ゼロからの再構築ではなく、Concordia 上で稼働実績のあるコードを移植する** (decision-metrics:
+作業コスト最小・解決度同等。再実装は二重実装になり非推奨)。
+
+---
+
+## 2. スコープ
+
+### 2.1 In scope (v0.2)
+
+1. **catalog** — `catalog/services.yaml` を source of truth に全サービスを宣言 (file watch で hot reload)。
+2. **scanner** — docker / プロセス / git / package version の周期スキャン → 死活 state。
+3. **control** — `start` / `stop` / `restart` を API + UI から (docker-compose / node / dev-process-md)。
+4. **process** — `autostart` による一括起動 (= `dev.bat` 代替)、 secret 注入、 restart_policy。
+5. **log** — docker-tail / file-tail (Vestigium JSONL 優先) / process-bridge を log bus に集約 + 保存。
+6. **error** — error_rules でパターン検知 → error_tasks triage キュー + 通知。
+7. **auto_fix** — error_task から Claude Code CLI を spawn し修正 PR まで (任意)。
+8. **Web UI** — Monitor / Catalog / Errors / LogsDrawer (Concordia から移植)。
+9. **Corpus コネクタ** — Excubitor が multi-hub backend を公開し、Corpus が運用情報を集約。
+
+### 2.2 Out of scope (v0.2)
+
+- 旧 Excubitor の **Infisical-relay** (secret CRUD を 1 か所から)。各サービス自前 fetch のまま。
+- リモートホスト常駐 agent (hosts テーブルは残すが、当面 localhost 1 ホスト運用)。
+- reviews (`/ludiars-review` 連携) — Concordia 側に残すか Excubitor に移すかは §7 で別途判断。
+- `dev.ps1` の対話 UI 撤去 — 当面は併存させ、Excubitor 安定後に段階移行。
+
+---
+
+## 3. アーキテクチャ
+
+### 3.1 全体像
+
+```
+┌───────────────────────────────────────────────┐
+│ Corpus (大規模 Hub) :corpus-port               │
+│   connectors/excubitor.ts ──┐                  │
+└─────────────────────────────┼──────────────────┘
+                              │ HTTP (multi-hub backend)
+┌─────────────────────────────▼──────────────────┐
+│ Excubitor backend  :17332  (loopback only)     │
+│  ┌─────────┐ ┌─────────┐ ┌──────────┐          │
+│  │ catalog │ │ scanner │ │ control  │          │
+│  └────┬────┘ └────┬────┘ └────┬─────┘          │
+│  ┌────▼────┐ ┌────▼────┐ ┌────▼─────┐          │
+│  │ process │ │  log    │ │ error    │          │
+│  │ autostart│ │ bus     │ │ detector │          │
+│  └────┬────┘ └────┬────┘ └────┬─────┘          │
+│       │           │           │ auto_fix       │
+│  ┌────▼───────────▼───────────▼─────┐          │
+│  │ SQLite (better-sqlite3 + drizzle) │         │
+│  └───────────────────────────────────┘         │
+└─────────────────┬───────────────────────────────┘
+                  │ spawn / docker compose / tail
+   ┌──────────────┼──────────────┬─────────────┐
+ Cernere       Actio          Corpus        ...  (catalog の各サービス)
+```
+
+### 3.2 技術スタック (Concordia 観測層と同一)
+
+- ランタイム: Node.js >= 22, TypeScript (ESM, tsx watch で hot reload)
+- HTTP: Hono + @hono/node-server
+- DB: **SQLite** (better-sqlite3 + drizzle-orm)。 Concordia で SQLite 化済みの schema をそのまま流用。
+- catalog: js-yaml + zod
+- ログ: pino / Vestigium (`@ludiars/vestigium`) JSONL reader
+- Web: React + Vite + Tailwind + Foundation UI (Concordia web から該当ページを移植)
+- 起動: `npm run dev` (tsx watch、 dev-process.md 同梱)
+
+### 3.3 ポート割当
+
+PORT-MAP では旧 Excubitor の 17331 は Concordia web に再割当済み。**17332 / 17333 が空き**なので:
+
+| プロセス | port | env | 備考 |
+|---|---|---|---|
+| Excubitor backend | **17332** | `EXCUBITOR_PORT` | loopback only |
+| Excubitor web | **17333** | (vite.config) | loopback only |
+
+→ `infra/PORT-MAP.md` を更新する (本 PR には含めず、移植実装 PR で行う)。
+
+---
+
+## 4. モジュール構成 (移植元 = `Concordia/src/observability/`)
+
+そのまま移植 (パスを `src/observability/` → `src/` に戻す):
+
+| Excubitor (新) | 移植元 (Concordia) | 内容 |
+|---|---|---|
+| `src/catalog/{loader,sync,watcher}.ts` | `observability/catalog/` | services.yaml ロード + DB sync + file watch |
+| `src/scanner/{docker,git,host,loop,sync}.ts` | `observability/scanner/` | 周期スキャン → state / git / version |
+| `src/control/{manager,docker-compose}.ts` | `observability/control/` | start / stop / restart |
+| `src/process/{manager,autostart,dev-process-md,inject}.ts` | `observability/process/` | 子プロセス管理 + 一括起動 + secret 注入 |
+| `src/log/{bus,docker-tail,file-tail,process-bridge,error-detector,vestigium-reader}.ts` | `observability/log/` | ログ集約 + エラー検知 |
+| `src/auto_fix/{runner,investigate,seed}.ts` | `observability/auto_fix/` | 自動修正 |
+| `src/db/{client,schema}.ts` | `observability/db/` | SQLite client + drizzle schema |
+| `src/app.ts` | `observability/index.ts` の router 部 | Hono router |
+| `web/src/pages/{Monitor,Catalog,Errors}.tsx` + `components/LogsDrawer.tsx` | `Concordia/web/src/...` | Web UI |
+| `catalog/services.yaml` | `Concordia/catalog/services.yaml` | カタログ (全サービス化は §6) |
+
+### 4.1 新規 / 改修モジュール
+
+| モジュール | 内容 |
+|---|---|
+| `src/server.ts` | Excubitor 単独の bootstrap (Concordia の `bootObservability()` 相当を main 化)。 |
+| `src/hub/backend.ts` | **Corpus multi-hub backend** エンドポイント (§7)。 |
+| `src/notify/` | エラー通知のアダプタ。 当面は Vestigium ログ + (任意) Concordia chat / Nuntius へ webhook。 |
+
+---
+
+## 5. データモデル
+
+Concordia で SQLite 化済みの schema (`observability/db/schema.ts`) をそのまま採用。 主テーブル:
+
+| テーブル | 役割 |
+|---|---|
+| `hosts` | 監視ホスト (当面 localhost 1 行)。 |
+| `services` | catalog snapshot (code unique + catalog_snapshot JSON)。 |
+| `service_instances` | インスタンス状態 (state / pid / docker_id / git_branch / git_hash / port / package_version)。 |
+| `liveness_history` | 死活プローブ履歴 (ok / latency_ms)。 |
+| `service_instance_logs` | 集約ログ行 (ts / level / line)。 |
+| `error_rules` | 検知ルール (pattern / pattern_type / severity / service_codes)。 |
+| `error_tasks` | エラー triage キュー (state: open/ack/resolved/dismissed/snoozed + auto_fix_state)。 |
+| `auto_fix_runs` | 自動修正実行ログ (branch / commit / pr_url / verify_result)。 |
+| `audit_log` | 操作監査 (actor / action / target)。 |
+
+- DB ファイル: `E:/Document/Ars/Excubitor/data/excubitor.sqlite` (gitignore)。 Concordia の DB とは分離。
+- migration: Concordia の `applyMigrations()` 相当を Excubitor 用に切り出す (新規 DB なので最新 schema を 1 本にまとめてよい)。
+- 注意: SQLite migration で新規カラム用 INDEX は ALTER の後に冪等発行する ([[feedback_sqlite_create_index_after_alter]])。
+
+### 5.1 catalog Service スキーマ (zod)
+
+Concordia の `catalog/loader.ts` の `ServiceSchema` を継承。主フィールド:
+
+- `code` / `name` / `project_code` / `component` / `port`
+- `runtime`: `docker-compose | docker | node | dev-process-md`
+- `cwd` / `command` / `compose_file` / `services` / `container_names`
+- `autostart` (bool) / `restart_policy` (`no|on-failure|always`) / `max_restart`
+- `health` (`http|tcp|cmd` + interval / grace)
+- `log_sources` / `log_path` (Vestigium JSONL を優先)
+- `infisical` (project_id / environment / inject / prefix)
+- `auto_fix` (enabled / branch_prefix / create_pr / pr_draft)
+
+---
+
+## 6. dev.bat / dev.ps1 代替
+
+### 6.1 現状の置換対象
+
+`dev.ps1` の 16 サービス (Cernere / Corpus / Actio / Schedula / Aedilis / Bibliotheca / Nuntius /
+Concordia / Conciliator / Custos / Quaestor / Praeforma / Imperativus / Signum / Ludellus / VantanHub)
+を catalog に `runtime: node` (or `docker-compose`) として全登録する。
+現状 catalog は 17 entry (infra 4 + 一部サービス) なので、**不足分を追記して全サービス化**する。
+
+### 6.2 一括起動フロー
+
+```
+Excubitor 起動
+  → loadCatalog()
+  → runAutostart(catalog)      # autostart:true の service を順次 spawn
+      └ inject secret (process env)   # .env を残さない
+      └ restart_policy に従い監視
+  → scanner loop 開始 (死活)
+  → log bus / error detector 開始
+```
+
+- `dev-services.json` の選択 (goal-set 等) は、catalog の `autostart` フラグ + UI トグルに移行。
+- Web UI の Catalog ページから個別 `start/stop/restart`、 一括起動はトップの操作ボタン。
+- **移行方針**: `dev.ps1` は当面残し、Excubitor 安定後に `dev.bat` を「Excubitor を起動するだけ」に置換。
+
+### 6.3 起動順序 / 依存
+
+v0.2 では catalog の記載順 + `health` の grace_period で素朴に直列化。 厳密な依存グラフ
+(`depends_on`) は v0.3 以降の課題 (infra → Cernere → 各サービス、の順序保証)。
+
+---
+
+## 7. Corpus 連携
+
+### 7.1 Corpus のコネクタ機構
+
+Corpus は `ServiceConnector` 抽象で各サービスの **multi-hub backend** を HTTP で叩く
+(`Corpus/DESIGN.md §4`)。Corpus 側は「サービスの backend を叩く HTTP クライアントに徹する」。
+
+### 7.2 Excubitor 側の対応
+
+Excubitor は multi-hub backend エンドポイント群を公開し、Corpus に `connectors/excubitor.ts` を追加:
+
+| メソッド | パス | 用途 |
+|---|---|---|
+| GET | `/api/hub/summary` | サービス数 / up / down / error_task 件数のサマリ (Hub カード用) |
+| GET | `/api/hub/services` | サービス一覧 + state (`/api/v1/services` の hub 整形) |
+| GET | `/api/hub/errors` | open な error_tasks |
+| POST | `/api/hub/services/:code/control` | start/stop/restart (Corpus からの操作、要認可) |
+
+- 認可: Corpus は接続先の認可をそのまま尊重 (Corpus は再認可しない)。Excubitor は loopback only +
+  操作系 (`control`) は actor ヘッダ + audit_log 記録。
+- 宣言的レンダリング: Corpus が UI を JSON 宣言で描く方針 ([[project_corpus]]) なので、
+  `/api/hub/summary` は Corpus の descriptor が読みやすい flat JSON で返す。
+
+---
+
+## 8. API (backend :17332)
+
+移植元 (`observability/index.ts`) の router をそのまま継承:
+
+| メソッド | パス | 用途 |
+|---|---|---|
+| GET | `/api/v1/services` | サービス一覧 + 最新 instance state |
+| GET | `/api/v1/services/:code` | 単一サービス詳細 |
+| GET | `/api/v1/services/:code/logs/recent?limit=` | 直近ログ |
+| POST | `/api/v1/services/:code/control` | `{action: start\|stop\|restart}` |
+| GET | `/api/v1/error-tasks?state=` | エラー triage キュー |
+| PATCH | `/api/v1/error-tasks/:id` | state / note / snooze 更新 |
+| POST | `/api/v1/error-tasks/:id/auto-fix` | 自動修正 trigger |
+| POST | `/api/v1/error-tasks/:id/investigate` | 調査 trigger |
+| GET/POST | `/api/v1/error-rules` | ルール一覧 / 追加 |
+| GET | `/api/v1/auto-fix/runs?error_task_id=` | 自動修正実行履歴 |
+| (§7) | `/api/hub/*` | Corpus multi-hub backend |
+
+操作系の actor ヘッダは `x-excubitor-actor` に統一 (Concordia 移植時の `x-concordia-actor` 互換は撤去)。
+
+---
+
+## 9. 移植計画 (実装 PR の手順)
+
+> 本設計書 PR とは別に、移植実装 PR を立てる ([[feedback_ai_pr_size]]: 1 PR 集約)。
+> 2 リポ (Excubitor + Concordia) + Corpus を触るが [[feedback_max_5_repos_warn]] の 5 未満。
+
+### Phase A — Excubitor に観測層を戻す
+
+1. Concordia `src/observability/**` を Excubitor `src/**` にコピー (import パスを書き換え)。
+2. `observability/index.ts` の `bootObservability()` を Excubitor `src/server.ts` の main 化。
+3. `Concordia/catalog/services.yaml` を Excubitor `catalog/services.yaml` に移送 + 全サービス追記 (§6.1)。
+4. Concordia web の `pages/{Monitor,Catalog,Errors}.tsx` + `LogsDrawer.tsx` を Excubitor `web/` に移植。
+5. `package.json` deps を観測層が要るものに整理 (hono / better-sqlite3 / drizzle-orm / js-yaml / vestigium / zod)。
+6. port 17332/17333、 DB パス、 dev-process.md、 CLAUDE.md / README の obsolete 表記を除去 + 再稼働版に更新。
+7. `actor` ヘッダ等の Concordia 固有名を Excubitor へ。
+
+### Phase B — Concordia から観測層を抜く (縮退)
+
+1. `Concordia/src/observability/` 削除。
+2. `Concordia/src/server.ts` の `bootObservability()` 呼び出し + `app.ts` の `observabilityRouter` mount 削除。
+3. `Concordia/web/src/pages/{Catalog,Errors}.tsx` + ナビ項目 + `LogsDrawer` 削除 (Monitor は session 用に残すか要確認)。
+4. `Concordia/catalog/services.yaml` 削除。
+5. observ 専用 deps が他で未使用なら整理。
+6. PORT-MAP / 各 memory (project_concordia_absorbs_excubitor, project_excubitor) を更新。
+
+> ⚠️ Concordia は現在 3 セッションが同時に触っている可能性 ([[feedback_concurrent_session_branch]])。
+> Phase B 着手前に `/v1/monitor/conflicts?repo=Concordia` で確認し、必要なら worktree 隔離。
+
+### Phase C — Corpus コネクタ
+
+1. Corpus `server/connectors/excubitor.ts` を追加 (§7)。
+2. Excubitor `/api/hub/*` を実装。
+3. Corpus の Hub カードに Excubitor サマリを表示。
+
+### Phase D — dev.bat 移行
+
+1. catalog 全サービス化 + autostart 検証。
+2. `dev.bat` を Excubitor 起動に置換 (`dev.ps1` の対話 UI は当面残置)。
+
+---
+
+## 10. 決定指標による評価 (decision-metrics)
+
+| 案 | AI 学習量 | 作業コスト | 解決度 | 主目的一致 |
+|---|---|---|---|---|
+| **A. Excubitor へ移植 (本書)** | 中 (2 リポ間の責務分割設計) | 中 (コピー + import 書換 + 縮退) | ◎ 5 | ◎ 5 (運用コア独立) |
+| B. Concordia のまま拡張 | 低 | 小 | ○ 4 | △ 3 (AI 協調と運用が同居) |
+| C. ゼロから再構築 | 中 | **大** (稼働コードを捨てる) | ○ 4 | ◎ 5 |
+
+→ **A を採用** (ユーザ判断: Concordia=AI 支援専念 / 監視=Excubitor)。C は二重実装で作業コスト過大のため不採用。
+
+---
+
+## 11. 未決事項
+
+1. **reviews** (`/ludiars-review` 連携) を Excubitor / Concordia どちらに残すか。
+   - 監視・運用寄りなら Excubitor、AI セッション寄りなら Concordia。要ユーザ判断。
+2. Concordia `Monitor` ページ (session 監視) と Excubitor `Monitor` (サービス監視) の名前衝突 → Excubitor 側を `Services` 等にリネーム検討。
+3. error 通知の宛先 (Concordia chat / Nuntius / Discord) — v0.2 はログ + Corpus サマリのみ、通知は v0.3。
+4. リモートホスト agent (hosts 複数) の再導入時期。
+5. `depends_on` による起動順序保証 (§6.3) の v0.3 設計。
+
+---
+
+## 付録: 関連メモリ
+
+- [[project_excubitor]] — 旧 Excubitor (obsolete)
+- [[project_concordia_absorbs_excubitor]] — 2026-05-17 の吸収 (本書で逆行)
+- [[project_concordia]] — AI 協調側に専念
+- [[project_corpus]] — 大規模 Hub / コネクタ機構 / 宣言的レンダリング
+- [[reference_ludiars_port_map]] — port 割当 (17332/17333 を使用)
+- [[feedback_no_dev_server]] — dev-process.md 規約
