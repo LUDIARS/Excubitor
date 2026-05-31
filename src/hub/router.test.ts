@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeServices } from './router.js';
+import { excubitorManifest, summarizeServices } from './router.js';
 
 describe('summarizeServices', () => {
   it('counts running as up, unknown/null as unknown, others as down', () => {
@@ -32,5 +32,20 @@ describe('summarizeServices', () => {
       unknown: 0,
       open_errors: 0,
     });
+  });
+});
+
+describe('excubitorManifest', () => {
+  it('declares corpusApi=1, health, and hub data endpoints', () => {
+    const m = excubitorManifest('0.2.0');
+    expect(m.service).toBe('excubitor');
+    expect(m.corpusApi).toBe(1);
+    expect(m.version).toBe('0.2.0');
+    expect(m.health).toBe('/api/hub/health');
+    expect(m.auth).toBe('none');
+    const data = m.data as Array<{ id: string; path: string; scope: string }>;
+    expect(data.map((d) => d.id)).toEqual(['summary', 'services', 'errors']);
+    expect(data.every((d) => d.scope === 'multi')).toBe(true);
+    expect(data.find((d) => d.id === 'summary')?.path).toBe('/api/hub/summary');
   });
 });
