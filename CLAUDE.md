@@ -1,31 +1,45 @@
-# Excubitor — obsolete (2026-05-17)
+# Excubitor — サービス監視・運用コア (再稼働 2026-05-31)
 
-このリポジトリは 2026-05-17 をもって obsolete になりました.
+LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起動・再起動 / 自動修正** を集約する
+運用コアサービス。一度 Concordia へ吸収 (2026-05-17) したが、責務分割
+(**Concordia=AI 協調支援 / Excubitor=サービス監視**) により再稼働。Concordia で稼働実績の
+あった observability 層を SQLite 化して移植した。
 
-機能はすべて [LUDIARS/Concordia](https://github.com/LUDIARS/Concordia) の `src/observability/`
-配下に集約されています. 新規開発・バグ修正は Concordia 側で行ってください.
+設計書は [`spec/design.md`](spec/design.md) (v0.2) が正本。旧 `spec/v0.1-design.md`
+(Postgres + Infisical-relay 時代) は破棄。
 
-## Concordia 内での対応
+## 構成
 
-| 旧 Excubitor | 新位置 |
+| モジュール | 役割 |
 |--------------|--------|
-| `src/catalog/` | `Concordia/src/observability/catalog/` |
-| `src/scanner/` | `Concordia/src/observability/scanner/` |
-| `src/control/` | `Concordia/src/observability/control/` |
-| `src/process/` | `Concordia/src/observability/process/` |
-| `src/log/` | `Concordia/src/observability/log/` |
-| `src/auto_fix/` | `Concordia/src/observability/auto_fix/` |
-| `src/reviews/router.ts` | `Concordia/src/observability/reviews/router.ts` |
-| `catalog/services.yaml` | `Concordia/catalog/services.yaml` |
-| `src/infisical/` | **廃止**. 各サービスが自前で Infisical fetch する設計に変更 |
-| frontend (Dashboard / Errors / Reviews) | `Concordia/web/src/pages/{Catalog,Errors,Reviews}.tsx` |
+| `src/catalog/` | `catalog/services.yaml` を source of truth に読み込み + DB sync + file watch |
+| `src/scanner/` | docker / プロセス / git / version の周期スキャン → 死活 state |
+| `src/control/` | start / stop / restart (docker-compose / node / dev-process-md) |
+| `src/process/` | autostart (一括起動) + secret 注入 + restart_policy |
+| `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector |
+| `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
+| `src/server.ts` | main entry。`bootObservability()` + Hono serve |
+| `frontend/` | Monitor / Catalog / Errors の Web UI (Vite + React) |
 
-## DB 変換
+## 技術スタック
 
-旧 Postgres + drizzle-orm/pg-core (`migrations/*.sql` 4本) は Concordia の
-`src/db/schema.ts` に SQLite 化して取り込まれました (SCHEMA_VERSION 7→8).
+- Node.js >= 22 / TypeScript (ESM, tsx watch)
+- Hono + @hono/node-server (backend **17332** / `EXCUBITOR_PORT`、loopback only)
+- **SQLite** (better-sqlite3 + drizzle-orm)。DB は `data/excubitor.sqlite`
+- frontend: Vite + React (**17333**)
+- ログ: pino / Vestigium (`@ludiars/vestigium`)
 
-## 過去データ
+## 起動
 
-- `review/<YYYY-MM-DD>/` ディレクトリは Excubitor 自身のレビューデータとして残置
-- git 履歴は archive 用に保持
+```bash
+npm install
+npm run dev        # tsx watch src/server.ts (backend)
+cd frontend && npm run dev   # Vite (17333)
+```
+
+## 注意
+
+- Infisical-relay は移植していない。secret 注入は catalog の `infisical` フィールド経由
+  (各サービスが起動時に自前 fetch する設計のまま)。
+- catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
+  設計書 §9 の Phase C/D で対応予定。

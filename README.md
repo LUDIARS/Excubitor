@@ -1,17 +1,13 @@
-# Excubitor (obsolete — 2026-05-17)
+# Excubitor (再稼働 — 2026-05-31)
 
-> **このリポジトリは 2026-05-17 をもって obsolete です.** 機能はすべて
-> [LUDIARS/Concordia](https://github.com/LUDIARS/Concordia) に集約されました.
+> **2026-05-31 に「サービス監視・運用コア」専用サービスとして再稼働。**
+> 一度 Concordia へ吸収 (2026-05-17) したが、Concordia=AI 協調支援 / Excubitor=サービス監視
+> の責務分割により、Concordia で稼働実績のあった observability 層を SQLite 化して移植し直した。
 >
-> - catalog / scanner / control / process manager / log bus / error detector / auto-fix / reviews →
->   `Concordia/src/observability/` 配下に移管
-> - Infisical-relay は持ち越さず、 各サービスが自前で Infisical fetch する設計に変更
-> - 旧 port (17331 / 17332) は空きに. Concordia は引き続き 17330 (backend) / 17333 (web)
->
-> 詳細は Concordia 側の `CLAUDE.md` (本リポ) または auto-memory
-> `project_concordia_absorbs_excubitor` を参照してください.
->
-> 過去の `review/` データはアーカイブ目的でこのリポに残置しています.
+> - 観測層 (catalog / scanner / control / process / log / error / auto-fix) を Concordia から移植
+> - DB は **SQLite** (better-sqlite3 + drizzle-orm)。旧 Postgres + Infisical-relay は廃止
+> - port: backend **17332** (`EXCUBITOR_PORT`) / frontend **17333**。loopback only
+> - 設計書: [`spec/design.md`](spec/design.md) (v0.2)
 
 ---
 
