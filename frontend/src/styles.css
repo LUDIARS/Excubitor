@@ -356,3 +356,22 @@ code {
 .preflight li.fail, .launch-result li.fail { color: var(--err); }
 .preflight li.warn, .launch-result li.warn { color: var(--warn); }
 .preflight p.fail { color: var(--err); margin: 4px 0; }
+
+/* ─────────────── Config (Infisical 設定) ─────────────── */
+.config { display: flex; flex-direction: column; gap: 16px; max-width: 900px; }
+.config-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.config-card h2 { margin: 0 0 6px; font-size: 15px; }
+.config .muted { color: var(--fg-muted); font-size: 13px; margin: 2px 0; }
+.config .muted.small { font-size: 11px; }
+.config .fail { color: var(--err); }
+.config-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; align-items: end; }
+.config-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--fg-muted); }
+.config-form input { width: 100%; }
+.config-form button { grid-column: 1 / -1; justify-self: start; }
+.config-form button.primary, .config-actions button.primary { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+.config-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+.config-table th { text-align: left; color: var(--fg-muted); font-weight: 500; padding: 4px 6px; }
+.config-table td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.config-table input { width: 100%; min-width: 80px; }
+.config-table button.link { background: none; border: none; color: var(--err); cursor: pointer; font-size: 12px; padding: 0; }
+.config-actions { display: flex; gap: 8px; margin-top: 10px; }

@@ -39,6 +39,8 @@ import { buildHubRouter } from './hub/router.js';
 import { buildLaunchRouter } from './launch/router.js';
 import { getLaunchProfile } from './launch/profile.js';
 import { startSelection } from './launch/orchestrator.js';
+import { buildConfigRouter } from './secrets/router.js';
+import { applyInfisicalToEnv } from './secrets/config-store.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -58,6 +60,14 @@ function findService(code: string): Service | undefined {
 }
 
 export async function bootObservability(): Promise<ObservabilityHandle> {
+  // 設定ファイルに Infisical identity があれば process.env に注入 (relay の前提)。
+  // 無ければ未設定のまま → UI が入力を促す。
+  if (applyInfisicalToEnv()) {
+    logger.info('Infisical identity loaded from config file');
+  } else {
+    logger.warn('Infisical identity not configured — secret relay は UI 設定待ち');
+  }
+
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
   const sync = await syncCatalog(currentCatalog);
@@ -105,6 +115,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)
   app.route('/', buildLaunchRouter(() => currentCatalog!));
+
+  // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
+  app.route('/', buildConfigRouter());
 
   app.get('/api/v1/services', (c) => {
     const rows = db().all(drizzleSql`
