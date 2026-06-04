@@ -9,3 +9,8 @@ dist/
 .vscode/
 coverage/
 *.tsbuildinfo
+
+# runtime artifacts
+data/
+logs/
+frontend/logs/

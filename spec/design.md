@@ -326,3 +326,44 @@ Excubitor は multi-hub backend エンドポイント群を公開し、Corpus �
 - [[project_corpus]] — 大規模 Hub / コネクタ機構 / 宣言的レンダリング
 - [[reference_ludiars_port_map]] — port 割当 (17332/17333 を使用)
 - [[feedback_no_dev_server]] — dev-process.md 規約
+
+---
+
+## 12. v0.3 — ランチャー + Infisical relay (2026-06-04)
+
+ユーザ指示: 「Excubitor をランチャー + 統合管理サービスとして確立。起動したら何を立ち上げるかを設定する画面を出し、決定したサービスの backend を立ち上げ Corpus / Cernere と繋げる」「環境変数を各サービス自前 Infisical fetch ではなく Excubitor からリレー。Excubitor が必要情報を Infisical から個別取得し、事前に起動チェックする」。
+
+### 12.1 起動セット (launch profile)
+
+- `launch_profile` singleton (id=1): `configured` / `auto_launch` / `selection (code[])`。
+- **初回ウィザード + 次回自動**: 初回 (`configured=false`) は UI が起動セット選択画面 (Launch タブ) を強制表示。保存すると `configured=true`。以降の boot で `auto_launch` なら保存済み selection を自動起動 (`bootObservability` 末尾)。
+- モジュール: `src/launch/profile.ts` (永続化) / `order.ts` (起動順 tier、pure) / `grouping.ts` (project 別 plan、pure) / `preflight.ts` (起動前チェック) / `orchestrator.ts` (一括 起動/停止) / `router.ts` (API)。
+
+### 12.2 起動順序 (tier)
+
+infra(0) → Cernere(1) → Corpus(2) → corpus 依存(<private-reference-012>Hub, 3) → leaf(5)。tier 単位で control を呼び、tier 間に 1.5s 待ち。Cernere / Corpus を起動セットに含めれば leaf より先に上がるので「Corpus / Cernere と繋げる」が成立 (Corpus は discovery で leaf の port + manifest を拾う)。
+
+### 12.3 Infisical relay (各サービス自前 fetch → Excubitor 集約)
+
+- 旧方針 (2026-05-17「各サービス自前 fetch」) を**撤回**。Excubitor が secret relay を担う (Corpus `env-bootstrap.ts` の想定経路 A)。
+- `src/secrets/infisical.ts`: Excubitor 自身の machine identity (`INFISICAL_SITE_URL/CLIENT_ID/CLIENT_SECRET`) で universal-auth login → `/api/v3/secrets/raw`。token 5min / secret 60s キャッシュ。
+- catalog の `infisical: { project_id, environment, inject, prefix, include, exclude }` を ServiceSchema に接続 (従来は未接続で捨てられていた)。`inject:true` のサービスは spawn 時に該当 project の secret を取得し、prefix/include/exclude を適用して子プロセス env にリレー (`process/inject.ts` の `resolveInjectEnv`)。
+- **起動前チェック (preflight)**: 選択セットの各サービスで cwd / compose_file 実在 + (inject 対象なら) identity 有無 + secret 解決可否を spawn 前に検査。NG は起動から除外しレポート。`POST /api/v1/launch/preflight`、`/launch/start` は内部で preflight 実行。
+
+### 12.4 API 追加
+
+- `GET /api/v1/launch/plan` — profile + project 別サービス (state/startable/tier 付き)
+- `PUT /api/v1/launch/profile` — 起動セット保存 (= ウィザード完了 / 設定変更)
+- `POST /api/v1/launch/preflight` — 起動前チェック
+- `POST /api/v1/launch/start` / `POST /api/v1/launch/stop` — 一括 起動 / 停止
+- `GET /api/v1/projects` — project 別グルーピング (既存 frontend Catalog の参照先が未実装だったのを追加)
+
+### 12.5 同梱した boot バグ修正 (fresh DB で起動できなかった)
+
+raw INSERT が `created_at`/`updated_at`/`ts` を渡しておらず、これらが NOT NULL (default 無し) のため fresh DB では catalog sync / rule seed / scanner が全て NOT NULL 制約で落ちていた。CREATE TABLE 側に `DEFAULT (unixepoch()*1000)` を付与 + `liveness_history` テーブルが MIGRATIONS に欠落していたのを追加。node サービスは scanner が instance 行を作らないため、`updateState` で instance 行を冪等確保 (UPDATE が no-op にならないように)。
+
+### 12.6 残課題
+
+- leaf 各サービスの `infisical.project_id` を catalog に充填する (現状 Cernere のみ設定済。他は inject 不要扱いで自前 .env.secrets fallback)。
+- Excubitor 自身の machine identity の供給経路 (`.env.secrets` / bootstrap)。
+- `/api/v1/launch/start` の実走 smoke (Corpus + leaf を実際に起動して Corpus discovery が拾うか)。

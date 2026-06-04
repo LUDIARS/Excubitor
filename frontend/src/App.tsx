@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
+import Launch from './pages/Launch';
 import Monitor from './pages/Monitor';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
+import { fetchLaunchPlan } from './lib/api';
 
-type Tab = 'monitor' | 'catalog' | 'errors';
+type Tab = 'launch' | 'monitor' | 'catalog' | 'errors';
+
+const TAB_IDS: Tab[] = ['launch', 'monitor', 'catalog', 'errors'];
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'launch', label: 'Launch' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'errors', label: 'Errors' },
@@ -14,8 +19,17 @@ const TABS: { id: Tab; label: string }[] = [
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return (['monitor', 'catalog', 'errors'] as Tab[]).includes(h) ? h : 'monitor';
+    return TAB_IDS.includes(h) ? h : 'launch';
   });
+
+  // 初回 (未設定) なら強制的にウィザード (Launch) を出す。
+  useEffect(() => {
+    void fetchLaunchPlan()
+      .then((p) => {
+        if (!p.profile.configured) setTab('launch');
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     window.location.hash = tab;
@@ -25,7 +39,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Excubitor</h1>
-        <span className="badge">v0.1</span>
+        <span className="badge">v0.2</span>
         <nav className="tabs">
           {TABS.map((t) => (
             <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
@@ -35,6 +49,7 @@ export default function App() {
         </nav>
       </header>
       <main className="container">
+        {tab === 'launch' && <Launch />}
         {tab === 'monitor' && <Monitor />}
         {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}

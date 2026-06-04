@@ -327,3 +327,32 @@ code {
   .task-summary { max-width: 200px; }
 }
 
+
+/* ─────────────── Launcher (起動セット) ─────────────── */
+.launch { display: flex; flex-direction: column; gap: 16px; }
+.launch-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.launch-head h2 { margin: 0 0 4px; }
+.launch .muted { color: var(--fg-muted); font-size: 13px; max-width: 60ch; }
+.launch-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.launch-actions .auto-launch { display: flex; gap: 4px; align-items: center; font-size: 13px; color: var(--fg-muted); }
+.launch-actions button.primary { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+.launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.launch-project { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.launch-project > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.launch-project button.link { background: none; border: none; color: var(--accent); font-size: 12px; padding: 0; cursor: pointer; }
+.launch-svc { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; font-size: 13px; }
+.launch-svc:hover { background: var(--bg-elev); }
+.launch-svc.disabled { opacity: 0.5; }
+.launch-svc .svc-name { flex: 1; }
+.launch-svc .svc-meta { color: var(--fg-muted); font-size: 11px; }
+.launch-svc .badge { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: var(--bg-elev); color: var(--fg-muted); }
+.launch-svc .badge.ok { background: rgba(74,222,128,0.15); color: var(--ok); }
+.launch-svc .badge.down { background: rgba(248,113,113,0.15); color: var(--err); }
+.preflight, .launch-result { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 13px; }
+.preflight.ok { border-color: rgba(74,222,128,0.4); }
+.preflight.warn { border-color: rgba(250,204,21,0.4); }
+.preflight ul, .launch-result ul { margin: 6px 0 0; padding-left: 18px; }
+.preflight li.ok, .launch-result li.ok { color: var(--ok); }
+.preflight li.fail, .launch-result li.fail { color: var(--err); }
+.preflight li.warn, .launch-result li.warn { color: var(--warn); }
+.preflight p.fail { color: var(--err); margin: 4px 0; }

@@ -36,6 +36,9 @@ import { runAutoFix } from './auto_fix/runner.js';
 import { runInvestigation } from './auto_fix/investigate.js';
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
+import { buildLaunchRouter } from './launch/router.js';
+import { getLaunchProfile } from './launch/profile.js';
+import { startSelection } from './launch/orchestrator.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -81,6 +84,16 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   });
   await runAutostart(currentCatalog);
 
+  // 初回ウィザード完了済み + auto_launch なら、 保存済み起動セットを boot で一括起動する
+  // (「次回自動」)。 未設定 (初回) なら何も起動せず、 UI のウィザードを待つ。
+  const profile = getLaunchProfile();
+  if (profile.configured && profile.autoLaunch && profile.selection.length > 0) {
+    logger.info({ selection: profile.selection }, 'auto-launching saved launch set');
+    void startSelection(currentCatalog, profile.selection).catch((err: unknown) =>
+      logger.error({ err: (err as Error).message }, 'auto-launch failed'),
+    );
+  }
+
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
 
@@ -89,6 +102,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // Corpus multi-hub backend (/api/hub/*)
   app.route('/', buildHubRouter());
+
+  // ランチャー API (/api/v1/launch/* + /api/v1/projects)
+  app.route('/', buildLaunchRouter(() => currentCatalog!));
 
   app.get('/api/v1/services', (c) => {
     const rows = db().all(drizzleSql`

@@ -62,7 +62,7 @@ export interface AutoFixRun {
   error_task_id: string;
   service_code: string;
   state: string;
-  /** 'fix' = branch + commit + push + PR、E'investigate' = 解析�Eみ (= 既宁E'fix') */
+  /** 'fix' = branch + commit + push + PR、E'investigate' = 解析�Eみ (= 既宁E'fix') */
   action_type: AutoFixActionType;
   triggered_by: string | null;
   branch: string | null;
@@ -78,6 +78,73 @@ export interface AutoFixRun {
   finished_at: string | null;
 }
 
+// ─────────────── Launcher (起動セット) ───────────────
+export interface PlanService {
+  code: string;
+  name: string;
+  project_code: string;
+  component: string | null;
+  runtime: string;
+  port: number | null;
+  monitor_only: boolean;
+  startable: boolean;
+  start_tier: number;
+  state: string;
+  selected: boolean;
+}
+
+export interface PlanProject {
+  project_code: string;
+  services: PlanService[];
+}
+
+export interface LaunchProfile {
+  configured: boolean;
+  auto_launch: boolean;
+  selection: string[];
+  updated_at: number | null;
+}
+
+export interface LaunchPlan {
+  profile: LaunchProfile;
+  projects: PlanProject[];
+}
+
+export type CheckStatus = 'ok' | 'warn' | 'fail';
+
+export interface PreflightCheck {
+  kind: 'cwd' | 'compose_file' | 'infisical';
+  status: CheckStatus;
+  detail: string;
+}
+
+export interface ServicePreflight {
+  code: string;
+  name: string;
+  ready: boolean;
+  injectedKeys: number;
+  checks: PreflightCheck[];
+}
+
+export interface PreflightReport {
+  ok: boolean;
+  identityPresent: boolean;
+  needsIdentity: boolean;
+  services: ServicePreflight[];
+}
+
+export interface LaunchItemResult {
+  code: string;
+  ok: boolean;
+  skipped: boolean;
+  message: string;
+}
+
+export interface LaunchResult {
+  preflight: PreflightReport;
+  results: LaunchItemResult[];
+}
+
 // ─────────────── API helpers ───────────────
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -91,6 +158,16 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  return (await res.json()) as T;
+}
+
+async function putJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
   return (await res.json()) as T;
 }
 
@@ -141,6 +218,29 @@ export function triggerInvestigate(id: string) {
 export function fetchAutoFixRuns(errorTaskId?: string): Promise<AutoFixRun[]> {
   const q = errorTaskId ? `?error_task_id=${encodeURIComponent(errorTaskId)}` : '';
   return getJSON<{ runs: AutoFixRun[] }>(`/api/v1/auto-fix/runs${q}`).then((d) => d.runs);
+}
+
+export function fetchLaunchPlan(): Promise<LaunchPlan> {
+  return getJSON<LaunchPlan>('/api/v1/launch/plan');
+}
+
+export function saveLaunchProfile(selection: string[], autoLaunch: boolean) {
+  return putJSON<{ ok: boolean; profile: LaunchProfile }>('/api/v1/launch/profile', {
+    selection,
+    auto_launch: autoLaunch,
+  });
+}
+
+export function runPreflight(codes?: string[]): Promise<PreflightReport> {
+  return postJSON<PreflightReport>('/api/v1/launch/preflight', codes ? { codes } : {});
+}
+
+export function launchStart(codes?: string[]): Promise<LaunchResult> {
+  return postJSON<LaunchResult>('/api/v1/launch/start', codes ? { codes } : {});
+}
+
+export function launchStop(codes?: string[]): Promise<{ results: LaunchItemResult[] }> {
+  return postJSON<{ results: LaunchItemResult[] }>('/api/v1/launch/stop', codes ? { codes } : {});
 }
 
 // SSE log stream を購読する、Eunsubscribe 関数を返す、E
