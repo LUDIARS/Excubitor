@@ -11,6 +11,7 @@
 import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
+import { resolveServiceInfisical } from '../secrets/config-store.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -23,7 +24,7 @@ export { hasIdentity };
  * - fetch 失敗 → throw
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
-  const cfg = svc.infisical;
+  const cfg = resolveServiceInfisical(svc.code, svc.infisical);
   if (!cfg || !cfg.inject) return {};
 
   const id = readIdentity();
