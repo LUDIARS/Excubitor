@@ -145,6 +145,36 @@ export interface LaunchResult {
   results: LaunchItemResult[];
 }
 
+// ─────────────── Config (Infisical 設定) ───────────────
+export interface IdentityStatus {
+  configured: boolean;
+  siteUrl: string | null;
+  environment: string | null;
+  clientIdHint: string | null;
+  storePath: string;
+}
+
+export interface ServiceInfisical {
+  project_id: string;
+  environment: string;
+  inject: boolean;
+  prefix: string;
+  include?: string[];
+  exclude?: string[];
+}
+
+export interface ConfigInfisical {
+  identity: IdentityStatus;
+  services: Record<string, ServiceInfisical>;
+}
+
+export interface IdentityInput {
+  siteUrl: string;
+  environment?: string;
+  clientId: string;
+  clientSecret: string;
+}
+
 // ─────────────── API helpers ───────────────
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -241,6 +271,21 @@ export function launchStart(codes?: string[]): Promise<LaunchResult> {
 
 export function launchStop(codes?: string[]): Promise<{ results: LaunchItemResult[] }> {
   return postJSON<{ results: LaunchItemResult[] }>('/api/v1/launch/stop', codes ? { codes } : {});
+}
+
+export function fetchConfig(): Promise<ConfigInfisical> {
+  return getJSON<ConfigInfisical>('/api/v1/config/infisical');
+}
+
+export function saveIdentity(input: IdentityInput) {
+  return putJSON<{ ok: boolean; identity: IdentityStatus }>('/api/v1/config/infisical/identity', input);
+}
+
+export function saveServices(services: Record<string, ServiceInfisical>) {
+  return putJSON<{ ok: boolean; services: Record<string, ServiceInfisical> }>(
+    '/api/v1/config/infisical/services',
+    { services },
+  );
 }
 
 // SSE log stream を購読する、Eunsubscribe 関数を返す、E

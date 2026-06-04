@@ -11,6 +11,7 @@
 import { existsSync } from 'node:fs';
 import type { Service } from '../catalog/loader.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap } from '../secrets/infisical.js';
+import { resolveServiceInfisical } from '../secrets/config-store.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -36,7 +37,7 @@ export interface PreflightReport {
 }
 
 async function checkInfisical(svc: Service): Promise<{ check: PreflightCheck; injected: number }> {
-  const cfg = svc.infisical;
+  const cfg = resolveServiceInfisical(svc.code, svc.infisical);
   if (!cfg || !cfg.inject) {
     return { check: { kind: 'infisical', status: 'ok', detail: 'inject 不要' }, injected: 0 };
   }
