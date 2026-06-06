@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   fetchConfig,
+  fetchCatalogServices,
   saveIdentity,
   saveServices,
+  type CatalogService,
   type ConfigInfisical,
   type ServiceInfisical,
 } from '../lib/api';
@@ -43,10 +45,12 @@ export default function Config() {
 
   // services editor
   const [rows, setRows] = useState<SvcRow[]>([]);
+  const [catalog, setCatalog] = useState<CatalogService[]>([]);
 
   const load = async () => {
-    const c = await fetchConfig();
+    const [c, svcs] = await Promise.all([fetchConfig(), fetchCatalogServices().catch(() => [])]);
     setCfg(c);
+    setCatalog(svcs);
     if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
     if (c.identity.environment) setEnvironment(c.identity.environment);
     setRows(toRows(c.services));
@@ -122,6 +126,7 @@ export default function Config() {
         <h2>サービス別 Infisical マッピング</h2>
         <p className="muted">
           各サービスがどの Infisical project から env を受け取るか。ここに入れた設定を catalog より優先。
+          service code は catalog 登録名から選択 (タイプミス防止)。
         </p>
         <table className="config-table">
           <thead>
@@ -130,7 +135,17 @@ export default function Config() {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td><input value={r.code} onChange={(e) => updateRow(i, { code: e.target.value })} placeholder="bibliotheca" /></td>
+                <td>
+                  <select value={r.code} onChange={(e) => updateRow(i, { code: e.target.value })}>
+                    <option value="">(選択)</option>
+                    {catalog.map((s) => (
+                      <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                    ))}
+                    {r.code && !catalog.some((s) => s.code === r.code) && (
+                      <option value={r.code}>{r.code} (catalog 外)</option>
+                    )}
+                  </select>
+                </td>
                 <td><input value={r.project_id} onChange={(e) => updateRow(i, { project_id: e.target.value })} placeholder="uuid" /></td>
                 <td><input value={r.environment} onChange={(e) => updateRow(i, { environment: e.target.value })} /></td>
                 <td><input value={r.prefix} onChange={(e) => updateRow(i, { prefix: e.target.value })} /></td>
