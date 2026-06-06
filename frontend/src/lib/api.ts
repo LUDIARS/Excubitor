@@ -215,6 +215,17 @@ export function fetchProjects(): Promise<Project[]> {
   return getJSON<{ projects: Project[] }>('/api/v1/projects').then((d) => d.projects);
 }
 
+export interface CatalogService {
+  code: string;
+  name: string;
+}
+
+/** catalog に登録済みの service code 一覧 (Config の service code 選択用)。 */
+export function fetchCatalogServices(): Promise<CatalogService[]> {
+  return getJSON<{ services: Array<{ code: string; name: string }> }>('/api/v1/services')
+    .then((d) => d.services.map((s) => ({ code: s.code, name: s.name })));
+}
+
 export function controlService(code: string, action: ControlAction) {
   return postJSON<{ ok: boolean; exit_code: number; command: string; stdout: string; stderr: string }>(
     `/api/v1/services/${encodeURIComponent(code)}/control`,
