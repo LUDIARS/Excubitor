@@ -1,44 +1,55 @@
-# Infisical 初期値を入れるための設定 (init-infisical)
+# Infisical 初期値を入れるための設定 (WebUI)
 
 Excubitor が各サービスの secret を解決する (secret-agent / spawn inject) には、
 Excubitor 自身の **machine identity** と、 各サービスの **Infisical マッピング** が必要。
-これらの初期値を対話入力で暗号化保存するのが `init-infisical` (env-cli の setup 相当)。
+これらの初期値は **WebUI の Config ページ**から入力する。
 
 env もファイルも生成しない。 値は `config-store` (AppData, AES-256-GCM 暗号化) に入る。
 詳細な常駐 resolve の仕組みは [`secret-agent.md`](../secret-agent.md) を参照。
 
-## 実行
+## 開き方
 
 ```bash
-npm run init-infisical
+npm run dev               # backend (17332)
+cd frontend && npm run dev  # WebUI (17333)
 ```
 
-対話で以下を聞かれる (空 Enter は既存値維持 / 既定値採用)。
+ブラウザで WebUI (17333) → **Config** タブ。
 
-### 1. machine identity
+## 1. machine identity
 
 | 入力 | 既定 | 説明 |
 |---|---|---|
-| Infisical site URL | `https://app.infisical.com` | self-host なら自分の URL |
+| Site URL | `https://app.infisical.com` | self-host なら自分の URL |
 | Environment | `dev` | identity の既定 environment |
-| Universal Auth Client ID | (必須) | Infisical の machine identity |
-| Universal Auth Client Secret | (必須・マスク入力) | 〃 (端末に表示されない) |
+| Client ID | (必須) | Infisical Universal Auth の machine identity |
+| Client Secret | (必須・password 入力) | 〃 (保存後は平文を返さない、 ヒントのみ表示) |
 
-保存後、 任意で「接続テスト」を選ぶと universal-auth login を試行する
-(失敗しても保存は維持)。
+「保存 (暗号化)」で `config-store` に保存し、 即 `process.env.INFISICAL_*` へ反映。
+「接続テスト」で保存済 identity による universal-auth login を試行する
+(`POST /api/v1/config/infisical/test`、 成功/失敗のみ表示、 secret は返さない)。
 
-### 2. サービス Infisical マッピング (任意)
+## 2. サービス別 Infisical マッピング
 
-サービスコードを入力すると、 そのサービスの project を聞く。 空 Enter で終了。
+サービスごとに「どの Infisical project から env を受け取るか」を表で編集する。
+ここに入れた設定は catalog より優先される。
 
-| 入力 | 説明 |
+| 列 | 説明 |
 |---|---|
-| サービスコード | catalog の登録名 (例 `tirocinium`) |
-| project_id (workspaceId) | Infisical の project |
+| service code | catalog 登録名から選択 (タイプミス防止) |
+| project_id | Infisical の workspaceId |
 | environment | 既定 `dev` |
 | prefix | env キー前置 (任意) |
+| inject | 起動時に注入するか |
 
-`inject` は常に `true` で保存する。 既存マッピングはマージされ、 消えない。
+「マッピングを保存」で一括保存。
+
+## API (WebUI が叩く)
+
+- `GET /api/v1/config/infisical` — identity 状態 + サービスマッピング
+- `PUT /api/v1/config/infisical/identity` — identity 保存 (暗号化)
+- `POST /api/v1/config/infisical/test` — 接続テスト
+- `PUT /api/v1/config/infisical/services` — マッピング一括保存
 
 ## 保存先
 

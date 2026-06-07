@@ -292,6 +292,10 @@ export function saveIdentity(input: IdentityInput) {
   return putJSON<{ ok: boolean; identity: IdentityStatus }>('/api/v1/config/infisical/identity', input);
 }
 
+export function testIdentity() {
+  return postJSON<{ ok: boolean; message: string }>('/api/v1/config/infisical/test', {});
+}
+
 export function saveServices(services: Record<string, ServiceInfisical>) {
   return putJSON<{ ok: boolean; services: Record<string, ServiceInfisical> }>(
     '/api/v1/config/infisical/services',
