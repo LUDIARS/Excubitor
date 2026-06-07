@@ -12,6 +12,7 @@ import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
 import { resolveServiceInfisical } from '../secrets/config-store.js';
+import { getTopologyEnv } from './topology.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -19,13 +20,16 @@ export { hasIdentity };
 
 /**
  * spawn する子プロセスに渡す env を解決する。
- * - infisical 設定が無い / inject:false → 空 (= 親 env のみ)
- * - identity 不足 → throw (preflight で事前検知させる)
+ * - 常に topology env (URL/port、 Excubitor が catalog から特定可能な情報) を含む
+ * - infisical inject 設定があれば secret を fetch して topology に上書きマージ
+ * - identity 不足 (infisical inject 要求時) → throw (preflight で事前検知させる)
  * - fetch 失敗 → throw
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
+  const topology = getTopologyEnv();
+
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  if (!cfg || !cfg.inject) return {};
+  if (!cfg || !cfg.inject) return { ...topology };
 
   const id = readIdentity();
   if (!id) {
@@ -41,6 +45,10 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     include: cfg.include,
     exclude: cfg.exclude,
   });
-  logger.info({ code: svc.code, project: cfg.project_id, injected: Object.keys(env).length }, 'resolved inject env');
-  return env;
+  logger.info(
+    { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
+    'resolved inject env (topology + infisical)',
+  );
+  // secret が topology と同名なら secret を優先 (上書き)。
+  return { ...topology, ...env };
 }
