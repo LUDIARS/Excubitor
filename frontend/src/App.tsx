@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import Launch from './pages/Launch';
+import Launcher from './pages/Launcher';
 import Monitor from './pages/Monitor';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
 import Config from './pages/Config';
 import { fetchLaunchPlan } from './lib/api';
 
-type Tab = 'launch' | 'monitor' | 'catalog' | 'errors' | 'config';
+type Tab = 'launch' | 'launcher' | 'monitor' | 'catalog' | 'errors' | 'config';
 
-const TAB_IDS: Tab[] = ['launch', 'monitor', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['launch', 'launcher', 'monitor', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'launch', label: 'Launch' },
+  { id: 'launcher', label: 'Launcher' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'errors', label: 'Errors' },
@@ -52,6 +54,7 @@ export default function App() {
       </header>
       <main className="container">
         {tab === 'launch' && <Launch />}
+        {tab === 'launcher' && <Launcher />}
         {tab === 'monitor' && <Monitor />}
         {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}

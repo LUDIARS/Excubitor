@@ -23,6 +23,57 @@ export interface Component {
   host: Host | null;
   last_seen_at: string | null;
   docker_id: string | null;
+  /** Vestigium JSONL ログを持つか (バッジ表示用)。 */
+  has_vestigium?: boolean;
+  log_path?: string | null;
+  autostart?: boolean;
+}
+
+// ─────────────── Updates (アップデート確認/配信) ───────────────
+export interface UpdateStatus {
+  code: string;
+  repoDir: string | null;
+  branch: string | null;
+  behind: number;
+  ahead: number;
+  dirty: boolean;
+  available: boolean;
+  note: string | null;
+  fetched: boolean;
+}
+
+export interface ApplyStep {
+  step: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ApplyResult {
+  code: string;
+  ok: boolean;
+  steps: ApplyStep[];
+}
+
+// ─────────────── Discovery (新規サービス検出) ───────────────
+export interface DiscoveredRepo {
+  name: string;
+  path: string;
+  hasPackageJson: boolean;
+  hasComposeFile: boolean;
+  hasDevScript: boolean;
+  suggestedRuntime: 'node' | 'docker-compose' | 'unknown';
+  remote: string | null;
+}
+
+export interface MissingService {
+  code: string;
+  repoDir: string;
+}
+
+export interface DiscoveryResult {
+  candidates: DiscoveredRepo[];
+  missing: MissingService[];
+  scannedRoot: string;
 }
 
 export interface Project {
@@ -301,6 +352,19 @@ export function saveServices(services: Record<string, ServiceInfisical>) {
     '/api/v1/config/infisical/services',
     { services },
   );
+}
+
+// ─── updates / discovery ───
+export function fetchUpdates(fetch = false): Promise<UpdateStatus[]> {
+  return getJSON<{ updates: UpdateStatus[] }>(`/api/v1/updates${fetch ? '?fetch=1' : ''}`).then((d) => d.updates);
+}
+
+export function applyUpdate(code: string, opts: { install?: boolean; restart?: boolean } = {}) {
+  return postJSON<ApplyResult>(`/api/v1/services/${encodeURIComponent(code)}/update`, opts);
+}
+
+export function fetchDiscovery(): Promise<DiscoveryResult> {
+  return getJSON<DiscoveryResult>('/api/v1/discovery');
 }
 
 // SSE log stream を購読する、Eunsubscribe 関数を返す、E

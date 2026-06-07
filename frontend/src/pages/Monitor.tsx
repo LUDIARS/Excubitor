@@ -99,6 +99,7 @@ function ComponentRow({ c, onShowLogs }: { c: Component; onShowLogs: (code: stri
           {c.state}
           {c.package_version && <> · v{c.package_version}</>}
           {c.monitor_only && <> · monitor-only</>}
+          {c.has_vestigium && <span className="vg-badge" title={c.log_path ?? 'Vestigium JSONL'}>Vg</span>}
         </div>
       </div>
       <div className="comp-actions">
@@ -112,9 +113,7 @@ function ComponentRow({ c, onShowLogs }: { c: Component; onShowLogs: (code: stri
               <button onClick={() => void act('stop')} title="stop">■</button>
             )}
             <button onClick={() => void act('restart')} title="restart">↻</button>
-            {isDocker && (
-              <button onClick={() => onShowLogs(c.code)} title="logs">≡</button>
-            )}
+            <button onClick={() => onShowLogs(c.code)} title="logs">≡</button>
           </div>
         )}
       </div>

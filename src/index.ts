@@ -27,7 +27,6 @@ import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
 import { controlService } from './control/manager.js';
 import { runAutostart } from './process/autostart.js';
-import { listRunningProcesses } from './process/manager.js';
 import { attachProcessBridge } from './log/process-bridge.js';
 import { startFileTail, type FileTailHandle } from './log/file-tail.js';
 import { startErrorDetector, setCatalogProvider } from './log/error-detector.js';
@@ -43,6 +42,10 @@ import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
+import { reconcileProcesses } from './process/reconcile.js';
+import { buildUpdateRouter } from './update/router.js';
+import { buildDiscoveryRouter } from './discovery/router.js';
+import { buildLogStreamRouter } from './log/sse.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -82,6 +85,10 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     { upserted: sync.upserted, deactivated: sync.deactivated, total: currentCatalog.services.length },
     'catalog synced',
   );
+
+  // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
+  // detached 起動なので Excubitor 再起動を跨いでサービスは生きており、 ここで管理下に戻す。
+  reconcileProcesses(currentCatalog);
 
   await seedDefaultRules();
   attachProcessBridge();
@@ -128,6 +135,15 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // secret-agent (/api/v1/secrets/resolve — service code → resolved secret、 token 認証)
   app.route('/', buildSecretAgentRouter((code) => findService(code)?.infisical));
+
+  // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)
+  app.route('/', buildUpdateRouter(() => currentCatalog!));
+
+  // 新規サービス検出 (/api/v1/discovery)
+  app.route('/', buildDiscoveryRouter(() => currentCatalog!));
+
+  // ライブログ SSE (/api/v1/services/:code/logs)
+  app.route('/', buildLogStreamRouter());
 
   app.get('/api/v1/services', (c) => {
     const rows = db().all(drizzleSql`
@@ -390,13 +406,12 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   return {
     router: app,
     shutdown: async () => {
+      // 監視・スキャン系のみ停止する。 spawn したサービスは detached なので
+      // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。
+      // 明示停止は stop API / launcher stop からのみ行う。
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
-      const procs = listRunningProcesses();
-      for (const p of procs) {
-        try { p.child.kill('SIGTERM'); } catch { /* noop */ }
-      }
     },
   };
 }

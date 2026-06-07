@@ -365,6 +365,31 @@ code {
 .config .muted.small { font-size: 11px; }
 .config .fail { color: var(--err); }
 .config .muted.ok { color: var(--ok); }
+
+/* Vestigium ログ対応バッジ */
+.vg-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  background: rgba(96,165,250,0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(96,165,250,0.4);
+}
+
+/* Launcher (アップデート + 新規サービス検出) */
+.launcher { display: flex; flex-direction: column; gap: 16px; }
+.launcher-msg {
+  padding: 8px 12px; border-radius: 6px;
+  background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3);
+  font-size: 13px;
+}
+.launcher-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.launcher-sub { font-size: 13px; color: var(--fg-muted); margin: 14px 0 6px; }
+.config-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.config-table code.path { font-size: 11px; color: var(--fg-muted); }
 .config-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; align-items: end; }
 .config-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--fg-muted); }
 .config-form input { width: 100%; }
