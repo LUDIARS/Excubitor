@@ -92,6 +92,17 @@ const ServiceSchema = z.object({
    * secret を fetch し、 spawn する子プロセスの env にリレーする (各サービス自前 fetch を不要にする)。
    */
   infisical: InfisicalSchema.optional(),
+  /**
+   * このサービスが他サービスへ公開する topology env (URL/port 等)。
+   * Excubitor が catalog から導出して全サービスの spawn env に注入する。
+   * value テンプレートで `${port}` / `${host}` を展開する。
+   * 例 (cernere-backend-dev):
+   *   provides:
+   *     CERNERE_URL: http://localhost:${port}
+   *     CERNERE_WS_URL: ws://localhost:${port}
+   * これで各サービスは CERNERE_URL を自前設定せずに受け取れる。
+   */
+  provides: z.record(z.string(), z.string()).optional(),
   auto_fix: AutoFixSchema.optional(),
 });
 

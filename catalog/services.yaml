@@ -77,6 +77,11 @@ services:
       project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
       environment: dev
       inject: true
+    # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
+    provides:
+      CERNERE_URL: http://${host}:${port}
+      CERNERE_BASE_URL: http://${host}:${port}
+      CERNERE_WS_URL: ws://${host}:${port}
     auto_fix:
       enabled: false  # pnpm v10 構成のハマりで暴走中、 手動で main を安定化させてから再有効化
       agent: claude-code
