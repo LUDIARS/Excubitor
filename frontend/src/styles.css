@@ -364,6 +364,7 @@ code {
 .config .muted { color: var(--fg-muted); font-size: 13px; margin: 2px 0; }
 .config .muted.small { font-size: 11px; }
 .config .fail { color: var(--err); }
+.config .muted.ok { color: var(--ok); }
 .config-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; align-items: end; }
 .config-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--fg-muted); }
 .config-form input { width: 100%; }
