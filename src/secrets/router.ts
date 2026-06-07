@@ -9,11 +9,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import {
   saveInfisicalIdentity,
+  getInfisicalIdentity,
   getIdentityStatus,
   applyInfisicalToEnv,
   getServiceMap,
   setServiceMap,
 } from './config-store.js';
+import { verifyIdentity } from './infisical.js';
 
 const IdentitySchema = z.object({
   siteUrl: z.string().min(1),
@@ -51,6 +53,18 @@ export function buildConfigRouter(): Hono {
     saveInfisicalIdentity(parsed.data);
     applyInfisicalToEnv();
     return c.json({ ok: true, identity: getIdentityStatus() });
+  });
+
+  // 保存済 identity で Infisical に login できるか接続テストする (値は返さない)。
+  app.post('/api/v1/config/infisical/test', async (c) => {
+    const id = getInfisicalIdentity();
+    if (!id) return c.json({ ok: false, message: 'identity 未設定です' }, 400);
+    try {
+      await verifyIdentity({ siteUrl: id.siteUrl, clientId: id.clientId, clientSecret: id.clientSecret });
+      return c.json({ ok: true, message: '接続成功 (login OK)' });
+    } catch (err) {
+      return c.json({ ok: false, message: (err as Error).message });
+    }
   });
 
   // 各サービスの Infisical マッピングを一括保存。

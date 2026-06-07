@@ -3,6 +3,7 @@ import {
   fetchConfig,
   fetchCatalogServices,
   saveIdentity,
+  testIdentity,
   saveServices,
   type CatalogService,
   type ConfigInfisical,
@@ -36,6 +37,7 @@ function toMap(rows: SvcRow[]): Record<string, ServiceInfisical> {
 export default function Config() {
   const [cfg, setCfg] = useState<ConfigInfisical | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // identity form
   const [siteUrl, setSiteUrl] = useState('https://app.infisical.com');
@@ -67,6 +69,18 @@ export default function Config() {
       setClientId('');
       setClientSecret('');
       await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runTest = async () => {
+    setBusy('test');
+    setTestResult(null);
+    try {
+      setTestResult(await testIdentity());
+    } catch (e) {
+      setTestResult({ ok: false, message: (e as Error).message });
     } finally {
       setBusy(null);
     }
@@ -112,13 +126,23 @@ export default function Config() {
           <label>Environment<input value={environment} onChange={(e) => setEnvironment(e.target.value)} /></label>
           <label>Client ID<input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder={id.configured ? '(変更時のみ入力)' : ''} /></label>
           <label>Client Secret<input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={id.configured ? '(変更時のみ入力)' : ''} /></label>
-          <button
-            className="primary"
-            disabled={busy !== null || !siteUrl || !clientId || !clientSecret}
-            onClick={() => void submitIdentity()}
-          >
-            {busy === 'identity' ? '保存中…' : '保存 (暗号化)'}
-          </button>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null || !siteUrl || !clientId || !clientSecret}
+              onClick={() => void submitIdentity()}
+            >
+              {busy === 'identity' ? '保存中…' : '保存 (暗号化)'}
+            </button>
+            <button disabled={busy !== null || !id.configured} onClick={() => void runTest()}>
+              {busy === 'test' ? 'テスト中…' : '接続テスト'}
+            </button>
+          </div>
+          {testResult && (
+            <p className={`muted small ${testResult.ok ? 'ok' : 'fail'}`}>
+              {testResult.ok ? '✓' : '✗'} {testResult.message}
+            </p>
+          )}
         </div>
       </section>
 
