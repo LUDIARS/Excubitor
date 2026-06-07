@@ -40,6 +40,8 @@ import { buildLaunchRouter } from './launch/router.js';
 import { getLaunchProfile } from './launch/profile.js';
 import { startSelection } from './launch/orchestrator.js';
 import { buildConfigRouter } from './secrets/router.js';
+import { buildSecretAgentRouter } from './secrets/agent-router.js';
+import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
 
 const logger = createNamedLogger('concordia.observability');
@@ -67,6 +69,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   } else {
     logger.warn('Infisical identity not configured — secret relay は UI 設定待ち');
   }
+
+  // secret-agent: 常駐 resolve エンドポイント用のローカルトークンを用意 (無ければ生成)。
+  // 各サービスは同じトークン (env or token ファイル) で /api/v1/secrets/resolve を叩く。
+  getOrCreateAgentToken();
+  logger.info({ tokenPath: agentTokenPath() }, 'secret-agent token ready');
 
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
@@ -118,6 +125,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
   app.route('/', buildConfigRouter());
+
+  // secret-agent (/api/v1/secrets/resolve — service code → resolved secret、 token 認証)
+  app.route('/', buildSecretAgentRouter((code) => findService(code)?.infisical));
 
   app.get('/api/v1/services', (c) => {
     const rows = db().all(drizzleSql`
