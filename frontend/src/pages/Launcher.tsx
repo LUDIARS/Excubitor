@@ -3,6 +3,7 @@ import {
   fetchUpdates,
   applyUpdate,
   fetchDiscovery,
+  fetchTopology,
   type UpdateStatus,
   type DiscoveryResult,
 } from '../lib/api';
@@ -14,6 +15,7 @@ import {
 export default function Launcher() {
   const [updates, setUpdates] = useState<UpdateStatus[] | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
+  const [topology, setTopology] = useState<Record<string, string> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -40,6 +42,7 @@ export default function Launcher() {
   useEffect(() => {
     void loadUpdates(false);
     void loadDiscovery();
+    void fetchTopology().then(setTopology).catch(() => {});
   }, []);
 
   const doUpdate = async (code: string) => {
@@ -166,6 +169,30 @@ export default function Launcher() {
               </>
             )}
           </>
+        )}
+      </section>
+
+      <section className="config-card">
+        <h2>注入される topology env</h2>
+        <p className="muted">
+          Excubitor が catalog から導出し、 起動する全サービスへ注入する URL/port
+          (各サービスが個別設定しなくてよい接続先)。 secret は別途 Infisical で解決。
+        </p>
+        {topology === null ? (
+          <p className="muted">読み込み中…</p>
+        ) : Object.keys(topology).length === 0 ? (
+          <p className="muted">port を持つサービスがありません。</p>
+        ) : (
+          <table className="config-table">
+            <thead><tr><th>env</th><th>value</th></tr></thead>
+            <tbody>
+              {Object.entries(topology)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => (
+                  <tr key={k}><td><code>{k}</code></td><td><code className="path">{v}</code></td></tr>
+                ))}
+            </tbody>
+          </table>
         )}
       </section>
     </div>

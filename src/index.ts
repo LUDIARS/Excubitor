@@ -43,6 +43,7 @@ import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
 import { reconcileProcesses } from './process/reconcile.js';
+import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
@@ -86,6 +87,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     'catalog synced',
   );
 
+  // catalog から topology env (URL/port) を構築。 spawn 時に全サービスへ注入する。
+  setTopologyFromCatalog(currentCatalog);
+
   // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
   // detached 起動なので Excubitor 再起動を跨いでサービスは生きており、 ここで管理下に戻す。
   reconcileProcesses(currentCatalog);
@@ -100,6 +104,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
+    setTopologyFromCatalog(fresh);
     fileTailHandle.refresh(fresh);
     logger.info(
       { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length },
@@ -144,6 +149,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ライブログ SSE (/api/v1/services/:code/logs)
   app.route('/', buildLogStreamRouter());
+
+  // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
+  app.get('/api/v1/topology', (c) => c.json({ env: getTopologyEnv() }));
 
   app.get('/api/v1/services', (c) => {
     const rows = db().all(drizzleSql`

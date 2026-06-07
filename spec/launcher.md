@@ -58,7 +58,29 @@ Excubitor を「ローカル LUDIARS サービス群の常駐ランチャー」 
   - `GET /api/v1/discovery`
 - 登録自体は当面手動 (`catalog/services.yaml` 追記)。 候補に runtime ヒントを添える。
 
-## 6. GUI (Web、 port 17333)
+## 6. トポロジ env の自動注入 (URL/port)
+
+> 要件: 環境変数のうち URL/port など Excubitor が catalog から特定可能な情報は
+> Excubitor が処理して全サービスに注入する (特に Cernere URL は毎サービス必要で面倒)。
+
+- `src/process/topology.ts`: catalog から topology env map を構築。
+  1. **自動導出**: port を持つ全サービスに `<CODE>_URL` / `<CODE>_PORT`
+     (CODE = code 大文字 + 非英数→`_`、 例 `MEMORIA_SERVER_URL=http://localhost:5180`)。
+  2. **明示 `provides`**: catalog の各サービスが公開する正規名。 `${port}`/`${host}` 展開。
+     自動導出を上書き。 例 (cernere-backend-dev):
+     ```yaml
+     provides:
+       CERNERE_URL: http://${host}:${port}
+       CERNERE_WS_URL: ws://${host}:${port}
+     ```
+- spawn 時に `resolveInjectEnv` が **topology + Infisical secret** をマージして注入
+  (secret が同名なら secret 優先)。 これで各サービスは `CERNERE_URL` 等を自前設定不要。
+- secret ではない (公開情報) ので Infisical ではなくここで扱う。
+- boot / catalog reload で `setTopologyFromCatalog()` が再構築。
+- 確認用 `GET /api/v1/topology`、 Launcher タブに一覧表示。
+- dotenv は既存 env を上書きしないため、 Excubitor 注入値がサービスの `.env` より優先。
+
+## 7. GUI (Web、 port 17333)
 
 - **Launcher** タブ (`frontend/src/pages/Launcher.tsx`) を新設:
   アップデート一覧 (available のみ + 「更新」 ボタン + origin 取得) と
