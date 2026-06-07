@@ -61,6 +61,15 @@ async function login(id: ExcubitorIdentity): Promise<string> {
   return accessToken;
 }
 
+/**
+ * identity の clientId / clientSecret で実際に login できるか確認する (初期化 CLI 用)。
+ * 成功なら true、 認証失敗なら throw する。
+ */
+export async function verifyIdentity(id: ExcubitorIdentity): Promise<boolean> {
+  await login(id);
+  return true;
+}
+
 // project secret を (projectId, environment) 単位で短期キャッシュ (TTL 60s)。
 interface SecretCacheEntry {
   secrets: InfisicalSecret[];
