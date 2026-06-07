@@ -429,3 +429,35 @@ services:
     health:
       type: tcp
       interval_sec: 30
+
+  # ─────────────── Tirocinium (面接練習) ───────────────
+  - code: tirocinium
+    name: Tirocinium server (面接練習)
+    project_code: tirocinium
+    component: server
+    port: 8084
+    repo: LUDIARS/Tirocinium
+    runtime: node
+    cwd: E:/Document/Ars/Tirocinium
+    command: npm run dev:server
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8084/health
+      interval_sec: 30
+
+  # ─────────────── Discutere (Discord 自走議論) ───────────────
+  - code: discutere
+    name: Discutere (Discord 議論)
+    project_code: discutere
+    component: backend
+    port: 3100
+    repo: LUDIARS/Discutere
+    runtime: node
+    cwd: E:/Document/Ars/Discutere
+    command: npm run dev:server
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:3100/health
+      interval_sec: 30

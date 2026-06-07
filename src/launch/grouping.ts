@@ -21,6 +21,12 @@ export interface PlanService {
   start_tier: number;
   state: string;
   selected: boolean;
+  /** Vestigium JSONL ログを持つか (catalog.log_path 設定済み)。 */
+  has_vestigium: boolean;
+  /** Vestigium ログディレクトリ (あれば)。 */
+  log_path: string | null;
+  /** boot 時に自動起動するか。 */
+  autostart: boolean;
 }
 
 export interface PlanProject {
@@ -48,6 +54,9 @@ export function buildPlanProjects(
       start_tier: startTier(svc),
       state: stateByCode.get(svc.code) ?? 'unknown',
       selected: selection.has(svc.code),
+      has_vestigium: Boolean(svc.log_path),
+      log_path: svc.log_path ?? null,
+      autostart: svc.autostart,
     };
     const arr = byProject.get(project) ?? [];
     arr.push(entry);

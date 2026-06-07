@@ -18,6 +18,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
+import { execCapture } from '../shared/exec.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -31,7 +32,40 @@ export interface SpawnedProcess {
 type LineHandler = (svc: Service, channel: 'stdout' | 'stderr', line: string) => void;
 
 const processes = new Map<string, SpawnedProcess>();
+
+/**
+ * adopted: Excubitor 再起動前に detached で起動され、 boot 時に pid 生存確認で
+ * 「再採用」 したサービス。 ChildProcess は持てない (再取得不可) ので pid のみ保持。
+ * stop は pid kill、 ライブログは取れない (file-tail / Vg があればそちらで継続)。
+ */
+interface AdoptedProcess {
+  code: string;
+  pid: number;
+  startedAt: Date;
+}
+const adopted = new Map<string, AdoptedProcess>();
 const lineHandlers = new Set<LineHandler>();
+
+/** boot 再採用: 既に detached で動いている pid を Excubitor の管理下に戻す。 */
+export function adoptProcess(code: string, pid: number, startedAt: Date): void {
+  if (processes.has(code)) return; // 自前 spawn が優先
+  adopted.set(code, { code, pid, startedAt });
+}
+
+/** code が (自前 spawn or 再採用で) 管理下にあるか。 */
+export function isManaged(code: string): boolean {
+  return processes.has(code) || adopted.has(code);
+}
+
+/** pid が生存しているか (signal 0)。 */
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 export function registerLineHandler(handler: LineHandler): () => void {
   lineHandlers.add(handler);
@@ -88,15 +122,23 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
 
   const child = spawn(cmd, args, {
     cwd: svc.cwd,
-    shell: true, // Windows での npm 等�E解決を簡単にするため shell 経由
+    shell: true, // Windows での npm 等の解決を簡単にするため shell 経由
     env: { ...process.env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    // detached: Excubitor 自身が再起動/停止してもサービスを道連れにしない
+    // (= 監視コアの状態がサービスに影響しない)。 boot 時に pid で再採用する。
+    detached: true,
   });
+  // 親 (Excubitor) の event loop を子に縛られないよう unref。 stdout/stderr は
+  // 生存中のみライブ取得し、 Excubitor 再起動後はストリーム欠落を許容する。
+  child.unref();
 
+  // adopted 側に同 code が残っていれば、 自前 spawn が真実なので除去。
+  adopted.delete(svc.code);
   const restartCount = opts.initialRestartCount ?? 0;
   const spawned: SpawnedProcess = { code: svc.code, child, startedAt: new Date(), restartCount };
   processes.set(svc.code, spawned);
-  logger.info({ code: svc.code, pid: child.pid, restartCount }, 'spawned');
+  logger.info({ code: svc.code, pid: child.pid, restartCount }, 'spawned (detached)');
 
   attachLineReader(svc, child, 'stdout');
   attachLineReader(svc, child, 'stderr');
@@ -121,15 +163,45 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
 
 export async function killService(code: string, signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
   const p = processes.get(code);
-  if (!p) return false;
-  // Windows では SIGTERM が即 kill にならなぁE��め、Eshort timeout で SIGKILL fallback
-  try { p.child.kill(signal); } catch { /* noop */ }
+  if (p) {
+    const pid = p.child.pid;
+    if (pid && process.platform === 'win32') {
+      // detached + shell:true は子ツリー (cmd → node → ...) になるため、
+      // child.kill では shell しか落ちない。 taskkill /T でツリーごと終了。
+      await treeKill(pid);
+    } else {
+      try { p.child.kill(signal); } catch { /* noop */ }
+      setTimeout(() => {
+        if (processes.has(code)) {
+          try { p.child.kill('SIGKILL'); } catch { /* noop */ }
+        }
+      }, 5000);
+    }
+    return true;
+  }
+  // 再採用したサービス: ChildProcess を持たないので pid で kill。
+  const a = adopted.get(code);
+  if (a) {
+    await treeKill(a.pid);
+    adopted.delete(code);
+    await updateState(code, 'stopped', null, 0);
+    return true;
+  }
+  return false;
+}
+
+/** pid のプロセスツリーを終了する (Windows=taskkill /T /F、 他=SIGTERM→SIGKILL)。 */
+async function treeKill(pid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    await execCapture('taskkill', ['/PID', String(pid), '/T', '/F'], process.cwd(), 10000);
+    return;
+  }
+  try { process.kill(pid, 'SIGTERM'); } catch { /* noop */ }
   setTimeout(() => {
-    if (processes.has(code)) {
-      try { p.child.kill('SIGKILL'); } catch { /* noop */ }
+    if (isPidAlive(pid)) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* noop */ }
     }
   }, 5000);
-  return true;
 }
 
 async function onExit(
