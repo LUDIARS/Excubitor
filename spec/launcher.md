@@ -1,8 +1,14 @@
-# ローカルサービス・プロダクトランチャー (v0.3)
+# ローカルサービス・プロダクトランチャー (v0.4)
 
 Excubitor を「ローカル LUDIARS サービス群の常駐ランチャー」 に拡張する。
 監視コア (死活/ログ/エラー) に加えて、 **サービスの起動制御・永続化・ログ監視・
 アップデート確認/配信・新規サービス検出** を 1 つの常駐プロセス + Web GUI で行う。
+
+v0.4 で対象を「ローカル**サービス** (port を持つ常駐型)」だけでなく「ローカル**アプリ**
+(port を持たないネイティブ/デスクトップ製品)」にも広げる (§8)。 これにより LUDIARS の
+統合 2 軸 ([[project_concordia_absorbs_excubitor]] / design.md §14) を
+ローカルアプリにも適用する: **Excubitor = ローカルアプリ監視 / Corpus = ローカルアプリ
+集約・起動**。
 
 ## 1. 監視データの永続化と再起動耐性
 
@@ -88,9 +94,68 @@ Excubitor を「ローカル LUDIARS サービス群の常駐ランチャー」 
 - **Monitor** タブ: Vg バッジ + 全サービスでログドロワー表示。
 - 起動セット選択は従来の **Launch** タブ、 死活監視は **Monitor**、 設定は **Config**。
 
+## 8. ローカルアプリ (プロダクト) 対応 — runtime=app (v0.4)
+
+> 要件: Excubitor / Corpus の統合 2 軸を、 port を持つサービスだけでなく
+> **ローカルアプリ (Tauri / Electron / native exe / CLI バイナリ)** にも適用する。
+
+ローカルアプリはサービスと**ライフサイクルが異なる** (ユーザ起動・port 無し・
+クラッシュは単発・自分で終了する) ため、 専用の `runtime: app` で扱う。 dev 起動
+(`npm run tauri dev` 等) は従来通り `runtime: node` で表現し、 `app` は **ビルド済の
+製品 exe を起動する** ためのもの。
+
+### 8.1 catalog スキーマ (loader.ts)
+
+`runtime: app` のサービスに以下を追加 (いずれも任意、 `exec` のみ app で必須):
+
+| フィールド | 役割 |
+|---|---|
+| `exec` | 起動する実行ファイル (絶対パス推奨)。 例 `…/target/release/hora.exe` |
+| `exec_args` | exec への引数 (string[]) |
+| `app_kind` | `tauri` / `electron` / `native` / `cli` (UI / Corpus 表示用の分類) |
+| `build_command` | 更新適用時に git ff の後で走らせるビルド (例 `npm run tauri build`) |
+| `process_match` | host スキャンで「外部起動された実体」を検知する image 名 (予約) |
+
+health は `type: process` (= 管理下プロセスの pid 生存) を新設。 app は port が無いため
+http/tcp probe は使わない。
+
+### 8.2 起動・監視 (ProcessManager)
+
+- `spawnService` が `app` を受理し、 `exec` (+ `exec_args`) を **detached + unref** で
+  起動する (§1 と同じ再起動耐性)。 npm 解決が不要なので `shell:false` で直接起動
+  (パスの空白 / backslash 対策)。 cwd 省略時は exec の dir。
+- 死活は exit handler で running / crashed / stopped を反映 (port probe 不要)。
+- **restart_policy 既定 `no`** を据え置く。 GUI 製品を勝手に respawn しない。
+- 停止は既存の tree-kill (Windows=`taskkill /T /F`) を流用。
+- boot reconcile (§1) / autostart も `app` を対象に含める。 autostart は GUI 製品の
+  性質上、 catalog で `autostart: true` を明示した opt-in のみ起動する。
+
+### 8.3 更新適用 (update/apply.ts)
+
+git fetch + ff-only の後、 `build_command` があれば実行してから restart する。
+ネイティブ製品は git pull だけでは exe に反映されないため (node の `npm install` に相当)。
+
+### 8.4 Corpus 連携 — 集約 + 起動 (hub/router.ts)
+
+- `/api/hub/apps` を新設: `runtime=app` の entry を `{ code, name, app_kind, state,
+  launchable }` で返す (catalog 全体は `catalog_snapshot` JSON に入るため
+  `json_extract(..., '$.runtime') = 'app'` で絞る)。
+- corpus-service manifest の `data` に `apps` を追加し、 `actions` に **起動 / 停止**
+  (既存 control `/api/v1/services/:code/control` を叩く descriptor) を宣言。 Corpus
+  フロントはこの descriptor を読んでローカルアプリのカード + 起動ボタンを描画する
+  (Corpus は loopback の Excubitor を connector 経由で叩く / §7)。
+
+### 8.5 適用例
+
+`catalog/services.yaml` に **Hora** (Tauri デスクトップアプリ) を `hora-app` として登録。
+他のローカルアプリ (Quaestor / Custos / Legatus 等) も同形式で追加できる。
+
 ## 今後 (このフェーズ外)
 
 - catalog への候補のワンクリック登録 (services.yaml 追記 or DB overlay)。
 - 欠落リポの `git clone` 実行ボタン。
 - アップデートの定期チェック + 通知 (Nuntius 連携)。
+- host プロセススキャンによる `process_match` 実装 (外部起動アプリの自動検知)。
+- **Corpus フロント側** のローカルアプリカード + 起動ボタン描画 (manifest の
+  `apps` / `actions` を消費する descriptor。 Corpus 側 PR で対応)。
 - Tauri 等によるネイティブ常駐シェル (現状は Node 常駐 + Web GUI)。

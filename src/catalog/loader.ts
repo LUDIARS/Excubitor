@@ -4,7 +4,8 @@ import { load } from 'js-yaml';
 import { z } from 'zod';
 
 const HealthSchema = z.object({
-  type: z.enum(['http', 'tcp', 'cmd']),
+  // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
+  type: z.enum(['http', 'tcp', 'cmd', 'process']),
   url: z.string().optional(),
   interval_sec: z.number().default(30),
   grace_period_sec: z.number().default(10),
@@ -62,7 +63,15 @@ const ServiceSchema = z.object({
    */
   monitor_only: z.boolean().default(false),
   repo: z.string().optional(),
-  runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md']),
+  /**
+   * - docker-compose / docker: コンテナ
+   * - node: `command` を spawn する常駐サービス (port を持つ)
+   * - dev-process-md: cwd の dev-process.md から起動コマンドを解決
+   * - app: **ローカルアプリ (プロダクト)**。 port を持たないネイティブ/デスクトップ製品
+   *   (Tauri / Electron / native exe / CLI バイナリ)。 `exec` で起動し、 死活は
+   *   プロセス生存で判定、 既定では自動 respawn しない (GUI を勝手に再起動しない)。
+   */
+  runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md', 'app']),
   cwd: z.string().optional(),
   command: z.string().optional(),
   compose_file: z.string().optional(),
@@ -103,6 +112,27 @@ const ServiceSchema = z.object({
    * これで各サービスは CERNERE_URL を自前設定せずに受け取れる。
    */
   provides: z.record(z.string(), z.string()).optional(),
+  /**
+   * runtime=app 専用。 起動する実行ファイル (絶対パス推奨) と引数。
+   * 例: exec: E:/Document/Ars/Hora/src-tauri/target/release/hora.exe
+   * dev 起動 (npm run tauri dev 等) は runtime=node + command で表現する。
+   */
+  exec: z.string().optional(),
+  exec_args: z.array(z.string()).optional(),
+  /** UI / Corpus 表示用の分類。 起動方式自体には影響しない。 */
+  app_kind: z.enum(['tauri', 'electron', 'native', 'cli']).optional(),
+  /**
+   * runtime=app の更新適用 (update apply) で git ff の後に走らせるビルドコマンド。
+   * node の `npm install` 相当。 例: 'cargo build --release' / 'npm run build'。
+   * 省略時はビルドせず取り込みのみ。
+   */
+  build_command: z.string().optional(),
+  /**
+   * host プロセススキャンで「ユーザが Excubitor 外から起動した実体」を検知するための
+   * 実行ファイル名 (image name)。 例: 'hora.exe'。 省略時は Excubitor が spawn した
+   * インスタンスのみ追跡する。 (host scanner 未対応の間は予約フィールド)
+   */
+  process_match: z.string().optional(),
   auto_fix: AutoFixSchema.optional(),
 });
 
