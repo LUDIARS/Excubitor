@@ -75,6 +75,14 @@ export async function applyUpdate(
     if (!npm.ok) return fail('install', tail(npm.stderr));
   }
 
+  // 3.5. ビルド (runtime=app 等で build_command 指定があれば)。
+  // ネイティブ/デスクトップ製品は git ff だけでは反映されないので exe を作り直す。
+  if (svc.build_command) {
+    const build = await execCapture(svc.build_command, [], svc.cwd ?? repoDir, 1_800_000, true);
+    steps.push({ step: 'build', ok: build.ok, detail: tail(build.stderr || build.stdout) });
+    if (!build.ok) return fail('build', tail(build.stderr));
+  }
+
   // 4. 起動中なら restart (反映)。
   const running = isManaged(svc.code) || currentState(svc.code) === 'running';
   if (restart && running) {

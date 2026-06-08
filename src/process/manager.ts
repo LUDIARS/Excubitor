@@ -12,6 +12,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
@@ -94,16 +95,19 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   if (processes.has(svc.code)) {
     throw new Error(`service ${svc.code} is already spawned`);
   }
-  if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md') {
+  if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md' && svc.runtime !== 'app') {
     throw new Error(`spawnService: unsupported runtime ${svc.runtime}`);
-  }
-  if (!svc.cwd) {
-    throw new Error(`service ${svc.code} has no cwd`);
   }
 
   let cmd: string;
   let args: string[];
-  if (svc.runtime === 'node') {
+  if (svc.runtime === 'app') {
+    // ローカルアプリ: exec (実行ファイル) を直接起動。 cwd は任意 (exec の dir 既定)。
+    if (!svc.exec) throw new Error(`service ${svc.code} has no exec`);
+    cmd = svc.exec;
+    args = svc.exec_args ?? [];
+  } else if (svc.runtime === 'node') {
+    if (!svc.cwd) throw new Error(`service ${svc.code} has no cwd`);
     if (!svc.command) throw new Error(`service ${svc.code} has no command`);
     const parts = splitCommand(svc.command);
     const first = parts.shift();
@@ -112,6 +116,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     args = parts;
   } else {
     // dev-process-md
+    if (!svc.cwd) throw new Error(`service ${svc.code} has no cwd`);
     const parsed = await resolveDevProcessCommand(svc.cwd);
     const parts = splitCommand(parsed);
     const first = parts.shift();
@@ -121,8 +126,11 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   }
 
   const child = spawn(cmd, args, {
-    cwd: svc.cwd,
-    shell: true, // Windows での npm 等の解決を簡単にするため shell 経由
+    // app は exec の dir を既定 cwd にする (省略時)。 サービスは catalog の cwd。
+    cwd: svc.cwd ?? (svc.runtime === 'app' && svc.exec ? dirname(svc.exec) : undefined),
+    // node/dev-process-md は npm 等の解決のため shell 経由。
+    // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
+    shell: svc.runtime !== 'app',
     env: { ...process.env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
     // detached: Excubitor 自身が再起動/停止してもサービスを道連れにしない

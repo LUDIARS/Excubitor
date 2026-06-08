@@ -13,7 +13,7 @@ const logger = createNamedLogger('excubitor.control');
  * runtime に応じぁEcontrol 呼び出しを dispatch する、E
  *
  * - docker-compose: docker compose up/stop/restart
- * - node / dev-process-md: ProcessManager spawn / kill
+ * - node / dev-process-md / app: ProcessManager spawn / kill
  * - docker (raw): v0.2 で対応予宁E
  */
 export async function controlService(
@@ -38,7 +38,7 @@ export async function controlService(
       const primary = svc.container_names?.[0];
       if (primary) ensureTail(svc.code, primary);
     }
-  } else if (svc.runtime === 'node' || svc.runtime === 'dev-process-md') {
+  } else if (svc.runtime === 'node' || svc.runtime === 'dev-process-md' || svc.runtime === 'app') {
     logger.info({ code: svc.code, action, actor }, 'control invoke (process)');
     result = await controlProcess(svc, action, env);
   } else {
