@@ -466,3 +466,24 @@ services:
       type: http
       url: http://localhost:3100/health
       interval_sec: 30
+
+  # ─────────────── ローカルアプリ (プロダクト / runtime=app) ───────────────
+  # port を持たないネイティブ/デスクトップ製品。 Excubitor は exec を detached spawn
+  # して死活 (プロセス生存) を監視し、 Corpus は /api/hub/apps で集約 + 起動する。
+  # GUI を勝手に再起動しないよう autostart=false / restart_policy=no が既定。
+  # exec は build_command (npm run tauri build) の出力 (Cargo bin 名 = hora)。
+  - code: hora-app
+    name: Hora (デスクトップおじさん)
+    project_code: hora
+    component: app
+    repo: LUDIARS/Hora
+    runtime: app
+    app_kind: tauri
+    exec: E:/Document/Ars/Hora/src-tauri/target/release/hora.exe
+    cwd: E:/Document/Ars/Hora
+    build_command: npm run tauri build
+    process_match: hora.exe
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30

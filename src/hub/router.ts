@@ -75,7 +75,28 @@ export function excubitorManifest(version: string): Record<string, unknown> {
     data: [
       { id: 'summary', path: '/api/hub/summary', scope: 'multi', title: '運用サマリ' },
       { id: 'services', path: '/api/hub/services', scope: 'multi', title: 'サービス一覧' },
+      { id: 'apps', path: '/api/hub/apps', scope: 'multi', title: 'ローカルアプリ' },
       { id: 'errors', path: '/api/hub/errors', scope: 'multi', title: 'エラータスク' },
+    ],
+    // ローカルアプリの起動/停止アクション。 Corpus フロントはこの descriptor を見て
+    // ボタンを描画し、 既存 control エンドポイント (loopback) を叩く (§7.1)。
+    actions: [
+      {
+        id: 'app-launch',
+        title: '起動',
+        method: 'POST',
+        path: '/api/v1/services/:code/control',
+        body: { action: 'start' },
+        appliesTo: 'apps',
+      },
+      {
+        id: 'app-stop',
+        title: '停止',
+        method: 'POST',
+        path: '/api/v1/services/:code/control',
+        body: { action: 'stop' },
+        appliesTo: 'apps',
+      },
     ],
     panels: [],
     auth: 'none',
@@ -121,6 +142,29 @@ export function buildHubRouter(version = process.env.npm_package_version ?? '0.1
         name: r.name,
         state: r.state ?? 'unknown',
         port: r.port ?? null,
+      })),
+    });
+  });
+
+  // ローカルアプリ (runtime=app) 一覧。 Corpus が「集約 + 起動」 する対象。
+  // catalog 全体は services.catalog_snapshot に JSON で入るため json_extract で絞る。
+  app.get('/api/hub/apps', (c) => {
+    const rows = db().all(drizzleSql`
+      SELECT s.code AS code, s.name AS name, si.state AS state,
+             json_extract(s.catalog_snapshot, '$.app_kind') AS app_kind
+      FROM services s
+      LEFT JOIN service_instances si ON si.service_id = s.id
+      WHERE s.is_active = 1
+        AND json_extract(s.catalog_snapshot, '$.runtime') = 'app'
+      ORDER BY s.code ASC
+    `) as Array<Record<string, unknown>>;
+    return c.json({
+      apps: rows.map((r) => ({
+        code: r.code,
+        name: r.name,
+        app_kind: r.app_kind ?? 'native',
+        state: r.state ?? 'unknown',
+        launchable: true,
       })),
     });
   });

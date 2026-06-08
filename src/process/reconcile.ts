@@ -30,11 +30,11 @@ export interface ReconcileResult {
   crashed: string[];
 }
 
-/** node / dev-process-md のうち、 DB 上 running/pending な行を実プロセスと突合する。 */
+/** node / dev-process-md / app のうち、 DB 上 running/pending な行を実プロセスと突合する。 */
 export function reconcileProcesses(catalog: Catalog): ReconcileResult {
   const processRuntimes = new Set(
     catalog.services
-      .filter((s) => s.runtime === 'node' || s.runtime === 'dev-process-md')
+      .filter((s) => s.runtime === 'node' || s.runtime === 'dev-process-md' || s.runtime === 'app')
       .map((s) => s.code),
   );
 
