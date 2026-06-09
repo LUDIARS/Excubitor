@@ -5,7 +5,7 @@ import Monitor from './pages/Monitor';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
 import Config from './pages/Config';
-import { fetchLaunchPlan } from './lib/api';
+import { fetchLaunchPlan, fetchSystem } from './lib/api';
 
 type Tab = 'launch' | 'launcher' | 'monitor' | 'catalog' | 'errors' | 'config';
 
@@ -26,12 +26,17 @@ export default function App() {
     return TAB_IDS.includes(h) ? h : 'launch';
   });
 
+  const [safeMode, setSafeMode] = useState(false);
+
   // 初回 (未設定) なら強制的にウィザード (Launch) を出す。
   useEffect(() => {
     void fetchLaunchPlan()
       .then((p) => {
         if (!p.profile.configured) setTab('launch');
       })
+      .catch(() => {});
+    void fetchSystem()
+      .then((s) => setSafeMode(s.safe_mode))
       .catch(() => {});
   }, []);
 
@@ -44,6 +49,11 @@ export default function App() {
       <header className="app-header">
         <h1>Excubitor</h1>
         <span className="badge">v0.2</span>
+        {safeMode && (
+          <span className="badge badge-safe" title="SafeMode: 何も自動起動していません (手動で起動してください)">
+            SAFE MODE
+          </span>
+        )}
         <nav className="tabs">
           {TABS.map((t) => (
             <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>

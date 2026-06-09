@@ -77,7 +77,8 @@ function ProjectCard({ project, onShowLogs }: { project: Project; onShowLogs: (c
 
 function ComponentRow({ c, onShowLogs }: { c: Component; onShowLogs: (code: string) => void }) {
   const cls = `dot ${c.state}`;
-  const isProcess = c.runtime === 'node' || c.runtime === 'dev-process-md';
+  const isProcess =
+    c.runtime === 'node' || c.runtime === 'dev-process-md' || c.runtime === 'app';
   const isDocker = c.runtime === 'docker-compose' || c.runtime === 'docker';
 
   const act = async (action: ControlAction) => {

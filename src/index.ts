@@ -43,6 +43,7 @@ import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
 import { reconcileProcesses } from './process/reconcile.js';
+import { detectSafeMode, setSafeMode, isSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
@@ -111,16 +112,26 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       'catalog reloaded from file change',
     );
   });
-  await runAutostart(currentCatalog);
-
-  // 初回ウィザード完了済み + auto_launch なら、 保存済み起動セットを boot で一括起動する
-  // (「次回自動」)。 未設定 (初回) なら何も起動せず、 UI のウィザードを待つ。
-  const profile = getLaunchProfile();
-  if (profile.configured && profile.autoLaunch && profile.selection.length > 0) {
-    logger.info({ selection: profile.selection }, 'auto-launching saved launch set');
-    void startSelection(currentCatalog, profile.selection).catch((err: unknown) =>
-      logger.error({ err: (err as Error).message }, 'auto-launch failed'),
+  // SafeMode: 何も起動せず Excubitor 本体だけ立ち上げる (autostart / auto-launch を抑止)。
+  // 監視・スキャン・Web GUI・制御 API は通常どおり動くので、 起動後に手動で立ち上げられる。
+  const safeMode = detectSafeMode();
+  setSafeMode(safeMode);
+  if (safeMode) {
+    logger.warn(
+      'SAFE MODE: autostart と保存済み起動セットの auto-launch をスキップ (Excubitor のみ起動)',
     );
+  } else {
+    await runAutostart(currentCatalog);
+
+    // 初回ウィザード完了済み + auto_launch なら、 保存済み起動セットを boot で一括起動する
+    // (「次回自動」)。 未設定 (初回) なら何も起動せず、 UI のウィザードを待つ。
+    const profile = getLaunchProfile();
+    if (profile.configured && profile.autoLaunch && profile.selection.length > 0) {
+      logger.info({ selection: profile.selection }, 'auto-launching saved launch set');
+      void startSelection(currentCatalog, profile.selection).catch((err: unknown) =>
+        logger.error({ err: (err as Error).message }, 'auto-launch failed'),
+      );
+    }
   }
 
   // ─── HTTP router ───────────────────────────────────────
@@ -149,6 +160,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ライブログ SSE (/api/v1/services/:code/logs)
   app.route('/', buildLogStreamRouter());
+
+  // 運用メタ (frontend が SafeMode バッジ等を出すため)。
+  app.get('/api/v1/system', (c) =>
+    c.json({ service: 'excubitor', safe_mode: isSafeMode() }),
+  );
 
   // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
   app.get('/api/v1/topology', (c) => c.json({ env: getTopologyEnv() }));
