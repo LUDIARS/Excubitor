@@ -150,6 +150,29 @@ git fetch + ff-only の後、 `build_command` があれば実行してから res
 `catalog/services.yaml` に **Hora** (Tauri デスクトップアプリ) を `hora-app` として登録。
 他のローカルアプリ (Quaestor / Custos / Legatus 等) も同形式で追加できる。
 
+## 9. インタラクティブ制御 + SafeMode (v0.4)
+
+### 9.1 サービスの対話的な起動 / 停止
+
+Monitor タブの各サービス行に **▶ 起動 / ■ 停止 / ↻ 再起動** ボタンがあり、
+`controlService(code, action)` → `/api/v1/services/:code/control` を叩く。
+process 系 (node / dev-process-md / **app**) と docker 系の両方が対象
+(runtime=app は §8 のローカルアプリ。 control 経路は ProcessManager spawn/kill)。
+
+### 9.2 SafeMode — Excubitor だけ起動する
+
+> 要件: 起動時に何もサービスを起動せず、 Excubitor 本体だけを立ち上げるモード。
+
+- 有効化: `EXCUBITOR_SAFE_MODE=1` または起動引数 `--safe`
+  (`npm run dev:safe` / `npm run start:safe`)。
+- 挙動 (`src/safe-mode.ts` + `src/index.ts`): `runAutostart` と保存済み launch
+  profile の auto-launch を**両方スキップ**する。 監視 / スキャン / Web GUI /
+  制御 API は通常どおり動くので、 起動後に Monitor / Launch から手動で立ち上げられる。
+- 公開: `GET /api/v1/system` → `{ safe_mode }`。 frontend は header に
+  **SAFE MODE** バッジを出す。
+- 用途: サービスが落ちて連鎖する状況の切り分け、 Excubitor 自体の更新・検証、
+  クリーンな状態からの手動起動。
+
 ## 今後 (このフェーズ外)
 
 - catalog への候補のワンクリック登録 (services.yaml 追記 or DB overlay)。

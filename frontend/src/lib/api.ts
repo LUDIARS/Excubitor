@@ -371,6 +371,15 @@ export function fetchTopology(): Promise<Record<string, string>> {
   return getJSON<{ env: Record<string, string> }>('/api/v1/topology').then((d) => d.env);
 }
 
+export interface SystemInfo {
+  service: string;
+  safe_mode: boolean;
+}
+
+export function fetchSystem(): Promise<SystemInfo> {
+  return getJSON<SystemInfo>('/api/v1/system');
+}
+
 // SSE log stream を購読する、Eunsubscribe 関数を返す、E
 export function subscribeLogs(
   code: string,
