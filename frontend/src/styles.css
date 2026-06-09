@@ -92,6 +92,11 @@ code {
   background: var(--accent-2);
   color: white;
 }
+.app-header .badge.badge-safe {
+  background: var(--err, #f87171);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
 .tabs { margin-left: auto; display: flex; gap: 4px; }
 .tabs button { padding: 4px 12px; font-size: 13px; }
 
