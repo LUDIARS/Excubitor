@@ -18,6 +18,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起
 | `src/process/` | autostart (一括起動) + secret 注入 + restart_policy |
 | `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
+| `src/release/` | リリースマニフェスト (`releases/*.yaml`) から自己完結ランナブル配布物を焼く (build→assemble→launcher→archive)。 spec/release.md / `npm run release` |
 | `src/server.ts` | main entry。`bootObservability()` + Hono serve |
 | `frontend/` | Monitor / Catalog / Errors の Web UI (Vite + React) |
 
