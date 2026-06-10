@@ -38,9 +38,33 @@ npm run dev        # tsx watch src/server.ts (backend)
 cd frontend && npm run dev   # Vite (17333)
 ```
 
+## tier (ローカルアプリ / SaaS の挙動分離)
+
+catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける (SaaS ランチャーから着手):
+
+| tier | 対象 | 扱い |
+|------|------|------|
+| `saas` | デプロイするバックエンド Web サービス | SaaS ランチャーの既定対象 |
+| `infra` | LUDIARS 共有インフラ (infra/ の DB / queue 等) | SaaS の依存として起動 |
+| `personal` | 本人 PC 専用ツール (Memoria local / Concordia / Conciliator / Quaestor / Custos) | SaaS ランチャー対象外 |
+| `local-app` | ネイティブ/デスクトップ製品 (runtime=app) | 別系統 (ローカルランチャー) |
+
+- 解決は `serviceTier()` (catalog 明示 → 無ければ runtime 推定、 既定 saas)。
+- ランチャー plan は `GET /api/v1/launch/plan?tier=saas,infra` で絞り込む。
+- **フロントエンドは catalog から除外** (フロント統合=Corpus)。 backend 単独になった論理サービスは
+  管理名から役割サフィックス (`-backend` 等) を外し純粋名にする (cernere / actio)。
+- サービス固有の静的 env は catalog の `env:` で注入 (例 discutere `BACKEND_PORT: "3110"` で
+  Nuntius(3100) との port 競合を回避)。 優先順位: topology < `env:` < secret。
+- runtime=app は port を持たないため、 `process_match` (image 名) で host プロセススキャンし
+  「Excubitor 外から起動した実体」 の生存も死活に反映する (scanner/host-process.ts)。
+
 ## 注意
 
 - Infisical-relay は移植していない。secret 注入は catalog の `infisical` フィールド経由
-  (各サービスが起動時に自前 fetch する設計のまま)。
+  (各サービスが起動時に自前 fetch する設計のまま)。 `infisical.project_id` は実 ID が必要で
+  捏造不可 — 現状 Cernere のみ実 ID。 他 SaaS は Infisical 側の project_id 入手後に充填する。
+- detached 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
+  親 (Excubitor) が落ちても子が EPIPE で死なない。 ライブログ/エラー検知は process-file が tail して bus へ。
 - catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
-  設計書 §9 の Phase C/D で対応予定。
+  設計書 §9 の Phase C/D で対応予定。 ローカルアプリ (local-app) の catalog 追加 (#90) は exec
+  パスを各リポのビルド出力で実在確認してから (hora-app 以外は follow-up)。

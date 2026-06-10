@@ -3,7 +3,7 @@
  * DB 非依存 — state は呼び出し側が code→state の map で渡す。
  */
 
-import type { Service } from '../catalog/loader.js';
+import { type Service, type Tier, serviceTier } from '../catalog/loader.js';
 import { startTier } from './order.js';
 
 const STARTABLE_RUNTIMES = new Set(['docker-compose', 'node', 'dev-process-md']);
@@ -14,6 +14,8 @@ export interface PlanService {
   project_code: string;
   component: string | null;
   runtime: string;
+  /** デプロイ/挙動クラス (saas / infra / personal / local-app)。 SaaS ランチャーの絞り込み軸。 */
+  tier: Tier;
   port: number | null;
   monitor_only: boolean;
   /** Excubitor が起動制御できる runtime か (raw docker は未対応)。 */
@@ -38,9 +40,11 @@ export function buildPlanProjects(
   services: Service[],
   stateByCode: Map<string, string>,
   selection: Set<string>,
+  filterTiers?: Set<Tier>,
 ): PlanProject[] {
   const byProject = new Map<string, PlanService[]>();
   for (const svc of services) {
+    if (filterTiers && !filterTiers.has(serviceTier(svc))) continue;
     const project = svc.project_code ?? svc.code;
     const entry: PlanService = {
       code: svc.code,
@@ -48,6 +52,7 @@ export function buildPlanProjects(
       project_code: project,
       component: svc.component ?? null,
       runtime: svc.runtime,
+      tier: serviceTier(svc),
       port: svc.port ?? null,
       monitor_only: svc.monitor_only,
       startable: STARTABLE_RUNTIMES.has(svc.runtime),
