@@ -1,0 +1,92 @@
+# Discutere オールインワン — 自己完結ランナブル配布物のマニフェスト。
+#
+# Excubitor の release サブシステムがこの宣言を読んで、 Di (primary) と関連ツール
+# (Lictor / Famulus / Canalis) を 1 つの展開して起動するだけのフォルダ + zip に焼く。
+#
+#   npm run release -- discutere-allinone            # 実ビルド (build + assemble + zip)
+#   npm run release -- discutere-allinone --dry-run  # repo 解決と git meta だけ確認
+#
+# 出力: dist/releases/discutere-allinone-<version>/ と同名 .zip。
+
+name: discutere-allinone
+display_name: Discutere All-in-One
+description: Di (Discord 自走議論ボット) を関連ツール同梱で単独起動できる自己完結配布物。
+primary: discutere
+output_dir: dist/releases
+
+# launcher が app/ で叩く起動コマンド (Di の `npm start` = node dist/index.js 相当)。
+start_command:
+  cmd: node
+  args: [dist/index.js]
+
+# Node ランタイム本体の同梱は既定オフ (host の Node 22+ を使う)。
+# 同梱したい場合は bundle: true + node_path に node(.exe) の絶対パスを指定する。
+runtime:
+  bundle: false
+
+components:
+  # ── primary: Discutere 本体 (app/ に配置) ──
+  - code: discutere
+    role: primary
+    path: E:/Document/Ars/Discutere
+    build:
+      - npm ci --no-audit --no-fund
+      - npm run build
+    include:
+      - dist
+      - package.json
+      - package-lock.json
+      - discutere.config.example.json
+      - .env.example
+      - frontend
+    prod_install: true
+
+  # ── cli: Lictor (Claude CLI を Di が Lictor 経由 spawn する経路) ──
+  - code: lictor
+    role: cli
+    path: E:/Document/Ars/Lictor
+    build:
+      - npm ci --no-audit --no-fund
+      - npm run build
+    include:
+      - dist
+      - bin
+      - package.json
+      - package-lock.json
+    prod_install: true
+    bin_name: lictor
+    bin_entry: bin/lictor.mjs
+
+  # ── cli: Famulus (ローカル LLM スポナー + 黒箱モデル切替) ──
+  - code: famulus
+    role: cli
+    path: E:/Document/Ars/Famulus
+    build:
+      - npm ci --no-audit --no-fund
+      - npm run build
+    include:
+      - dist
+      - bin
+      - package.json
+      - package-lock.json
+    prod_install: true
+    bin_name: famulus
+    bin_entry: bin/famulus.mjs
+
+  # ── lib: Canalis (外部コメント収集パイプライン基盤。 Di の ②transform が利用) ──
+  - code: canalis
+    role: lib
+    path: E:/Document/Ars/Canalis
+    build:
+      - npm ci --no-audit --no-fund
+      - npm run build
+    include:
+      - dist
+      - package.json
+      - package-lock.json
+    prod_install: true
+
+readme_notes:
+  - "1. app/discutere.config.example.json を app/discutere.config.json にコピーし Discord 設定を埋める。"
+  - "2. botToken / apiKey / AWS 等の秘密情報は環境変数で上書きするのを推奨 (config 直書きしない)。"
+  - "3. ローカル LLM を使う場合は famulus / Ollama を別途用意 (Di の llm.backend=local)。"

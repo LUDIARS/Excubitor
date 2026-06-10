@@ -48,6 +48,7 @@ import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
+import { buildReleaseRouter } from './release/router.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -157,6 +158,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // 新規サービス検出 (/api/v1/discovery)
   app.route('/', buildDiscoveryRouter(() => currentCatalog!));
+
+  // リリースビルド (/api/v1/releases — 自己完結ランナブル配布物の組み立て)
+  app.route('/', buildReleaseRouter(() => currentCatalog));
 
   // ライブログ SSE (/api/v1/services/:code/logs)
   app.route('/', buildLogStreamRouter());

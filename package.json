@@ -11,6 +11,7 @@
     "start": "node dist/server.js",
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",
+    "release": "tsx src/release/cli.ts",
     "test": "vitest run"
   },
   "dependencies": {
