@@ -12,13 +12,11 @@ import {
 
 /** 初回ウィザードで既定 ON にする推奨セット (存在 & startable なものだけ採用)。 */
 const RECOMMENDED = [
-  'cernere-backend-dev',
-  'cernere-frontend-dev',
+  'cernere',
   'corpus',
   'bibliotheca',
   'aedilis',
-  'actio-backend',
-  'actio-frontend',
+  'actio',
 ];
 
 function stateBadge(state: string): string {

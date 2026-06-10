@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import { syncDockerInstances } from './sync.js';
+import { scanHostProcesses } from './host-process.js';
 import { type Catalog } from '../catalog/loader.js';
 import { ensureTail, stopTail, isTailingService } from '../log/docker-tail.js';
 
@@ -22,6 +23,13 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
     try {
       const { scanned, matched } = await syncDockerInstances(catalog);
       logger.debug({ scanned, matched }, 'docker scan complete');
+
+      // host プロセススキャン (#91): runtime=app 等の process_match で外部起動の生存を反映。
+      try {
+        await scanHostProcesses(catalog);
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'host process scan failed');
+      }
 
       // running 中の docker サービスだけに docker logs -f を張めE(DB の state を見る)
       const runningRows = db().all(sql`
