@@ -49,6 +49,15 @@ const ServiceSchema = z.object({
   code: z.string(),
   name: z.string(),
   /**
+   * デプロイ/挙動クラス。 ローカルアプリ と SaaS で Excubitor の扱いを分けるための分類。
+   * - saas      : 多人数向けにデプロイするバックエンド Web サービス (SaaS ランチャーが管理)
+   * - infra     : LUDIARS 共有インフラ (infra/ リポの DB / queue / object store 等)
+   * - personal  : 本人の PC でのみ動く単独利用ツール (Memoria local / Concordia 等)
+   * - local-app : ネイティブ/デスクトップ製品 (runtime=app、 Tauri / Electron / native)
+   * 未指定時は serviceTier() が runtime / project から推定する (既定 saas)。
+   */
+  tier: z.enum(['saas', 'infra', 'personal', 'local-app']).optional(),
+  /**
    * 論理サービス (LUDIARS の 1 プロジェクチE を表す識別子、E
    * 同じ project_code を持つ catalog entry めEUI で雁E��E��示する、E
    * 侁E cernere-backend / cernere-frontend は project_code: "cernere"、E
@@ -113,6 +122,12 @@ const ServiceSchema = z.object({
    */
   provides: z.record(z.string(), z.string()).optional(),
   /**
+   * このサービス自身の spawn 時に注入する静的 env (非 secret)。 topology より優先、 secret より低優先。
+   * サービス固有の port / フラグ等を catalog 1 箇所で固定したいとき (= Excubitor 内で完結) に使う。
+   * 例 (discutere の port 競合回避): env: { BACKEND_PORT: "3110" }
+   */
+  env: z.record(z.string(), z.string()).optional(),
+  /**
    * runtime=app 専用。 起動する実行ファイル (絶対パス推奨) と引数。
    * 例: exec: E:/Document/Ars/Hora/src-tauri/target/release/hora.exe
    * dev 起動 (npm run tauri dev 等) は runtime=node + command で表現する。
@@ -142,6 +157,22 @@ const CatalogSchema = z.object({
 
 export type Service = z.infer<typeof ServiceSchema>;
 export type Catalog = z.infer<typeof CatalogSchema>;
+
+export type Tier = 'saas' | 'infra' | 'personal' | 'local-app';
+
+/** 表示順 (SaaS ランチャー → infra → personal → local-app)。 */
+export const TIER_ORDER: Tier[] = ['saas', 'infra', 'personal', 'local-app'];
+
+/**
+ * サービスの tier を解決する。 catalog で明示されていればそれを使い、
+ * 無ければ runtime から推定する (runtime=app → local-app、 それ以外 → saas)。
+ * infra / personal は曖昧さがあるため catalog 明示を推奨 (推定は saas 既定に倒す)。
+ */
+export function serviceTier(svc: Service): Tier {
+  if (svc.tier) return svc.tier;
+  if (svc.runtime === 'app') return 'local-app';
+  return 'saas';
+}
 
 export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const absPath = resolve(process.cwd(), path);

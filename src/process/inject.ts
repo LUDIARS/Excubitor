@@ -27,9 +27,11 @@ export { hasIdentity };
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
   const topology = getTopologyEnv();
+  // サービス固有の静的 env (catalog の env:)。 topology より優先 (port 上書き等)。
+  const staticEnv = svc.env ?? {};
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  if (!cfg || !cfg.inject) return { ...topology };
+  if (!cfg || !cfg.inject) return { ...topology, ...staticEnv };
 
   const id = readIdentity();
   if (!id) {
@@ -49,6 +51,6 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  // secret が topology と同名なら secret を優先 (上書き)。
-  return { ...topology, ...env };
+  // 優先順位: topology < 静的 env (catalog) < secret。
+  return { ...topology, ...staticEnv, ...env };
 }

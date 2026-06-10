@@ -20,6 +20,7 @@ import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
 import { execCapture } from '../shared/exec.js';
+import { startProcessLog, stopProcessLog } from '../log/process-file.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -125,6 +126,10 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     args = parts;
   }
 
+  // #84: detached 子の stdout/stderr は親所有の「ファイル fd」に向ける (pipe ではなく)。
+  // 親 (Excubitor) が落ちても write 先が生存するため EPIPE で子が即死しない。
+  // ライブログ/エラー検知は process-file がこのファイルを tail して log bus に publish する。
+  const { stdoutFd, stderrFd } = startProcessLog(svc.code);
   const child = spawn(cmd, args, {
     // app は exec の dir を既定 cwd にする (省略時)。 サービスは catalog の cwd。
     cwd: svc.cwd ?? (svc.runtime === 'app' && svc.exec ? dirname(svc.exec) : undefined),
@@ -132,13 +137,12 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
     shell: svc.runtime !== 'app',
     env: { ...process.env, ...(opts.env ?? {}) },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', stdoutFd, stderrFd],
     // detached: Excubitor 自身が再起動/停止してもサービスを道連れにしない
     // (= 監視コアの状態がサービスに影響しない)。 boot 時に pid で再採用する。
     detached: true,
   });
-  // 親 (Excubitor) の event loop を子に縛られないよう unref。 stdout/stderr は
-  // 生存中のみライブ取得し、 Excubitor 再起動後はストリーム欠落を許容する。
+  // 親 (Excubitor) の event loop を子に縛られないよう unref。
   child.unref();
 
   // adopted 側に同 code が残っていれば、 自前 spawn が真実なので除去。
@@ -148,13 +152,11 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   processes.set(svc.code, spawned);
   logger.info({ code: svc.code, pid: child.pid, restartCount }, 'spawned (detached)');
 
-  attachLineReader(svc, child, 'stdout');
-  attachLineReader(svc, child, 'stderr');
-
   await updateState(svc.code, 'running', child.pid ?? null);
 
   child.on('exit', (code, signal) => {
     processes.delete(svc.code);
+    stopProcessLog(svc.code);
     logger.info(
       { code: svc.code, exit_code: code, signal, restartCount },
       'process exited',
@@ -250,35 +252,6 @@ async function onExit(
       logger.error({ code: svc.code, err: (err as Error).message }, 'auto-restart failed'),
     );
   }, delay);
-}
-
-function attachLineReader(svc: Service, child: ChildProcess, channel: 'stdout' | 'stderr'): void {
-  const stream = child[channel];
-  if (!stream) return;
-  let buf = '';
-  stream.on('data', (chunk: Buffer) => {
-    buf += chunk.toString('utf8');
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).replace(/\r$/, '');
-      buf = buf.slice(nl + 1);
-      if (line.length > 0) emitLine(svc, channel, line);
-    }
-  });
-  stream.on('end', () => {
-    if (buf.length > 0) {
-      emitLine(svc, channel, buf);
-      buf = '';
-    }
-  });
-}
-
-function emitLine(svc: Service, channel: 'stdout' | 'stderr', line: string): void {
-  for (const h of lineHandlers) {
-    try { h(svc, channel, line); } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'lineHandler threw');
-    }
-  }
 }
 
 function splitCommand(input: string): string[] {

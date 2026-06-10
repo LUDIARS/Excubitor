@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import type { Catalog } from '../catalog/loader.js';
+import { type Catalog, type Tier, TIER_ORDER } from '../catalog/loader.js';
 import { getLaunchProfile, saveLaunchProfile } from './profile.js';
 import { buildPlanProjects } from './grouping.js';
 import { runPreflight } from './preflight.js';
@@ -27,6 +27,14 @@ const CodesSchema = z.object({
 });
 
 /** service_instances から code→state の map を作る。 */
+/** `?tier=saas,infra` を Tier の Set に解釈する (未指定/不正は undefined = 全 tier)。 */
+function parseTierFilter(raw: string | undefined): Set<Tier> | undefined {
+  if (!raw) return undefined;
+  const valid = new Set(TIER_ORDER);
+  const tiers = raw.split(',').map((t) => t.trim()).filter((t): t is Tier => valid.has(t as Tier));
+  return tiers.length > 0 ? new Set(tiers) : undefined;
+}
+
 function stateByCode(): Map<string, string> {
   const rows = db().all(sql`
     SELECT s.code AS code, si.state AS state
@@ -45,7 +53,11 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
   // 起動セット選択画面の plan (profile + project 別サービス)。
   app.get('/api/v1/launch/plan', (c) => {
     const profile = getLaunchProfile();
-    const projects = buildPlanProjects(getCatalog().services, stateByCode(), new Set(profile.selection));
+    // SaaS ランチャーは `?tier=saas,infra` で絞り込む。 未指定なら全 tier。
+    const filterTiers = parseTierFilter(c.req.query('tier'));
+    const projects = buildPlanProjects(
+      getCatalog().services, stateByCode(), new Set(profile.selection), filterTiers,
+    );
     return c.json({
       profile: {
         configured: profile.configured,
@@ -53,6 +65,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
         selection: profile.selection,
         updated_at: profile.updatedAt,
       },
+      tiers: TIER_ORDER,
       projects,
     });
   });
@@ -115,6 +128,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
           name: s.name,
           component: s.component,
           runtime: s.runtime,
+          tier: s.tier,
           state: s.state,
           port: s.port,
           git: { branch: null, hash: null, dirty: null },
