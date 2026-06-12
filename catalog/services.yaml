@@ -534,3 +534,42 @@ services:
     health:
       type: process
       interval_sec: 30
+
+  - code: quaestor-app
+    name: Quaestor (個人会計)
+    tier: local-app
+    project_code: quaestor
+    component: app
+    repo: LUDIARS/Quaestor
+    runtime: app
+    app_kind: tauri
+    # src-tauri/Cargo.toml [[bin]] name = "quaestor" → release binary は quaestor.exe
+    exec: E:/Document/Ars/Quaestor/src-tauri/target/release/quaestor.exe
+    cwd: E:/Document/Ars/Quaestor
+    build_command: npm run tauri build
+    process_match: quaestor.exe
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30
+
+  - code: legatus-app
+    name: Legatus (PC 代理人)
+    tier: local-app
+    project_code: legatus
+    component: app
+    repo: LUDIARS/Legatus
+    runtime: app
+    app_kind: electron
+    # package.json "start": "electron dist/electron/main.js"
+    # build:electron → dist/electron/main.js (tsconfig.electron.json)
+    exec: E:/Document/Ars/Legatus/node_modules/electron/dist/electron.exe
+    exec_args:
+      - dist/electron/main.js
+    cwd: E:/Document/Ars/Legatus
+    build_command: npm run build
+    # process_match は省略 — electron.exe は汎用名のため Excubitor spawn 追跡のみ
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30
