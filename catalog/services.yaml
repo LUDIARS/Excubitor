@@ -295,6 +295,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      AEDILIS_URL: http://${host}:${port}
 
   - code: bibliotheca
     name: Bibliotheca (貸出台帳)
@@ -310,6 +312,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      BIBLIOTHECA_URL: http://${host}:${port}
 
   - code: quaestor
     name: Quaestor (個人会計)
@@ -325,6 +329,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      QUAESTOR_URL: http://${host}:${port}
 
   - code: praeforma
     name: Praeforma (仕様↔実装)
@@ -340,6 +346,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      PRAEFORMA_URL: http://${host}:${port}
 
   - code: signum
     name: Signum (コンテンツ署名)
@@ -355,6 +363,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      SIGNUM_URL: http://${host}:${port}
 
   - code: ludellus
     name: Ludellus server (知育)
@@ -370,6 +380,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      LUDELLUS_URL: http://${host}:${port}
 
   - code: vantanhub
     name: VantanHub (学校 hub)
@@ -385,6 +397,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      VANTANHUB_URL: http://${host}:${port}
 
   # ─────────────── Tirocinium (面接練習) ───────────────
   - code: tirocinium
@@ -402,6 +416,8 @@ services:
       type: http
       url: http://localhost:8084/health
       interval_sec: 30
+    provides:
+      TIROCINIUM_URL: http://${host}:${port}
 
   # ─────────────── Discutere (Discord 自走議論) ───────────────
   # port は Nuntius (3100) と競合するため 3110 へ退避。 サービス側は BACKEND_PORT を
@@ -423,6 +439,8 @@ services:
       type: http
       url: http://localhost:3110/health
       interval_sec: 30
+    provides:
+      DISCUTERE_URL: http://${host}:${port}
 
   # ─────────────── personal (本人 PC 専用ツール / tier: personal) ───────────────
   # 個人ローカル開発用 server (個人ログ専用、 port 5180)。 シェアサーバ (Hub) とは別。
@@ -441,6 +459,8 @@ services:
       type: http
       url: http://localhost:5180/api/health
       interval_sec: 30
+    provides:
+      MEMORIA_URL: http://${host}:${port}
 
   - code: concordia
     name: Concordia (AI 協調)
@@ -456,6 +476,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      CONCORDIA_URL: http://${host}:${port}
 
   - code: conciliator
     name: Conciliator (衝突検知)
@@ -471,6 +493,8 @@ services:
     health:
       type: tcp
       interval_sec: 30
+    provides:
+      CONCILIATOR_URL: http://${host}:${port}
 
   - code: custos
     name: Custos (リモートテストランナー)
@@ -486,6 +510,8 @@ services:
       type: http
       url: http://localhost:8765/health
       interval_sec: 30
+    provides:
+      CUSTOS_URL: http://${host}:${port}
 
   # ─────────────── ローカルアプリ (tier: local-app / runtime=app) ───────────────
   # port を持たないネイティブ/デスクトップ製品。 Excubitor は exec を detached spawn
