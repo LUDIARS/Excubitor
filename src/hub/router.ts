@@ -77,6 +77,8 @@ export function excubitorManifest(version: string): Record<string, unknown> {
       { id: 'services', path: '/api/hub/services', scope: 'multi', title: 'サービス一覧' },
       { id: 'apps', path: '/api/hub/apps', scope: 'multi', title: 'ローカルアプリ' },
       { id: 'errors', path: '/api/hub/errors', scope: 'multi', title: 'エラータスク' },
+      // 宣言的レンダラのアクションから :code を差し込んで control を叩く (_cp_ 方式)。
+      { id: 'app-control', path: '/api/v1/services/:code/control', scope: 'multi', title: 'アプリ操作' },
     ],
     // ローカルアプリの起動/停止アクション。 Corpus フロントはこの descriptor を見て
     // ボタンを描画し、 既存 control エンドポイント (loopback) を叩く (§7.1)。
@@ -98,7 +100,55 @@ export function excubitorManifest(version: string): Record<string, unknown> {
         appliesTo: 'apps',
       },
     ],
-    panels: [],
+    panels: [
+      {
+        id: 'local-apps',
+        kind: 'declarative',
+        title: 'ローカルアプリ',
+        icon: '🖥',
+        ui: {
+          descriptorVersion: 1,
+          title: 'ローカルアプリ',
+          sections: [
+            {
+              components: [
+                {
+                  type: 'list',
+                  dataSource: 'apps',
+                  itemsPath: 'apps',
+                  itemKey: 'code',
+                  empty: 'ローカルアプリが登録されていません',
+                  item: {
+                    title: '{name}',
+                    subtitle: '{app_kind}',
+                    meta: '状態: {state}',
+                    actions: [
+                      {
+                        label: '起動',
+                        dataId: 'app-control',
+                        method: 'POST',
+                        params: { code: '{code}' },
+                        body: { action: 'start' },
+                        success: '起動しました',
+                      },
+                      {
+                        label: '停止',
+                        dataId: 'app-control',
+                        method: 'POST',
+                        params: { code: '{code}' },
+                        body: { action: 'stop' },
+                        success: '停止しました',
+                        confirm: '停止しますか？',
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
     auth: 'none',
   };
 }
