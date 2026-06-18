@@ -45,6 +45,20 @@ const AutoFixSchema = z.object({
   prompt_extra: z.string().optional(),
 });
 
+/**
+ * メモリ監視設定 (per service)。 省略時は enabled=true で外形 RSS のみ監視する。
+ * - metrics_url: Tier2 (heap 内訳)。 サービスが process.memoryUsage() 相当を JSON で返す
+ *   エンドポイント (例 http://localhost:5180/api/metrics/memory)。 設定したサービスのみ heap/external を取得。
+ * - leak_window_min: リーク判定の観測窓 (分)。 この窓の RSS 時系列で slope を測る。
+ * - leak_threshold_mb_per_hr: この傾き (MB/時) を超え かつ 単調増加なら leak と判定し error_task を起こす。
+ */
+const MemoryMonitorServiceSchema = z.object({
+  enabled: z.boolean().default(true),
+  metrics_url: z.string().optional(),
+  leak_window_min: z.number().positive().default(60),
+  leak_threshold_mb_per_hr: z.number().positive().default(50),
+});
+
 const ServiceSchema = z.object({
   code: z.string(),
   name: z.string(),
@@ -149,10 +163,35 @@ const ServiceSchema = z.object({
    */
   process_match: z.string().optional(),
   auto_fix: AutoFixSchema.optional(),
+  /** メモリ監視設定。 省略時は外形 RSS のみ (Tier1) で監視する。 */
+  memory: MemoryMonitorServiceSchema.optional(),
+});
+
+/**
+ * WSL バックエンドのメモリ監視設定 (catalog top-level)。
+ * WSL2 は全 distro が 1 つの軽量 VM (Windows 側 vmmem プロセス) を共有するため、
+ * サービス単位ではなく distro / vmmem 単位で別軸監視する。
+ */
+const WslMonitorSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** 監視する distro 名。 空なら `wsl -l -q` で自動検出 (docker-desktop 系は除外)。 */
+  distros: z.array(z.string()).default([]),
+  leak_window_min: z.number().positive().default(120),
+  leak_threshold_mb_per_hr: z.number().positive().default(200),
+});
+
+/** メモリ監視のグローバル設定 (catalog top-level、 省略時は既定値)。 */
+const MemoryGlobalSchema = z.object({
+  enabled: z.boolean().default(true),
+  interval_sec: z.number().positive().default(60),
+  retention_hours: z.number().positive().default(48),
+  wsl: WslMonitorSchema.default({}),
 });
 
 const CatalogSchema = z.object({
   services: z.array(ServiceSchema),
+  /** メモリ監視のグローバル設定 (interval / 保持期間 / WSL)。 */
+  memory_monitor: MemoryGlobalSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;

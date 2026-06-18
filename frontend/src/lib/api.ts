@@ -380,6 +380,65 @@ export function fetchSystem(): Promise<SystemInfo> {
   return getJSON<SystemInfo>('/api/v1/system');
 }
 
+// ─────────────── Memory (メモリ監視) ───────────────
+export type LeakVerdict = 'insufficient' | 'ok' | 'suspect' | 'leaking';
+
+export interface MemoryLeak {
+  verdict: LeakVerdict;
+  slopeBytesPerHour: number;
+  monotonicRatio: number;
+  baselineBytes: number | null;
+  latestBytes: number | null;
+  samples: number;
+  spanMs: number;
+}
+
+export interface MemoryCard {
+  target_kind: 'service' | 'wsl';
+  target_key: string;
+  name: string;
+  primary_source: string;
+  rss_bytes: number | null;
+  heap_used_bytes: number | null;
+  heap_total_bytes: number | null;
+  external_bytes: number | null;
+  array_buffers_bytes: number | null;
+  pid: number | null;
+  detail: Record<string, unknown> | null;
+  sampled_at: number;
+  leak: MemoryLeak;
+  spark: Array<{ t: number; rss: number }>;
+}
+
+export interface MemorySummary {
+  services: MemoryCard[];
+  wsl: MemoryCard[];
+}
+
+export function fetchMemorySummary(): Promise<MemorySummary> {
+  return getJSON<MemorySummary>('/api/v1/memory/summary');
+}
+
+export interface MemorySeriesPoint {
+  t: number;
+  rss: number | null;
+  heap_used: number | null;
+  heap_total: number | null;
+  external: number | null;
+  array_buffers: number | null;
+}
+
+export function fetchMemorySeries(
+  kind: string,
+  key: string,
+  windowMin = 120,
+  source?: string,
+): Promise<MemorySeriesPoint[]> {
+  const q = new URLSearchParams({ kind, key, window_min: String(windowMin) });
+  if (source) q.set('source', source);
+  return getJSON<{ series: MemorySeriesPoint[] }>(`/api/v1/memory/series?${q.toString()}`).then((d) => d.series);
+}
+
 // SSE log stream を購読する、Eunsubscribe 関数を返す、E
 export function subscribeLogs(
   code: string,
