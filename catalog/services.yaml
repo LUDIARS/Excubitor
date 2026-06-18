@@ -552,6 +552,12 @@ services:
     health:
       type: process
       interval_sec: 30
+    # Tier2 (heap 内訳) を取りたいサービスは memory.metrics_url を設定する。
+    # サービス側は GET <url> → { rss, heapUsed, heapTotal, external, arrayBuffers } (各バイト) を返す。
+    # memory:
+    #   metrics_url: http://localhost:17400/api/metrics/memory
+    #   leak_window_min: 60
+    #   leak_threshold_mb_per_hr: 50
 
   - code: legatus-app
     name: Legatus (PC 代理人)
@@ -573,3 +579,17 @@ services:
     health:
       type: process
       interval_sec: 30
+
+# ─────────────── メモリ監視 (memory_monitor) ───────────────
+# 各サービスの RSS (プロセスツリー合算 / docker stats) を時系列で採取し、 単調増加トレンドを
+# leak として error_tasks に起票する。 WSL2 バックエンドは distro 内部 + Windows 側 vmmem を別軸で監視。
+# per-service の閾値は各サービスの memory: ブロックで上書きできる (既定 60 分窓 / 50MB/h)。
+memory_monitor:
+  enabled: true
+  interval_sec: 60        # サンプリング間隔
+  retention_hours: 48     # memory_samples の保持期間 (これより古い行は剪定)
+  wsl:
+    enabled: true
+    distros: []           # 空 = `wsl -l -q` で自動検出 (docker-desktop 系は除外)
+    leak_window_min: 120
+    leak_threshold_mb_per_hr: 200
