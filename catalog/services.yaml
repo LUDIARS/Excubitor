@@ -461,6 +461,10 @@ services:
       interval_sec: 30
     provides:
       MEMORIA_URL: http://${host}:${port}
+    # Tier2: Memoria server が /api/metrics/memory で process.memoryUsage() を晒すので、
+    # heap/external 内訳を取得する (Memoria PR #217)。 外形 RSS と併せて leak の真因切り分けに使う。
+    memory:
+      metrics_url: http://localhost:5180/api/metrics/memory
 
   - code: concordia
     name: Concordia (AI 協調)
