@@ -294,11 +294,12 @@ async function raiseRestartLimitError(
   max: number,
 ): Promise<void> {
   const newId = randomUUID();
+  // first_seen_at / last_seen_at は NOT NULL かつ SQL default 無し → 明示指定が必要。
   db().run(sql`
-    INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt)
+    INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
     SELECT ${newId}, si.id, 'fatal',
            ${'restart limit reached (max=' + max + ', exit_code=' + exitCode + ', signal=' + (signal ?? 'none') + ')'},
-           NULL
+           NULL, unixepoch() * 1000, unixepoch() * 1000
     FROM service_instances si
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${svc.code}

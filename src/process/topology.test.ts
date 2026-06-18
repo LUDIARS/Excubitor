@@ -15,6 +15,19 @@ function svc(p: Partial<Service>): Service {
   } as Service;
 }
 
+/** Catalog リテラルに memory_monitor 既定を補って組む。 */
+function cat(services: Service[]): Catalog {
+  return {
+    services,
+    memory_monitor: {
+      enabled: true,
+      interval_sec: 60,
+      retention_hours: 48,
+      wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
+    },
+  };
+}
+
 describe('envKey', () => {
   it('uppercases and replaces non-alnum with _', () => {
     expect(envKey('cernere-backend-dev')).toBe('CERNERE_BACKEND_DEV');
@@ -24,20 +37,18 @@ describe('envKey', () => {
 
 describe('buildTopologyEnv', () => {
   it('auto-derives <CODE>_URL / <CODE>_PORT for services with port', () => {
-    const cat: Catalog = { services: [svc({ code: 'memoria-server', port: 5180 })] };
-    const env = buildTopologyEnv(cat);
+    const env = buildTopologyEnv(cat([svc({ code: 'memoria-server', port: 5180 })]));
     expect(env['MEMORIA_SERVER_PORT']).toBe('5180');
     expect(env['MEMORIA_SERVER_URL']).toBe('http://localhost:5180');
   });
 
   it('skips services without a port', () => {
-    const cat: Catalog = { services: [svc({ code: 'no-port' })] };
-    expect(buildTopologyEnv(cat)).toEqual({});
+    expect(buildTopologyEnv(cat([svc({ code: 'no-port' })]))).toEqual({});
   });
 
   it('renders explicit provides templates and overrides auto keys', () => {
-    const cat: Catalog = {
-      services: [
+    const env = buildTopologyEnv(
+      cat([
         svc({
           code: 'cernere-backend-dev',
           port: 8080,
@@ -46,9 +57,8 @@ describe('buildTopologyEnv', () => {
             CERNERE_WS_URL: 'ws://${host}:${port}',
           },
         }),
-      ],
-    };
-    const env = buildTopologyEnv(cat);
+      ]),
+    );
     expect(env['CERNERE_URL']).toBe('http://localhost:8080');
     expect(env['CERNERE_WS_URL']).toBe('ws://localhost:8080');
     // auto キーも共存

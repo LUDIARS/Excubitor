@@ -406,3 +406,38 @@ code {
 .config-table input { width: 100%; min-width: 80px; }
 .config-table button.link { background: none; border: none; color: var(--err); cursor: pointer; font-size: 12px; padding: 0; }
 .config-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ─────────────── Memory (メモリ監視) ─────────────── */
+.memory { display: flex; flex-direction: column; gap: 6px; }
+.mem-section-title { font-size: 14px; color: var(--fg-muted); font-weight: 600; margin: 16px 0 4px; }
+.mem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.mem-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mem-card.leaking { border-color: var(--err); box-shadow: 0 0 0 1px rgba(248,113,113,0.25); }
+.mem-card.suspect { border-color: var(--warn); }
+.mem-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mem-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem-rss { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 700; }
+.mem-meta { font-size: 11px; color: var(--fg-muted); }
+.mem-heap { font-size: 11px; color: var(--info); }
+.sparkline { display: block; width: 100%; height: 36px; }
+.mem-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+  background: rgba(96,165,250,0.18); color: var(--info); border: 1px solid rgba(96,165,250,0.4);
+  white-space: nowrap;
+}
+.mem-badge.leaking { background: rgba(248,113,113,0.18); color: var(--err); border-color: rgba(248,113,113,0.5); }
+.mem-badge.suspect { background: rgba(250,204,21,0.18); color: var(--warn); border-color: rgba(250,204,21,0.5); }
+.mem-badge.ok { background: rgba(74,222,128,0.15); color: var(--ok); border-color: rgba(74,222,128,0.4); }
+.mem-badge.insufficient { background: rgba(107,114,128,0.18); color: var(--unknown); border-color: rgba(107,114,128,0.4); }

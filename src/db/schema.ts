@@ -147,6 +147,29 @@ export const launchProfile = sqliteTable('launch_profile', {
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
+/**
+ * メモリ監視サンプル (時系列)。 liveness_history と同型の append-only 時系列テーブル。
+ * - target_kind='service' は service_instance に紐付く (code=target_key)。
+ *   source='process' (RSS ツリー集計) / 'docker' (docker stats) / 'metrics' (/metrics の heap 内訳)。
+ * - target_kind='wsl' は WSL distro / vmmem に紐付く (instance なし、 target_key=distro 名 or 'vmmem')。
+ * リーク検知 (memory/leak.ts) はこのテーブルの rss 時系列を window で読んで slope を計算する。
+ */
+export const memorySamples = sqliteTable('memory_samples', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  target_kind: text('target_kind').notNull(), // 'service' | 'wsl'
+  target_key: text('target_key').notNull(),   // service code | distro 名 | 'vmmem'
+  service_instance_id: text('service_instance_id').references(() => serviceInstances.id),
+  source: text('source').notNull(),           // 'process' | 'docker' | 'metrics' | 'wsl'
+  sampled_at: integer('sampled_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  rss_bytes: integer('rss_bytes'),
+  heap_used_bytes: integer('heap_used_bytes'),
+  heap_total_bytes: integer('heap_total_bytes'),
+  external_bytes: integer('external_bytes'),
+  array_buffers_bytes: integer('array_buffers_bytes'),
+  pid: integer('pid'),
+  detail: text('detail', { mode: 'json' }),
+});
+
 export const auditLog = sqliteTable('audit_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   ts: integer('ts', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
@@ -169,6 +192,9 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS error_tasks (id TEXT PRIMARY KEY, rule_id TEXT REFERENCES error_rules(id), service_instance_id TEXT REFERENCES service_instances(id), severity TEXT NOT NULL DEFAULT 'error', summary TEXT NOT NULL, log_excerpt TEXT, occurrence_count INTEGER NOT NULL DEFAULT 1, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'open', snooze_until INTEGER, triaged_by TEXT, triaged_at INTEGER, note TEXT, auto_fix_state TEXT, auto_fix_attempts INTEGER NOT NULL DEFAULT 0, auto_fix_run_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   `CREATE TABLE IF NOT EXISTS auto_fix_runs (id TEXT PRIMARY KEY, error_task_id TEXT NOT NULL REFERENCES error_tasks(id), service_code TEXT NOT NULL, agent TEXT NOT NULL DEFAULT 'claude-code', state TEXT NOT NULL DEFAULT 'pending', triggered_by TEXT, prompt TEXT, started_at INTEGER, finished_at INTEGER, exit_code INTEGER, stdout_tail TEXT, stderr_tail TEXT, branch TEXT, commit_hash TEXT, pr_url TEXT, verify_result TEXT, error_message TEXT, action_type TEXT NOT NULL DEFAULT 'fix', created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   `CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL DEFAULT (unixepoch() * 1000), actor TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, payload TEXT)`,
+  `CREATE TABLE IF NOT EXISTS memory_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, target_kind TEXT NOT NULL, target_key TEXT NOT NULL, service_instance_id TEXT REFERENCES service_instances(id), source TEXT NOT NULL, sampled_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), rss_bytes INTEGER, heap_used_bytes INTEGER, heap_total_bytes INTEGER, external_bytes INTEGER, array_buffers_bytes INTEGER, pid INTEGER, detail TEXT)`,
+  // 時系列クエリ (window 読み出し) 用の複合インデックス。 CREATE TABLE の後に冪等発行する。
+  `CREATE INDEX IF NOT EXISTS idx_memory_samples_target ON memory_samples (target_kind, target_key, sampled_at)`,
   `CREATE TABLE IF NOT EXISTS launch_profile (id INTEGER PRIMARY KEY, configured INTEGER NOT NULL DEFAULT 0, auto_launch INTEGER NOT NULL DEFAULT 1, selection TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO launch_profile (id, configured, auto_launch, selection, updated_at) VALUES (1, 0, 1, '[]', unixepoch() * 1000)`
 ];

@@ -49,6 +49,8 @@ import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
 import { buildReleaseRouter } from './release/router.js';
+import { startMemoryLoop } from './memory/loop.js';
+import { buildMemoryRouter } from './memory/router.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -102,6 +104,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   setCatalogProvider(() => currentCatalog!);
   await startErrorDetector();
   const scannerHandle = startScannerLoop(currentCatalog);
+  // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
+  // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
+  const memoryHandle = startMemoryLoop(() => currentCatalog!);
   const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
@@ -164,6 +169,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ライブログ SSE (/api/v1/services/:code/logs)
   app.route('/', buildLogStreamRouter());
+
+  // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
+  app.route('/', buildMemoryRouter(() => currentCatalog!));
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get('/api/v1/system', (c) =>
@@ -439,6 +447,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       // 明示停止は stop API / launcher stop からのみ行う。
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
+      try { memoryHandle?.stop?.(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
     },
   };
