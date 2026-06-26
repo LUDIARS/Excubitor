@@ -477,8 +477,11 @@ services:
     cwd: E:/Document/Ars/Concordia
     command: npm run dev
     autostart: false
+    # backend は /health (JSON) を持つので tcp probe ではなく http health で死活判定する。
+    # root (/) は build 済み web UI (web/dist) を配信するため、 開いても 404 にならない。
     health:
-      type: tcp
+      type: http
+      url: http://localhost:17330/health
       interval_sec: 30
     provides:
       CONCORDIA_URL: http://${host}:${port}
