@@ -47,7 +47,7 @@ npm install
 npm run dev
 ```
 
-http://localhost:17331/health で動作確認。
+http://localhost:17332/health で動作確認。
 
 ## ラテン語の名前
 
@@ -81,7 +81,7 @@ Excubitor は LUDIARS 起動チェーンの最先頭にあり、Infisical / Cern
 [`frontend/config.ts`](frontend/config.ts) を直接編集する想定。
 
 - `allowedHosts`: Cloudflare Tunnel / reverse proxy 越しのホスト名を追加
-- `port`: frontend dev server port (default 17332)
-- `backendUrl`: backend (Excubitor server) の URL (default http://localhost:17331)
+- `port`: frontend dev server port (default 17333 / 17331 は Concordia Vite が占有)
+- `backendUrl`: backend (Excubitor server) の URL (default http://localhost:17332)
 
 機密値はここに置かない (公開ドメインや port 等のみ)。
