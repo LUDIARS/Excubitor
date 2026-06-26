@@ -29,6 +29,10 @@ export interface PlanService {
   log_path: string | null;
   /** boot 時に自動起動するか。 */
   autostart: boolean;
+  /** 既存 start-<service>.bat 等の起動スクリプトで起動するか (あればパス)。 */
+  start_script: string | null;
+  /** 実効 uses_corpus (catalog デフォルト ← service_prefs override)。 */
+  uses_corpus: boolean;
 }
 
 export interface PlanProject {
@@ -41,6 +45,7 @@ export function buildPlanProjects(
   stateByCode: Map<string, string>,
   selection: Set<string>,
   filterTiers?: Set<Tier>,
+  usesCorpusByCode?: Map<string, boolean>,
 ): PlanProject[] {
   const byProject = new Map<string, PlanService[]>();
   for (const svc of services) {
@@ -62,6 +67,8 @@ export function buildPlanProjects(
       has_vestigium: Boolean(svc.log_path),
       log_path: svc.log_path ?? null,
       autostart: svc.autostart,
+      start_script: svc.start_script ?? null,
+      uses_corpus: usesCorpusByCode?.get(svc.code) ?? svc.uses_corpus ?? false,
     };
     const arr = byProject.get(project) ?? [];
     arr.push(entry);

@@ -16,6 +16,7 @@ import { getLaunchProfile, saveLaunchProfile } from './profile.js';
 import { buildPlanProjects } from './grouping.js';
 import { runPreflight } from './preflight.js';
 import { startSelection, stopSelection } from './orchestrator.js';
+import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
 
 const SaveProfileSchema = z.object({
   selection: z.array(z.string()),
@@ -55,8 +56,9 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
     const profile = getLaunchProfile();
     // SaaS ランチャーは `?tier=saas,infra` で絞り込む。 未指定なら全 tier。
     const filterTiers = parseTierFilter(c.req.query('tier'));
+    const catalog = getCatalog();
     const projects = buildPlanProjects(
-      getCatalog().services, stateByCode(), new Set(profile.selection), filterTiers,
+      catalog.services, stateByCode(), new Set(profile.selection), filterTiers, usesCorpusByCode(catalog),
     );
     return c.json({
       profile: {
@@ -115,35 +117,92 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
     return c.json({ results });
   });
 
+  // Corpus 利用設定の保存 (req3)。 usesCorpus=null で catalog デフォルトに戻す。
+  app.put('/api/v1/services/:code/corpus-pref', async (c) => {
+    const code = c.req.param('code');
+    if (!getCatalog().services.some((s) => s.code === code)) return c.json({ error: 'not_found' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { uses_corpus?: boolean | null };
+    const v = body.uses_corpus;
+    if (v !== true && v !== false && v !== null) return c.json({ error: 'invalid_body' }, 400);
+    setCorpusPref(code, v);
+    return c.json({ ok: true, code, uses_corpus: v });
+  });
+
   // 既存 Catalog 画面用 (project 別グルーピング)。frontend api.ts fetchProjects が叩く。
+  // git / version / last_seen は service_instances から補完してカードに詳細を出す (req6)。
   app.get('/api/v1/projects', (c) => {
     const profile = getLaunchProfile();
-    const projects = buildPlanProjects(getCatalog().services, stateByCode(), new Set(profile.selection));
+    const catalog = getCatalog();
+    const projects = buildPlanProjects(
+      catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
+    );
+    const detail = instanceDetailByCode();
     return c.json({
       projects: projects.map((p) => ({
         project_code: p.project_code,
         project_name: p.project_code,
-        components: p.services.map((s) => ({
-          code: s.code,
-          name: s.name,
-          component: s.component,
-          runtime: s.runtime,
-          tier: s.tier,
-          state: s.state,
-          port: s.port,
-          git: { branch: null, hash: null, dirty: null },
-          package_version: null,
-          monitor_only: s.monitor_only,
-          has_vestigium: s.has_vestigium,
-          log_path: s.log_path,
-          autostart: s.autostart,
-          host: null,
-          last_seen_at: null,
-          docker_id: null,
-        })),
+        components: p.services.map((s) => {
+          const d = detail.get(s.code);
+          return {
+            code: s.code,
+            name: s.name,
+            component: s.component,
+            runtime: s.runtime,
+            tier: s.tier,
+            state: s.state,
+            port: s.port,
+            git: {
+              branch: d?.git_branch ?? null,
+              hash: d?.git_hash ?? null,
+              dirty: d?.git_dirty ?? null,
+            },
+            package_version: d?.package_version ?? null,
+            monitor_only: s.monitor_only,
+            has_vestigium: s.has_vestigium,
+            log_path: s.log_path,
+            autostart: s.autostart,
+            start_script: s.start_script,
+            uses_corpus: s.uses_corpus,
+            host: null,
+            last_seen_at: d?.last_seen_at ?? null,
+            docker_id: d?.docker_id ?? null,
+          };
+        }),
       })),
     });
   });
 
   return app;
+}
+
+interface InstanceDetail {
+  git_branch: string | null;
+  git_hash: string | null;
+  git_dirty: boolean | null;
+  package_version: string | null;
+  last_seen_at: number | null;
+  docker_id: string | null;
+}
+
+/** service_instances から code→詳細 (git/version/last_seen) を引く。 */
+function instanceDetailByCode(): Map<string, InstanceDetail> {
+  const rows = db().all(sql`
+    SELECT s.code AS code, si.git_branch, si.git_hash, si.git_dirty,
+           si.package_version, si.last_seen_at, si.docker_id
+    FROM services s
+    LEFT JOIN service_instances si ON si.service_id = s.id
+    WHERE s.is_active = 1
+  `) as Array<Record<string, unknown>>;
+  const map = new Map<string, InstanceDetail>();
+  for (const r of rows) {
+    map.set(r.code as string, {
+      git_branch: (r.git_branch as string | null) ?? null,
+      git_hash: (r.git_hash as string | null) ?? null,
+      git_dirty: r.git_dirty === null || r.git_dirty === undefined ? null : Boolean(r.git_dirty),
+      package_version: (r.package_version as string | null) ?? null,
+      last_seen_at: (r.last_seen_at as number | null) ?? null,
+      docker_id: (r.docker_id as string | null) ?? null,
+    });
+  }
+  return map;
 }

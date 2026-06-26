@@ -16,7 +16,9 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起
 | `src/scanner/` | docker / プロセス / git / version の周期スキャン → 死活 state |
 | `src/control/` | start / stop / restart (docker-compose / node / dev-process-md) |
 | `src/process/` | autostart (一括起動) + secret 注入 + restart_policy |
-| `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector |
+| `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector + SSE (`/logs` 単一/横断, `/logs/recent`) |
+| `src/scanner/ports.ts` | ポート衝突検知 (netstat/ss/tasklist 解析 → 重複宣言 / LISTEN 占有 / foreign 衝突)。 `/api/v1/ports` |
+| `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポートを公開 |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
 | `src/release/` | リリースマニフェスト (`releases/*.yaml`) から自己完結ランナブル配布物を焼く (build→assemble→launcher→archive)。 spec/release.md / `npm run release` |
 | `src/server.ts` | main entry。`bootObservability()` + Hono serve |
@@ -65,6 +67,9 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   捏造不可 — 現状 Cernere のみ実 ID。 他 SaaS は Infisical 側の project_id 入手後に充填する。
 - detached 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
   親 (Excubitor) が落ちても子が EPIPE で死なない。 ライブログ/エラー検知は process-file が tail して bus へ。
+- 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
+  catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
+- `uses_corpus` (catalog) は UI から `service_prefs` (DB) で上書きできる。 起動セットに含めると Corpus を自動補完。
 - catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
   設計書 §9 の Phase C/D で対応予定。 ローカルアプリ (local-app) の catalog 追加 (#90) は exec
   パスを各リポのビルド出力で実在確認してから (hora-app 以外は follow-up)。

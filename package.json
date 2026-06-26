@@ -12,10 +12,12 @@
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",
     "release": "tsx src/release/cli.ts",
+    "mcp": "tsx src/mcp/server.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.12.0",
     "better-sqlite3": "^11.8.1",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.6.14",

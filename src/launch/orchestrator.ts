@@ -13,6 +13,7 @@ import type { Catalog } from '../catalog/loader.js';
 import { controlService } from '../control/manager.js';
 import { orderForStart, orderForStop } from './order.js';
 import { runPreflight, type PreflightReport } from './preflight.js';
+import { withCorpusIfNeeded } from './corpus-prefs.js';
 
 const logger = createNamedLogger('excubitor.launch');
 
@@ -47,6 +48,9 @@ export async function startSelection(
 ): Promise<LaunchResult> {
   const skipNotReady = opts.skipNotReady ?? true;
   const actor = opts.actor ?? 'launcher';
+
+  // Corpus を使うサービスが含まれていれば Corpus も起動セットに加える (tier 順で先に上がる)。
+  codes = withCorpusIfNeeded(catalog, codes);
 
   const preflight = await runPreflight(catalog.services, codes);
   const notReady = new Set(
