@@ -170,6 +170,18 @@ export const memorySamples = sqliteTable('memory_samples', {
   detail: text('detail', { mode: 'json' }),
 });
 
+/**
+ * サービス単位の運用設定 (UI から編集できる catalog override)。 code が PK。
+ * - uses_corpus: このサービスが Corpus を利用するか。 catalog の uses_corpus がデフォルト、
+ *   この行があれば優先する (= 「Corpus を使う / 使わないを設定できる」 req3 の永続先)。
+ * null は「未設定 = catalog のデフォルトに従う」 を意味する。
+ */
+export const servicePrefs = sqliteTable('service_prefs', {
+  code: text('code').primaryKey(),
+  uses_corpus: integer('uses_corpus', { mode: 'boolean' }),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});
+
 export const auditLog = sqliteTable('audit_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   ts: integer('ts', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
@@ -196,7 +208,8 @@ const MIGRATIONS: string[] = [
   // 時系列クエリ (window 読み出し) 用の複合インデックス。 CREATE TABLE の後に冪等発行する。
   `CREATE INDEX IF NOT EXISTS idx_memory_samples_target ON memory_samples (target_kind, target_key, sampled_at)`,
   `CREATE TABLE IF NOT EXISTS launch_profile (id INTEGER PRIMARY KEY, configured INTEGER NOT NULL DEFAULT 0, auto_launch INTEGER NOT NULL DEFAULT 1, selection TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL)`,
-  `INSERT OR IGNORE INTO launch_profile (id, configured, auto_launch, selection, updated_at) VALUES (1, 0, 1, '[]', unixepoch() * 1000)`
+  `INSERT OR IGNORE INTO launch_profile (id, configured, auto_launch, selection, updated_at) VALUES (1, 0, 1, '[]', unixepoch() * 1000)`,
+  `CREATE TABLE IF NOT EXISTS service_prefs (code TEXT PRIMARY KEY, uses_corpus INTEGER, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`
 ];
 
 export function applyMigrations(db: Database.Database): void {

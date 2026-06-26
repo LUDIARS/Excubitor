@@ -102,7 +102,12 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
 
   let cmd: string;
   let args: string[];
-  if (svc.runtime === 'app') {
+  // 起動方式の解決。 runtime=node/dev-process-md で start_script があれば最優先で使う
+  // (= 既存 start-<service>.bat の pull/build/dev 一式をそのまま起動)。
+  if (svc.runtime !== 'app' && svc.start_script) {
+    cmd = svc.start_script;
+    args = [];
+  } else if (svc.runtime === 'app') {
     // ローカルアプリ: exec (実行ファイル) を直接起動。 cwd は任意 (exec の dir 既定)。
     if (!svc.exec) throw new Error(`service ${svc.code} has no exec`);
     cmd = svc.exec;
@@ -130,10 +135,17 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   // 親 (Excubitor) が落ちても write 先が生存するため EPIPE で子が即死しない。
   // ライブログ/エラー検知は process-file がこのファイルを tail して log bus に publish する。
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
+  // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
+  const resolvedCwd =
+    svc.cwd ??
+    (svc.runtime === 'app' && svc.exec
+      ? dirname(svc.exec)
+      : svc.start_script
+        ? dirname(svc.start_script)
+        : undefined);
   const child = spawn(cmd, args, {
-    // app は exec の dir を既定 cwd にする (省略時)。 サービスは catalog の cwd。
-    cwd: svc.cwd ?? (svc.runtime === 'app' && svc.exec ? dirname(svc.exec) : undefined),
-    // node/dev-process-md は npm 等の解決のため shell 経由。
+    cwd: resolvedCwd,
+    // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
     // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
     shell: svc.runtime !== 'app',
     env: { ...process.env, ...(opts.env ?? {}) },
@@ -141,6 +153,9 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     // detached: Excubitor 自身が再起動/停止してもサービスを道連れにしない
     // (= 監視コアの状態がサービスに影響しない)。 boot 時に pid で再採用する。
     detached: true,
+    // #req1: Windows でコンソールウィンドウを出さずに起動する (バックグラウンド常駐)。
+    // detached + shell の cmd.exe 窓 / アプリ窓を SW_HIDE で抑止する。
+    windowsHide: true,
   });
   // 親 (Excubitor) の event loop を子に縛られないよう unref。
   child.unref();

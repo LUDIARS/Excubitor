@@ -118,7 +118,7 @@ code {
 /* ─────────────── Dashboard ─────────────── */
 .projects {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
   gap: 16px;
 }
 
@@ -179,6 +179,71 @@ code {
 .dirty-flag { color: var(--warn); }
 
 .empty-state { color: var(--fg-muted); text-align: center; padding: 40px 20px; }
+
+.warn-banner {
+  background: var(--warn);
+  color: #1a1300;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+/* ─────────────── 拡大サービスカード (req6) ─────────────── */
+.component-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--unknown);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.component-card.running { border-left-color: var(--ok); }
+.component-card.stopped,
+.component-card.crashed { border-left-color: var(--err); }
+.component-card.pending { border-left-color: var(--warn); }
+
+.cc-head { display: flex; align-items: center; gap: 8px; }
+.cc-name { font-weight: 600; font-size: 14px; }
+.cc-code { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }
+.cc-spacer { flex: 1; }
+.cc-port { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+.cc-port.conflict { color: var(--err); font-weight: 700; }
+
+.cc-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
+.state-badge {
+  font-size: 10px; padding: 1px 7px; border-radius: 10px;
+  text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+  background: var(--border); color: var(--fg-muted);
+}
+.state-badge.running { background: rgba(46,160,67,0.18); color: var(--ok); }
+.state-badge.stopped, .state-badge.crashed { background: rgba(218,54,51,0.18); color: var(--err); }
+.state-badge.pending { background: rgba(210,153,34,0.18); color: var(--warn); }
+.tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: var(--border); color: var(--fg-muted); font-family: var(--mono);
+}
+.tag.tier { text-transform: uppercase; letter-spacing: 0.03em; }
+.tag.bat { background: rgba(88,166,255,0.18); color: #58a6ff; }
+.tag.vg { background: rgba(163,113,247,0.18); color: #a371f7; }
+.tag.conflict { background: rgba(218,54,51,0.2); color: var(--err); }
+
+.cc-git { margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
+.cc-git code { font-family: var(--mono); }
+.cc-seen { color: var(--fg-muted); }
+
+.cc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.cc-actions button { padding: 3px 10px; font-size: 11px; }
+.corpus-toggle { opacity: 0.7; }
+.corpus-toggle.on { background: rgba(88,166,255,0.2); color: #58a6ff; opacity: 1; border-color: #58a6ff; }
+.link-btn { background: transparent; border: none; color: var(--fg-muted); padding: 3px 6px; cursor: pointer; }
+.link-btn:hover { color: var(--fg); }
+
+.cc-commits { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.commit-row { display: flex; gap: 8px; font-size: 11px; padding: 2px 0; align-items: baseline; }
+.commit-hash { font-family: var(--mono); color: #58a6ff; flex-shrink: 0; }
+.commit-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-rel { color: var(--fg-muted); flex-shrink: 0; }
+.muted { color: var(--fg-muted); font-size: 11px; }
 
 /* ─────────────── Errors ─────────────── */
 .toolbar {

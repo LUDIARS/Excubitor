@@ -27,6 +27,47 @@ export interface Component {
   has_vestigium?: boolean;
   log_path?: string | null;
   autostart?: boolean;
+  /** 起動スクリプト (start-*.bat) のパス (あれば)。 */
+  start_script?: string | null;
+  /** Corpus を利用するか (実効値)。 */
+  uses_corpus?: boolean;
+  tier?: string;
+}
+
+// ─────────────── Commits (最近の更新内容) ───────────────
+export interface CommitInfo {
+  hash: string;
+  subject: string;
+  author: string;
+  date: string;
+  relative: string;
+}
+
+// ─────────────── Ports (ポート衝突検知) ───────────────
+export interface PortListener {
+  port: number;
+  pids: number[];
+  processNames: string[];
+}
+export interface DeclaredConflict {
+  port: number;
+  codes: string[];
+}
+export interface ServicePortStatus {
+  code: string;
+  name: string;
+  port: number;
+  state: string;
+  listening: boolean;
+  pids: number[];
+  processNames: string[];
+  conflict: boolean;
+}
+export interface PortReport {
+  listeners: PortListener[];
+  declaredConflicts: DeclaredConflict[];
+  services: ServicePortStatus[];
+  hasConflict: boolean;
 }
 
 // ─────────────── Updates (アップデート確認/配信) ───────────────
@@ -453,5 +494,40 @@ export function subscribeLogs(
     }
   });
   return () => es.close();
+}
+
+/** 全サービス横断のライブログを購読する (codes 省略で全件)。 行に code が付く。 */
+export function subscribeAllLogs(
+  onLine: (line: { code: string; channel: string; ts: string; line: string }) => void,
+  codes?: string[],
+): () => void {
+  const q = codes && codes.length > 0 ? `?codes=${encodeURIComponent(codes.join(','))}` : '';
+  const es = new EventSource(`/api/v1/logs${q}`);
+  es.addEventListener('log', (e: MessageEvent) => {
+    try {
+      onLine(JSON.parse(e.data) as { code: string; channel: string; ts: string; line: string });
+    } catch {
+      /* ignore */
+    }
+  });
+  return () => es.close();
+}
+
+// ─── commits / ports / corpus-pref ───
+export function fetchCommits(code: string, limit = 5): Promise<CommitInfo[]> {
+  return getJSON<{ commits: CommitInfo[] }>(
+    `/api/v1/services/${encodeURIComponent(code)}/commits?limit=${limit}`,
+  ).then((d) => d.commits);
+}
+
+export function fetchPorts(): Promise<PortReport> {
+  return getJSON<PortReport>('/api/v1/ports');
+}
+
+export function setCorpusPref(code: string, usesCorpus: boolean | null) {
+  return putJSON<{ ok: boolean; code: string; uses_corpus: boolean | null }>(
+    `/api/v1/services/${encodeURIComponent(code)}/corpus-pref`,
+    { uses_corpus: usesCorpus },
+  );
 }
 

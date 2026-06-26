@@ -12,11 +12,12 @@ import { existsSync } from 'node:fs';
 import type { Service } from '../catalog/loader.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap } from '../secrets/infisical.js';
 import { resolveServiceInfisical } from '../secrets/config-store.js';
+import { listListeners, type PortListener } from '../scanner/ports.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical';
+  kind: 'cwd' | 'compose_file' | 'infisical' | 'start_script' | 'port';
   status: CheckStatus;
   detail: string;
 }
@@ -71,11 +72,16 @@ async function checkInfisical(svc: Service): Promise<{ check: PreflightCheck; in
 function checkPaths(svc: Service): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
   if (svc.runtime === 'node' || svc.runtime === 'dev-process-md') {
-    if (!svc.cwd) {
+    if (svc.start_script && !existsSync(svc.start_script)) {
+      checks.push({ kind: 'start_script', status: 'fail', detail: `start_script が存在しない: ${svc.start_script}` });
+    } else if (svc.start_script) {
+      checks.push({ kind: 'start_script', status: 'ok', detail: svc.start_script });
+    }
+    if (!svc.cwd && !svc.start_script) {
       checks.push({ kind: 'cwd', status: 'fail', detail: 'cwd が未設定' });
-    } else if (!existsSync(svc.cwd)) {
+    } else if (svc.cwd && !existsSync(svc.cwd)) {
       checks.push({ kind: 'cwd', status: 'fail', detail: `cwd が存在しない: ${svc.cwd}` });
-    } else {
+    } else if (svc.cwd) {
       checks.push({ kind: 'cwd', status: 'ok', detail: svc.cwd });
     }
   }
@@ -91,6 +97,19 @@ function checkPaths(svc: Service): PreflightCheck[] {
   return checks;
 }
 
+/** 宣言 port が既に LISTEN されているか (起動済み or foreign 占有) を warn で知らせる。 */
+function checkPort(svc: Service, listeners: PortListener[]): PreflightCheck | null {
+  if (typeof svc.port !== 'number') return null;
+  const l = listeners.find((x) => x.port === svc.port);
+  if (!l) return { kind: 'port', status: 'ok', detail: `:${svc.port} 空き` };
+  const who = l.processNames.length > 0 ? l.processNames.join(',') : `pid ${l.pids.join(',')}`;
+  return {
+    kind: 'port',
+    status: 'warn',
+    detail: `:${svc.port} は既に使用中 (${who}) — 起動済みか別プロセスが占有`,
+  };
+}
+
 /** 選択された service を preflight する。 */
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
@@ -98,11 +117,16 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
   const needsIdentity = targets.some((s) => s.infisical?.inject);
   const identityPresent = readIdentity() !== null;
 
+  // port 占有は OS 呼び出し 1 回で全 listener を取得して使い回す。
+  const listeners = await listListeners();
+
   const result: ServicePreflight[] = [];
   for (const svc of targets) {
     const checks = checkPaths(svc);
     const { check: infCheck, injected } = await checkInfisical(svc);
     checks.push(infCheck);
+    const portCheck = checkPort(svc, listeners);
+    if (portCheck) checks.push(portCheck);
     result.push({
       code: svc.code,
       name: svc.name,

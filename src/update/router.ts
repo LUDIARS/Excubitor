@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Catalog } from '../catalog/loader.js';
-import { checkAllUpdates, checkUpdate } from './checker.js';
+import { checkAllUpdates, checkUpdate, recentCommits } from './checker.js';
 import { applyUpdate } from './apply.js';
 
 const ApplyBodySchema = z.object({
@@ -24,6 +24,17 @@ export function buildUpdateRouter(getCatalog: () => Catalog): Hono {
     const fetch = c.req.query('fetch') === '1';
     const updates = await checkAllUpdates(getCatalog(), fetch);
     return c.json({ updates, fetched: fetch });
+  });
+
+  // カード「最近の更新内容」用: サービスリポの直近コミット。
+  app.get('/api/v1/services/:code/commits', async (c) => {
+    const code = c.req.param('code');
+    const svc = getCatalog().services.find((s) => s.code === code);
+    if (!svc) return c.json({ error: 'not_found' }, 404);
+    const limitRaw = Number(c.req.query('limit') ?? 5);
+    const limit = Math.max(1, Math.min(50, isFinite(limitRaw) ? limitRaw : 5));
+    const commits = await recentCommits(svc, limit);
+    return c.json({ code, commits });
   });
 
   app.get('/api/v1/services/:code/update', async (c) => {
