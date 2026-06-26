@@ -416,6 +416,13 @@ services:
       type: http
       url: http://localhost:8084/health
       interval_sec: 30
+    # secret-agent が tirocinium サービスの secret を解決するための Infisical マッピング。
+    # 値の実体は Infisical (infisical.vtn-game.com) の本プロジェクトに置く。 dev は
+    # claude CLI バックエンド (TIROCINIUM_LLM_BACKEND=cli) で API キー不要。
+    infisical:
+      project_id: 798d69f4-18a1-4a8a-8e53-4e663748caa6
+      environment: dev
+      inject: true
     provides:
       TIROCINIUM_URL: http://${host}:${port}
 
