@@ -84,6 +84,48 @@ export async function checkUpdate(svc: Service, fetch = false): Promise<UpdateSt
   return { code: svc.code, repoDir, branch, behind, ahead, dirty, available: behind > 0, note, fetched };
 }
 
+export interface CommitInfo {
+  hash: string;
+  subject: string;
+  author: string;
+  /** ISO8601 (commit date)。 */
+  date: string;
+  /** 相対表現 (例 "2 hours ago")。 */
+  relative: string;
+}
+
+/**
+ * サービスのリポジトリの最近のコミットを取得する (カード「最近の更新内容」用)。
+ * `git log` を機械可読フォーマットで読む。 取得不能 (no_repo 等) は空配列。
+ */
+export async function recentCommits(svc: Service, limit = 5): Promise<CommitInfo[]> {
+  const repoDir = repoDirOf(svc);
+  if (!repoDir || !existsSync(repoDir) || !existsSync(`${repoDir}/.git`)) return [];
+  // 区切りは制御文字 (US=\x1f 行内, RS=\x1e 行間) でメッセージ内の改行/記号と衝突させない。
+  const fmt = '%h\x1f%s\x1f%an\x1f%cI\x1f%cr\x1e';
+  const out = await safeExec(
+    'git',
+    ['log', `-n`, String(Math.max(1, Math.min(50, limit))), `--pretty=format:${fmt}`],
+    repoDir,
+  );
+  if (!out) return [];
+  const commits: CommitInfo[] = [];
+  for (const rec of out.split('\x1e')) {
+    const r = rec.replace(/^\s+/, '');
+    if (!r) continue;
+    const [hash, subject, author, date, relative] = r.split('\x1f');
+    if (!hash) continue;
+    commits.push({
+      hash,
+      subject: subject ?? '',
+      author: author ?? '',
+      date: date ?? '',
+      relative: relative ?? '',
+    });
+  }
+  return commits;
+}
+
 /** catalog 全サービスを並列 (上限あり) で確認する。 repoDir 重複は 1 回に集約。 */
 export async function checkAllUpdates(catalog: Catalog, fetch = false): Promise<UpdateStatus[]> {
   // 同一 repoDir を共有する複数サービス (backend/frontend 等) は 1 回だけ確認して使い回す。

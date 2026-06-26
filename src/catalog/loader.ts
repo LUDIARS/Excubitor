@@ -97,6 +97,14 @@ const ServiceSchema = z.object({
   runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md', 'app']),
   cwd: z.string().optional(),
   command: z.string().optional(),
+  /**
+   * 起動スクリプト (.bat / .sh / .cmd) の絶対パス。 設定すると runtime=node/dev-process-md の
+   * `command` より優先してこのスクリプトを spawn する。 既存の start-<service>.bat
+   * (git pull → 関連リポ build → npm run dev) をそのまま Excubitor から「ウィンドウ無し」で
+   * 起動するための口。 cwd 省略時はスクリプトのあるディレクトリで実行する。
+   * 例: start_script: E:/Document/Ars/start-concordia.bat
+   */
+  start_script: z.string().optional(),
   compose_file: z.string().optional(),
   services: z.array(z.string()).optional(),
   /**
@@ -150,6 +158,15 @@ const ServiceSchema = z.object({
   exec_args: z.array(z.string()).optional(),
   /** UI / Corpus 表示用の分類。 起動方式自体には影響しない。 */
   app_kind: z.enum(['tauri', 'electron', 'native', 'cli']).optional(),
+  /**
+   * このサービスが Corpus (大規模 Hub) をフロント/連携基盤として利用するか。
+   * - true  : Corpus 経由でフロントを統合する。 このサービスを起動セットに含めると
+   *           orchestrator が Corpus も自動で起動セットに加える (Corpus を先に立てる)。
+   * - false : Corpus に依存しない単独サービス (自前フロント / バックエンド単独)。
+   * catalog がデフォルト値。 UI から service_prefs (DB) で上書きできる
+   * (= 「Corpus を使うケース / 使わないケースを設定できる」 の実体)。 省略時は false。
+   */
+  uses_corpus: z.boolean().optional(),
   /**
    * runtime=app の更新適用 (update apply) で git ff の後に走らせるビルドコマンド。
    * node の `npm install` 相当。 例: 'cargo build --release' / 'npm run build'。

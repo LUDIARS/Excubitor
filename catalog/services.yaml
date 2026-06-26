@@ -308,6 +308,7 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Bibliotheca
     command: npm run dev
+    start_script: E:/Document/Ars/start-bibliotheca.bat
     autostart: false
     health:
       type: tcp
@@ -325,6 +326,7 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Quaestor
     command: npm run dev
+    start_script: E:/Document/Ars/start-quaestor.bat
     autostart: false
     health:
       type: tcp
@@ -393,6 +395,8 @@ services:
     runtime: node
     cwd: E:/Document/Ars/VantanHub
     command: npm run dev
+    # 学校生活 hub はフロントを Corpus 経由で統合する → 起動セットに含めると Corpus も自動起動。
+    uses_corpus: true
     autostart: false
     health:
       type: tcp
@@ -411,6 +415,8 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Tirocinium
     command: npm run dev:server
+    # start-tirocinium.bat は server(8084)+desktop(5178) を 1 プロセスツリーで起動 + port 掃除。
+    start_script: E:/Document/Ars/start-tirocinium.bat
     autostart: false
     health:
       type: http
@@ -432,6 +438,9 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Discutere
     command: npm run dev:server
+    # start-discutere.bat を使う。 BACKEND_PORT=3110 は env: で spawn env に注入され、
+    # bat → npm → node が継承するので bat 自身が 3100 を書いていても 3110 で上がる。
+    start_script: E:/Document/Ars/start-discutere.bat
     autostart: false
     env:
       BACKEND_PORT: "3110"
@@ -454,6 +463,8 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Memoria/server
     command: npm run dev
+    # 既存 start-memoria.bat (cd Memoria/server → npm run dev) をウィンドウ無しで起動。
+    start_script: E:/Document/Ars/start-memoria.bat
     autostart: false
     health:
       type: http
@@ -476,6 +487,9 @@ services:
     runtime: node
     cwd: E:/Document/Ars/Concordia
     command: npm run dev
+    # 既存の start-concordia.bat (Concordia/Lictor/Vestigium を pull → Lictor build → npm run dev)
+    # をそのまま「ウィンドウ無し」で起動する。 単純な npm run dev では関連リポ同期/ビルドが漏れる。
+    start_script: E:/Document/Ars/start-concordia.bat
     autostart: false
     # backend は /health (JSON) を持つので tcp probe ではなく http health で死活判定する。
     # root (/) は build 済み web UI (web/dist) を配信するため、 開いても 404 にならない。

@@ -48,6 +48,7 @@ import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
+import { buildPortsRouter } from './scanner/ports-router.js';
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
@@ -167,8 +168,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // リリースビルド (/api/v1/releases — 自己完結ランナブル配布物の組み立て)
   app.route('/', buildReleaseRouter(() => currentCatalog));
 
-  // ライブログ SSE (/api/v1/services/:code/logs)
+  // ライブログ SSE (/api/v1/services/:code/logs, /api/v1/logs[/recent])
   app.route('/', buildLogStreamRouter());
+
+  // ポート衝突検知 (/api/v1/ports)
+  app.route('/', buildPortsRouter(() => currentCatalog!));
 
   // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
   app.route('/', buildMemoryRouter(() => currentCatalog!));
