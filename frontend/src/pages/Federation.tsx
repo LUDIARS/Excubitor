@@ -2,19 +2,23 @@ import { useEffect, useState } from 'react';
 import {
   fetchPeers,
   fetchFederation,
+  fetchSelfNode,
   addPeer,
   deletePeer,
   testPeer,
   updatePeer,
   remoteControl,
+  remoteUpdate,
   type PeerView,
   type FederationView,
   type FederationNode,
+  type SelfNode,
 } from '../lib/api';
 
 export default function Federation() {
   const [peers, setPeers] = useState<PeerView[]>([]);
   const [view, setView] = useState<FederationView | null>(null);
+  const [self, setSelf] = useState<SelfNode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,6 +40,7 @@ export default function Federation() {
 
   useEffect(() => {
     void reload();
+    void fetchSelfNode().then(setSelf).catch(() => {});
     const id = setInterval(() => void fetchFederation().then(setView).catch(() => {}), 10000);
     return () => clearInterval(id);
   }, []);
@@ -89,6 +94,8 @@ export default function Federation() {
   return (
     <div className="federation">
       {error && <div className="error-banner">エラー: {error}</div>}
+
+      <SelfNodePanel self={self} />
 
       <h2 className="mem-section-title">他拠点ピア</h2>
       <div className="peer-add foundation-form">
@@ -144,6 +151,39 @@ export default function Federation() {
   );
 }
 
+/** 本ノードの federation 名 + agent token。 相手ノードに貼ってピア登録するための導線。 */
+function SelfNodePanel({ self }: { self: SelfNode | null }) {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!self) return null;
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(self.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setRevealed(true); // クリップボード不可なら手動コピーできるよう表示する
+    }
+  };
+
+  return (
+    <section className="self-node foundation-form">
+      <h2 className="mem-section-title">このノード</h2>
+      <div className="self-node-row">
+        <span className="self-node-name">{self.node}</span>
+        <code className="self-token mono">{revealed ? self.token : `…${self.token.slice(-4)}`}</code>
+        <button onClick={() => setRevealed((v) => !v)}>{revealed ? '隠す' : '表示'}</button>
+        <button onClick={() => void onCopy()}>{copied ? 'コピー済' : 'token をコピー'}</button>
+      </div>
+      <p className="self-node-hint muted">
+        この token を相手ノードの「他拠点ピア」登録に貼ると、 相手から本ノードへ接続できます。
+      </p>
+    </section>
+  );
+}
+
 function NodeCard({ node, onControl }: { node: FederationNode; onControl?: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const s = node.summary;
@@ -154,6 +194,18 @@ function NodeCard({ node, onControl }: { node: FederationNode; onControl?: () =>
     setBusy(true);
     try {
       await remoteControl(node.peer_id, code, action);
+      if (onControl) await onControl();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doPull = async (code: string) => {
+    if (!node.peer_id) return;
+    setBusy(true);
+    try {
+      const res = await remoteUpdate(node.peer_id, code);
+      if (!res.ok) alert(`更新失敗 (${code}): ${res.error ?? 'unknown'}`);
       if (onControl) await onControl();
     } finally {
       setBusy(false);
@@ -185,6 +237,7 @@ function NodeCard({ node, onControl }: { node: FederationNode; onControl?: () =>
             <span className="svc-branch mono">{svc.git_branch ?? ''}</span>
             {isRemote && node.ok && (
               <span className="svc-actions">
+                <button disabled={busy} onClick={() => void doPull(svc.code)} title="git pull (更新)">更新</button>
                 <button disabled={busy} onClick={() => void doControl(svc.code, 'restart')}>再起動</button>
                 <button disabled={busy} onClick={() => void doControl(svc.code, 'start')}>起動</button>
                 <button disabled={busy} onClick={() => void doControl(svc.code, 'stop')}>停止</button>
