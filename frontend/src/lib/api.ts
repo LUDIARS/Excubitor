@@ -563,6 +563,8 @@ export interface PeerView {
   name: string;
   base_url: string;
   token_hint: string;
+  cf_access_id: string | null;
+  cf_secret_hint: string | null;
   enabled: boolean;
   last_ok_at: number | null;
   last_error: string | null;
@@ -617,11 +619,20 @@ export function fetchPeers(): Promise<PeerView[]> {
   return getJSON<{ peers: PeerView[] }>('/api/v1/peers').then((d) => d.peers);
 }
 
-export function addPeer(input: { name: string; base_url: string; token: string }) {
+export function addPeer(input: {
+  name: string;
+  base_url: string;
+  token: string;
+  cf_access_id?: string;
+  cf_access_secret?: string;
+}) {
   return postJSON<{ ok: boolean; peer: PeerView }>('/api/v1/peers', input);
 }
 
-export function updatePeer(id: string, patch: { name?: string; base_url?: string; token?: string; enabled?: boolean }) {
+export function updatePeer(
+  id: string,
+  patch: { name?: string; base_url?: string; token?: string; cf_access_id?: string; cf_access_secret?: string; enabled?: boolean },
+) {
   return patchJSON<{ ok: boolean; peer: PeerView }>(`/api/v1/peers/${encodeURIComponent(id)}`, patch);
 }
 

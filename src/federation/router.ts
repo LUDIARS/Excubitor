@@ -36,6 +36,8 @@ const CreatePeerSchema = z.object({
   name: z.string().min(1),
   base_url: z.string().url(),
   token: z.string().min(1),
+  cf_access_id: z.string().optional(),
+  cf_access_secret: z.string().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -43,6 +45,9 @@ const UpdatePeerSchema = z.object({
   name: z.string().min(1).optional(),
   base_url: z.string().url().optional(),
   token: z.string().min(1).optional(),
+  // 空文字は「クリア」を許可 (CF Access を外す)。
+  cf_access_id: z.string().optional(),
+  cf_access_secret: z.string().optional(),
   enabled: z.boolean().optional(),
 });
 

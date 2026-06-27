@@ -26,6 +26,8 @@ export default function Federation() {
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [token, setToken] = useState('');
+  const [cfId, setCfId] = useState('');
+  const [cfSecret, setCfSecret] = useState('');
 
   const reload = async () => {
     try {
@@ -49,10 +51,17 @@ export default function Federation() {
     if (!name || !baseUrl || !token) return;
     setBusy(true);
     try {
-      await addPeer({ name, base_url: baseUrl, token });
+      await addPeer({
+        name,
+        base_url: baseUrl,
+        token,
+        ...(cfId && cfSecret ? { cf_access_id: cfId, cf_access_secret: cfSecret } : {}),
+      });
       setName('');
       setBaseUrl('');
       setToken('');
+      setCfId('');
+      setCfSecret('');
       await reload();
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -102,10 +111,15 @@ export default function Federation() {
         <input placeholder="拠点名 (例: 自宅PC)" value={name} onChange={(e) => setName(e.target.value)} />
         <input placeholder="base_url (例: https://host:17332)" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
         <input placeholder="agent token" value={token} onChange={(e) => setToken(e.target.value)} type="password" />
+        <input placeholder="CF-Access Client Id (任意)" value={cfId} onChange={(e) => setCfId(e.target.value)} />
+        <input placeholder="CF-Access Client Secret (任意)" value={cfSecret} onChange={(e) => setCfSecret(e.target.value)} type="password" />
         <button disabled={busy || !name || !baseUrl || !token} onClick={() => void onAdd()}>
           追加
         </button>
       </div>
+      <p className="muted">
+        相手ノードが Cloudflare Access の後ろにある場合のみ CF-Access の Service Token を入力 (両方揃えば送信)。 token / secret は暗号化保存。
+      </p>
 
       {peers.length === 0 ? (
         <div className="empty-state">ピア未登録。 相手 Excubitor の base_url と agent token を登録すると集約します。</div>
@@ -121,7 +135,7 @@ export default function Federation() {
               <tr key={p.id} className={p.enabled ? '' : 'disabled'}>
                 <td>{p.name}</td>
                 <td className="mono">{p.base_url}</td>
-                <td className="mono">{p.token_hint}</td>
+                <td className="mono">{p.token_hint}{p.cf_access_id ? ' · CF✓' : ''}</td>
                 <td>
                   {p.last_error ? <span className="bad">NG: {p.last_error}</span> : p.last_ok_at ? <span className="ok">OK</span> : '—'}
                 </td>
