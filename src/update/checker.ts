@@ -126,6 +126,72 @@ export async function recentCommits(svc: Service, limit = 5): Promise<CommitInfo
   return commits;
 }
 
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+  /** リモート追跡ブランチか (refs/remotes/origin/...)。 */
+  remote: boolean;
+}
+
+export interface BranchStatus {
+  code: string;
+  repoDir: string | null;
+  current: string | null;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  /** ローカル + リモート (origin) のブランチ一覧。 */
+  branches: BranchInfo[];
+  note: string | null;
+}
+
+/** `git branch` の機械可読出力をパースする (pure)。 行頭 '*' が current。 */
+export function parseBranchList(localRaw: string, remoteRaw: string, current: string | null): BranchInfo[] {
+  const out: BranchInfo[] = [];
+  for (const line of localRaw.split(/\r?\n/)) {
+    const name = line.replace(/^\*?\s+/, '').trim();
+    if (!name || name.startsWith('(')) continue; // detached HEAD 行 "(HEAD detached...)" は除外
+    out.push({ name, current: name === current, remote: false });
+  }
+  for (const line of remoteRaw.split(/\r?\n/)) {
+    const name = line.trim();
+    if (!name || name.includes('->')) continue; // "origin/HEAD -> origin/main" は除外
+    out.push({ name, current: false, remote: true });
+  }
+  return out;
+}
+
+/**
+ * 1 サービスのブランチ状況 (現在ブランチ / ローカル+リモート一覧 / ahead-behind / dirty)。
+ * fetch はしない (最新の remote 反映が要るときは先に update の fetch を回す)。
+ */
+export async function branchStatus(svc: Service): Promise<BranchStatus> {
+  const repoDir = repoDirOf(svc);
+  const base: BranchStatus = {
+    code: svc.code, repoDir, current: null, dirty: false, ahead: 0, behind: 0, branches: [], note: null,
+  };
+  if (!repoDir) return { ...base, note: 'no_repo' };
+  if (!existsSync(repoDir)) return { ...base, note: 'dir_missing' };
+  if (!existsSync(`${repoDir}/.git`)) return { ...base, note: 'not_git' };
+
+  const status = await checkUpdate(svc, false);
+  const [localRaw, remoteRaw] = await Promise.all([
+    safeExec('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], repoDir),
+    safeExec('git', ['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'], repoDir),
+  ]);
+  const branches = parseBranchList(localRaw ?? '', remoteRaw ?? '', status.branch);
+  return {
+    code: svc.code,
+    repoDir,
+    current: status.branch,
+    dirty: status.dirty,
+    ahead: status.ahead,
+    behind: status.behind,
+    branches,
+    note: status.note,
+  };
+}
+
 /** catalog 全サービスを並列 (上限あり) で確認する。 repoDir 重複は 1 回に集約。 */
 export async function checkAllUpdates(catalog: Catalog, fetch = false): Promise<UpdateStatus[]> {
   // 同一 repoDir を共有する複数サービス (backend/frontend 等) は 1 回だけ確認して使い回す。

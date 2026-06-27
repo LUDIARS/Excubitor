@@ -52,6 +52,7 @@ import { buildPortsRouter } from './scanner/ports-router.js';
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
+import { buildFederationRouter } from './federation/router.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -176,6 +177,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
   app.route('/', buildMemoryRouter(() => currentCatalog!));
+
+  // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作)
+  app.route('/', buildFederationRouter(() => currentCatalog!));
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get('/api/v1/system', (c) =>

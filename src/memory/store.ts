@@ -22,12 +22,12 @@ export function insertSamples(samples: MemorySample[]): void {
         INSERT INTO memory_samples (
           target_kind, target_key, service_instance_id, source, sampled_at,
           rss_bytes, heap_used_bytes, heap_total_bytes, external_bytes, array_buffers_bytes,
-          pid, detail
+          cpu_pct, pid, detail
         ) VALUES (
           ${s.targetKind}, ${s.targetKey}, ${s.serviceInstanceId}, ${s.source}, ${now},
           ${s.rssBytes}, ${s.heapUsedBytes ?? null}, ${s.heapTotalBytes ?? null},
           ${s.externalBytes ?? null}, ${s.arrayBuffersBytes ?? null},
-          ${s.pid ?? null}, ${s.detail ? JSON.stringify(s.detail) : null}
+          ${s.cpuPct ?? null}, ${s.pid ?? null}, ${s.detail ? JSON.stringify(s.detail) : null}
         )
       `);
     }
@@ -47,6 +47,7 @@ export interface SeriesRow {
   heap_total: number | null;
   external: number | null;
   array_buffers: number | null;
+  cpu: number | null;
 }
 
 /**
@@ -62,7 +63,8 @@ export function querySeries(
   const rows = source
     ? db().all(sql`
         SELECT sampled_at AS t, rss_bytes AS rss, heap_used_bytes AS heap_used,
-               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers
+               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers,
+               cpu_pct AS cpu
         FROM memory_samples
         WHERE target_kind = ${targetKind} AND target_key = ${targetKey}
           AND source = ${source} AND sampled_at >= ${sinceMs}
@@ -70,7 +72,8 @@ export function querySeries(
       `)
     : db().all(sql`
         SELECT sampled_at AS t, rss_bytes AS rss, heap_used_bytes AS heap_used,
-               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers
+               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers,
+               cpu_pct AS cpu
         FROM memory_samples
         WHERE target_kind = ${targetKind} AND target_key = ${targetKey}
           AND sampled_at >= ${sinceMs}
@@ -99,6 +102,7 @@ export interface LatestTarget {
   heap_total_bytes: number | null;
   external_bytes: number | null;
   array_buffers_bytes: number | null;
+  cpu_pct: number | null;
   pid: number | null;
   detail: string | null;
 }
@@ -111,7 +115,7 @@ export function latestPerTarget(): LatestTarget[] {
   const rows = db().all(sql`
     SELECT ms.target_kind, ms.target_key, ms.service_instance_id, ms.source, ms.sampled_at,
            ms.rss_bytes, ms.heap_used_bytes, ms.heap_total_bytes, ms.external_bytes,
-           ms.array_buffers_bytes, ms.pid, ms.detail
+           ms.array_buffers_bytes, ms.cpu_pct, ms.pid, ms.detail
     FROM memory_samples ms
     JOIN (
       SELECT target_kind, target_key, source, MAX(sampled_at) AS max_at

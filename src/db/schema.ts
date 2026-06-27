@@ -13,7 +13,7 @@
  *   - BIGSERIAL    ↁEinteger PK AUTOINCREMENT
  */
 
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { randomUUID } from 'node:crypto';
 
 export const hosts = sqliteTable('hosts', {
@@ -156,16 +156,18 @@ export const launchProfile = sqliteTable('launch_profile', {
  */
 export const memorySamples = sqliteTable('memory_samples', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  target_kind: text('target_kind').notNull(), // 'service' | 'wsl'
-  target_key: text('target_key').notNull(),   // service code | distro 名 | 'vmmem'
+  target_kind: text('target_kind').notNull(), // 'service' | 'wsl' | 'host'
+  target_key: text('target_key').notNull(),   // service code | distro 名 | 'vmmem' | 'host'
   service_instance_id: text('service_instance_id').references(() => serviceInstances.id),
-  source: text('source').notNull(),           // 'process' | 'docker' | 'metrics' | 'wsl'
+  source: text('source').notNull(),           // 'process' | 'docker' | 'metrics' | 'wsl' | 'host'
   sampled_at: integer('sampled_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
   rss_bytes: integer('rss_bytes'),
   heap_used_bytes: integer('heap_used_bytes'),
   heap_total_bytes: integer('heap_total_bytes'),
   external_bytes: integer('external_bytes'),
   array_buffers_bytes: integer('array_buffers_bytes'),
+  /** CPU 使用率 (%)。 service=プロセスツリーの全マシン比、 host=全体、 docker=docker stats の CPUPerc。 */
+  cpu_pct: real('cpu_pct'),
   pid: integer('pid'),
   detail: text('detail', { mode: 'json' }),
 });
@@ -179,6 +181,26 @@ export const memorySamples = sqliteTable('memory_samples', {
 export const servicePrefs = sqliteTable('service_prefs', {
   code: text('code').primaryKey(),
   uses_corpus: integer('uses_corpus', { mode: 'boolean' }),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});
+
+/**
+ * 他拠点 (リモート) の Excubitor ピア。 federation で接続先と認証トークンを保持する。
+ * - base_url: 相手 Excubitor backend の URL (例 https://host:17332 / Tailscale 経由)。
+ * - token: 相手ノードの agent token (Authorization: Bearer に載せて federation API を叩く)。
+ * - enabled: 集約/操作の対象にするか。
+ * - last_ok_at / last_error: 直近の疎通結果 (UI の健全性表示用)。
+ * token は平文保存のため DB ファイル自体を機密扱いにする (loopback + ローカル本人のみ前提)。
+ */
+export const remotePeers = sqliteTable('remote_peers', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  name: text('name').notNull(),
+  base_url: text('base_url').notNull(),
+  token: text('token').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  last_ok_at: integer('last_ok_at', { mode: 'timestamp_ms' }),
+  last_error: text('last_error'),
+  created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
@@ -209,14 +231,33 @@ const MIGRATIONS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_memory_samples_target ON memory_samples (target_kind, target_key, sampled_at)`,
   `CREATE TABLE IF NOT EXISTS launch_profile (id INTEGER PRIMARY KEY, configured INTEGER NOT NULL DEFAULT 0, auto_launch INTEGER NOT NULL DEFAULT 1, selection TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO launch_profile (id, configured, auto_launch, selection, updated_at) VALUES (1, 0, 1, '[]', unixepoch() * 1000)`,
-  `CREATE TABLE IF NOT EXISTS service_prefs (code TEXT PRIMARY KEY, uses_corpus INTEGER, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`
+  `CREATE TABLE IF NOT EXISTS service_prefs (code TEXT PRIMARY KEY, uses_corpus INTEGER, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
+  // federation: 他拠点 Excubitor ピア (base_url + token)。
+  `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`
 ];
+
+/**
+ * 既存 DB へ後付けするカラム (ALTER ADD COLUMN は重複でエラーになるため table_info で冪等化)。
+ * CREATE 群を流した後に発行する (空 DB でも CREATE 済みなので順序問題はない)。
+ */
+const ADD_COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+  // メモリ監視に CPU 使用率 (%) を追加。 既存環境の memory_samples を壊さず拡張する。
+  { table: 'memory_samples', column: 'cpu_pct', ddl: 'cpu_pct REAL' },
+];
+
+function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
 
 export function applyMigrations(db: Database.Database): void {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   const tx = db.transaction(() => {
     for (const stmt of MIGRATIONS) db.exec(stmt);
+    for (const c of ADD_COLUMNS) ensureColumn(db, c.table, c.column, c.ddl);
   });
   tx();
 }
