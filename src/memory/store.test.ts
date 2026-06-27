@@ -80,8 +80,8 @@ describe('insertSamples / querySeries / latestPerTarget', () => {
 
   it('toLeakSamples は rss null を除外', () => {
     const rows = [
-      { t: 1, rss: 100, heap_used: null, heap_total: null, external: null, array_buffers: null },
-      { t: 2, rss: null, heap_used: null, heap_total: null, external: null, array_buffers: null },
+      { t: 1, rss: 100, heap_used: null, heap_total: null, external: null, array_buffers: null, cpu: null },
+      { t: 2, rss: null, heap_used: null, heap_total: null, external: null, array_buffers: null, cpu: null },
     ];
     expect(toLeakSamples(rows)).toEqual([{ t: 1, rss: 100 }]);
   });

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parseWindowsProcList, parsePosixProcList, sumTreeRss, type ProcEntry } from './process-sampler.js';
+import {
+  parseWindowsProcList,
+  parsePosixProcList,
+  parsePosixCpuTime,
+  sumTreeRss,
+  sumTreeCpu,
+  type ProcEntry,
+} from './process-sampler.js';
 
 describe('parseWindowsProcList', () => {
   it('"pid,ppid,ws" CSV を parse', () => {
@@ -58,5 +65,49 @@ describe('sumTreeRss', () => {
     const r = sumTreeRss(cyclic, 2);
     expect(r.rssBytes).toBe(50); // 2 + 3、 cycle で止まる
     expect(r.procCount).toBe(2);
+  });
+});
+
+describe('parseWindowsProcList (CPU 列付き)', () => {
+  it('5 列 "pid,ppid,ws,kernel100ns,user100ns" で cpuMs を算出', () => {
+    // 10,000 (100ns) = 1ms。 kernel=10000 + user=20000 → 3ms。
+    const raw = '100,4,1048576,10000,20000';
+    expect(parseWindowsProcList(raw)).toEqual([{ pid: 100, ppid: 4, rss: 1048576, cpuMs: 3 }]);
+  });
+  it('3 列のみなら cpuMs は付かない (後方互換)', () => {
+    expect(parseWindowsProcList('100,4,1048576')).toEqual([{ pid: 100, ppid: 4, rss: 1048576 }]);
+  });
+});
+
+describe('parsePosixCpuTime', () => {
+  it('MM:SS', () => expect(parsePosixCpuTime('01:30')).toBe(90_000));
+  it('HH:MM:SS', () => expect(parsePosixCpuTime('1:00:00')).toBe(3_600_000));
+  it('DD-HH:MM:SS', () => expect(parsePosixCpuTime('1-00:00:00')).toBe(86_400_000));
+  it('不正は null', () => expect(parsePosixCpuTime('xx')).toBeNull());
+});
+
+describe('parsePosixProcList (TIME 列付き)', () => {
+  it('4 列目を cpuMs に載せる', () => {
+    expect(parsePosixProcList('100 4 1024 00:10')).toEqual([
+      { pid: 100, ppid: 4, rss: 1024 * 1024, cpuMs: 10_000 },
+    ]);
+  });
+});
+
+describe('sumTreeCpu', () => {
+  const procs: ProcEntry[] = [
+    { pid: 100, ppid: 1, rss: 0, cpuMs: 100 },
+    { pid: 200, ppid: 100, rss: 0, cpuMs: 200 },
+    { pid: 300, ppid: 200, rss: 0 }, // cpuMs 無し
+    { pid: 999, ppid: 1, rss: 0, cpuMs: 999 },
+  ];
+  it('部分木の cpuMs を合算 (cpuMs 無しは 0 扱い)', () => {
+    expect(sumTreeCpu(procs, 100)).toBe(300);
+  });
+  it('木に cpuMs が 1 つも無ければ null', () => {
+    expect(sumTreeCpu([{ pid: 1, ppid: 0, rss: 0 }], 1)).toBeNull();
+  });
+  it('存在しない pid は null', () => {
+    expect(sumTreeCpu(procs, 55555)).toBeNull();
   });
 });

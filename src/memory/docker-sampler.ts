@@ -15,8 +15,10 @@ export interface DockerMemStat {
   container: string;
   usedBytes: number | null;
   limitBytes: number | null;
-  /** docker 報告の使用率 (%)、 数値化できなければ null。 */
+  /** docker 報告のメモリ使用率 (%)、 数値化できなければ null。 */
   percent: number | null;
+  /** docker 報告の CPU 使用率 (CPUPerc, %)、 数値化できなければ null。 */
+  cpuPercent: number | null;
 }
 
 /**
@@ -31,12 +33,14 @@ export function parseDockerStats(raw: string): DockerMemStat[] {
       const o = JSON.parse(line) as Record<string, string>;
       const { used, limit } = parseMemUsage(o.MemUsage ?? '');
       const percent = parsePercent(o.MemPerc ?? '');
+      const cpuPercent = parsePercent(o.CPUPerc ?? '');
       stats.push({
         name: (o.Name ?? '').replace(/^\//, '').trim(),
         container: o.Container ?? '',
         usedBytes: used,
         limitBytes: limit,
         percent,
+        cpuPercent,
       });
     } catch {
       // broken line — skip
