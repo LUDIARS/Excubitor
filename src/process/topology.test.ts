@@ -24,6 +24,7 @@ function cat(services: Service[]): Catalog {
       interval_sec: 60,
       retention_hours: 48,
       wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
+      cpu_alert: { enabled: true, threshold_pct: 85, window_min: 15, sustained_ratio: 0.8, min_samples: 8 },
     },
   };
 }
