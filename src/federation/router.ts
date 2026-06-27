@@ -21,7 +21,7 @@ import { sql as drizzleSql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Catalog } from '../catalog/loader.js';
-import { verifyAgentToken } from '../secrets/agent-token.js';
+import { verifyAgentToken, getOrCreateAgentToken } from '../secrets/agent-token.js';
 import { controlService } from '../control/manager.js';
 import { applyUpdate } from '../update/apply.js';
 import { summarizeServices, type ServiceStateRow } from '../hub/router.js';
@@ -149,6 +149,15 @@ export function buildFederationRouter(getCatalog: () => Catalog): Hono {
   });
 
   // ─── ローカル管理面 (peer CRUD) ─────────────────────────────
+
+  // 本ノード自身の identity (federation 名 + agent token)。
+  // ピア登録には相手ノードに「こちらの token」を貼る必要があるため、 UI が
+  // コピー導線を出せるよう raw token を返す。 token は本ノードを操作できる
+  // 機密なので、 これは loopback 管理面 (peer CRUD と同方針) でのみ提供する。
+  app.get('/api/v1/federation/self', (c) =>
+    c.json({ node: localNodeName(), token: getOrCreateAgentToken() }),
+  );
+
   app.get('/api/v1/peers', (c) => c.json({ peers: listPeers().map(toView) }));
 
   app.post('/api/v1/peers', async (c) => {
