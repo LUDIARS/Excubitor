@@ -477,6 +477,27 @@ services:
     memory:
       metrics_url: http://localhost:5180/api/metrics/memory
 
+  - code: anatomia
+    name: Anatomia (建築規約オラクル)
+    tier: personal
+    project_code: anatomia
+    component: backend
+    port: 4200
+    repo: LUDIARS/Anatomia
+    runtime: node
+    cwd: E:/Document/Ars/Anatomia
+    command: node bin/anatomia.mjs web
+    # warm サーバは通常 anatomia hook が必要時に spawn し idle 自動終了する。 Excubitor からは
+    # ログ tail と任意の手動起動のために登録する (autostart はしない)。
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:4200/api/projects
+      interval_sec: 30
+    # Vestigium JSONL ログ (cache hit/miss・supply/verify)。 Excubitor が spawn 時に
+    # VESTIGIUM_LOGS_DIR=E:/Document/Ars/logs を注入し、 Anatomia が <root>/anatomia/ に書く。
+    log_path: E:/Document/Ars/logs/anatomia
+
   - code: concordia
     name: Concordia (AI 協調)
     tier: personal
@@ -491,6 +512,10 @@ services:
     # をそのまま「ウィンドウ無し」で起動する。 単純な npm run dev では関連リポ同期/ビルドが漏れる。
     start_script: E:/Document/Ars/start-concordia.bat
     autostart: false
+    # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
+    # VESTIGIUM_LOGS_DIR=dirname(log_path)=E:/Document/Ars/logs を注入し、 Concordia の Vestigium が
+    # <root>/concordia/ に書く → ここを file-tail する。
+    log_path: E:/Document/Ars/logs/concordia
     # backend は /health (JSON) を持つので tcp probe ではなく http health で死活判定する。
     # root (/) は build 済み web UI (web/dist) を配信するため、 開いても 404 にならない。
     health:
