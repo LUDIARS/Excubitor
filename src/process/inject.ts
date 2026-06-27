@@ -8,6 +8,7 @@
  *
  * (2026-06-04 方針転換: 旧「各サービス自前 fetch」 から Excubitor relay へ戻した)
  */
+import path from 'node:path';
 import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
@@ -17,6 +18,16 @@ import { getTopologyEnv } from './topology.js';
 const logger = createNamedLogger('excubitor.process.inject');
 
 export { hasIdentity };
+
+/**
+ * Vestigium ログ先を spawn 子に伝える env。 catalog の `log_path` (= `<root>/<code>` 規約) があれば
+ * その親 `<root>` を `VESTIGIUM_LOGS_DIR` として渡す。 サービス側 Vestigium は `<root>/<code>/` に書き、
+ * Excubitor の file-tail (log_path) と一致する。 log_path 未設定なら空 — サービスは自分の cwd/logs を
+ * 既定にする (= 「ログ dir は Excubitor からもらう、 無ければ cwd/logs」)。 純関数 (テスト可能)。
+ */
+export function vestigiumEnvFor(svc: Pick<Service, 'log_path'>): Record<string, string> {
+  return svc.log_path ? { VESTIGIUM_LOGS_DIR: path.dirname(svc.log_path) } : {};
+}
 
 /**
  * spawn する子プロセスに渡す env を解決する。
@@ -29,9 +40,11 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const topology = getTopologyEnv();
   // サービス固有の静的 env (catalog の env:)。 topology より優先 (port 上書き等)。
   const staticEnv = svc.env ?? {};
+  // Vestigium ログ先 (最低優先 — catalog env: / secret で上書き可)。
+  const vestigiumEnv = vestigiumEnvFor(svc);
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  if (!cfg || !cfg.inject) return { ...topology, ...staticEnv };
+  if (!cfg || !cfg.inject) return { ...vestigiumEnv, ...topology, ...staticEnv };
 
   const id = readIdentity();
   if (!id) {
@@ -51,6 +64,6 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  // 優先順位: topology < 静的 env (catalog) < secret。
-  return { ...topology, ...staticEnv, ...env };
+  // 優先順位: vestigium < topology < 静的 env (catalog) < secret。
+  return { ...vestigiumEnv, ...topology, ...staticEnv, ...env };
 }
