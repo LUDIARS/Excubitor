@@ -542,3 +542,20 @@ button.danger { color: var(--err); border-color: rgba(248,113,113,0.4); }
 .svc-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .svc-branch { color: var(--fg-muted); font-family: var(--mono); font-size: 11px; }
 .svc-actions { display: flex; gap: 4px; }
+
+/* このノードの identity (federation token) */
+.self-node { margin-bottom: 20px; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+.self-node-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.self-node-name { font-weight: 700; }
+.self-token { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); }
+.self-node-hint { margin: 8px 0 0; }
+
+/* ブランチ状況 (Monitor) */
+.cc-branch { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }
+.cc-branch-summary code { font-family: var(--mono); }
+.cc-branch-summary .ahead { color: var(--ok); }
+.cc-branch-summary .behind { color: var(--warn); }
+.cc-branch-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.branch-pill { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg-muted); }
+.branch-pill.current { color: var(--accent); border-color: var(--accent); }
+.branch-pill.remote { opacity: 0.7; }

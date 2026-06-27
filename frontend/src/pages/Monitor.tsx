@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Project, Component, ControlAction, CommitInfo, PortReport, ServicePortStatus } from '../lib/api';
-import { fetchProjects, controlService, fetchCommits, fetchPorts, setCorpusPref } from '../lib/api';
+import type { Project, Component, ControlAction, CommitInfo, PortReport, ServicePortStatus, BranchStatus } from '../lib/api';
+import { fetchProjects, controlService, fetchCommits, fetchPorts, setCorpusPref, fetchBranchStatus, applyUpdate } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 
 export default function Monitor() {
@@ -96,9 +96,14 @@ function ComponentCard({
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [showCommits, setShowCommits] = useState(false);
   const [usesCorpus, setUsesCorpus] = useState<boolean>(c.uses_corpus ?? false);
+  const [branch, setBranch] = useState<BranchStatus | null>(null);
+  const [showBranch, setShowBranch] = useState(false);
+  const [branchErr, setBranchErr] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   const isProcess = c.runtime === 'node' || c.runtime === 'dev-process-md' || c.runtime === 'app';
   const isDocker = c.runtime === 'docker-compose' || c.runtime === 'docker';
+  const hasRepo = c.git.branch != null;
 
   useEffect(() => {
     setUsesCorpus(c.uses_corpus ?? false);
@@ -129,6 +134,33 @@ function ComponentCard({
       await setCorpusPref(c.code, next);
     } catch {
       setUsesCorpus(!next); // revert
+    }
+  };
+
+  const loadBranch = async (force = false) => {
+    setShowBranch((v) => (force ? true : !v));
+    if (branch === null || force) {
+      setBranchErr(null);
+      try {
+        setBranch(await fetchBranchStatus(c.code));
+      } catch (e: unknown) {
+        setBranchErr((e as Error).message);
+      }
+    }
+  };
+
+  const update = async () => {
+    if (!window.confirm(`${c.code} を pull (更新) しますか? 起動中なら適用後に再起動します。`)) return;
+    setUpdating(true);
+    try {
+      const res = await applyUpdate(c.code, { install: true, restart: c.state === 'running' });
+      if (!res.ok) {
+        const failed = res.steps.find((s) => !s.ok);
+        alert(`更新失敗 (${c.code}): ${failed ? `${failed.step}: ${failed.detail}` : 'unknown'}`);
+      }
+      await loadBranch(true); // 適用後のブランチ状況へ更新
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -181,6 +213,16 @@ function ComponentCard({
         <button className="link-btn" onClick={() => void loadCommits()}>
           {showCommits ? '▲ 更新履歴' : '▼ 更新履歴'}
         </button>
+        {hasRepo && (
+          <>
+            <button className="link-btn" onClick={() => void loadBranch()}>
+              {showBranch ? '▲ ブランチ' : '▼ ブランチ'}
+            </button>
+            <button onClick={() => void update()} disabled={updating} title="git pull → 任意で install/build → 起動中なら restart">
+              {updating ? '更新中…' : '⇩ 更新(pull)'}
+            </button>
+          </>
+        )}
       </div>
 
       {showCommits && (
@@ -194,6 +236,31 @@ function ComponentCard({
               <span className="commit-rel">{cm.relative}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {showBranch && (
+        <div className="cc-branch">
+          {branchErr && <div className="muted">取得失敗: {branchErr}</div>}
+          {!branchErr && branch === null && <div className="muted">読み込み中…</div>}
+          {branch && (
+            <>
+              <div className="cc-branch-summary">
+                現在 <code>{branch.current ?? '—'}</code>
+                {branch.ahead > 0 && <span className="ahead"> ↑{branch.ahead}</span>}
+                {branch.behind > 0 && <span className="behind"> ↓{branch.behind}</span>}
+                {branch.dirty && <span className="dirty-flag"> (dirty)</span>}
+                {branch.note && <span className="muted"> · {branch.note}</span>}
+              </div>
+              <div className="cc-branch-list">
+                {branch.branches.map((b) => (
+                  <span key={`${b.remote ? 'r' : 'l'}:${b.name}`} className={`branch-pill ${b.current ? 'current' : ''} ${b.remote ? 'remote' : 'local'}`}>
+                    {b.remote ? `origin/${b.name}` : b.name}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

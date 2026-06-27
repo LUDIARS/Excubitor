@@ -647,3 +647,22 @@ export function remoteControl(peerId: string, code: string, action: ControlActio
   );
 }
 
+/** リモートピアの 1 サービスを pull (更新) する (federation プロキシ)。 */
+export function remoteUpdate(peerId: string, code: string, opts: { install?: boolean; restart?: boolean } = {}) {
+  return postJSON<{ ok: boolean; status: number | null; error: string | null; result: unknown }>(
+    `/api/v1/peers/${encodeURIComponent(peerId)}/services/${encodeURIComponent(code)}/update`,
+    opts,
+  );
+}
+
+// ─────────────── このノードの identity (federation token) ───────────────
+export interface SelfNode {
+  node: string;
+  token: string;
+}
+
+/** 本ノードの federation 名 + agent token。 ピアに貼り付けて登録するための導線。 */
+export function fetchSelfNode(): Promise<SelfNode> {
+  return getJSON<SelfNode>('/api/v1/federation/self');
+}
+
