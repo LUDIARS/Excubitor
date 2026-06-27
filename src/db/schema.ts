@@ -190,13 +190,17 @@ export const servicePrefs = sqliteTable('service_prefs', {
  * - token: 相手ノードの agent token (Authorization: Bearer に載せて federation API を叩く)。
  * - enabled: 集約/操作の対象にするか。
  * - last_ok_at / last_error: 直近の疎通結果 (UI の健全性表示用)。
- * token は平文保存のため DB ファイル自体を機密扱いにする (loopback + ローカル本人のみ前提)。
+ * - cf_access_id / cf_access_secret: Cloudflare Access Service Token (任意)。 ピアが CF Access の
+ *   後ろにある場合、 CF-Access-Client-Id / Secret ヘッダで境界を突破する (中で agent token が authz)。
+ * token と cf_access_secret は secret-box で at-rest 暗号化して保存する (config.enc と同じ master 鍵)。
  */
 export const remotePeers = sqliteTable('remote_peers', {
   id: text('id').primaryKey().$defaultFn(() => randomUUID()),
   name: text('name').notNull(),
   base_url: text('base_url').notNull(),
   token: text('token').notNull(),
+  cf_access_id: text('cf_access_id'),
+  cf_access_secret: text('cf_access_secret'),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   last_ok_at: integer('last_ok_at', { mode: 'timestamp_ms' }),
   last_error: text('last_error'),
@@ -243,6 +247,9 @@ const MIGRATIONS: string[] = [
 const ADD_COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   // メモリ監視に CPU 使用率 (%) を追加。 既存環境の memory_samples を壊さず拡張する。
   { table: 'memory_samples', column: 'cpu_pct', ddl: 'cpu_pct REAL' },
+  // federation: Cloudflare Access Service Token (任意)。 既存 remote_peers を壊さず拡張。
+  { table: 'remote_peers', column: 'cf_access_id', ddl: 'cf_access_id TEXT' },
+  { table: 'remote_peers', column: 'cf_access_secret', ddl: 'cf_access_secret TEXT' },
 ];
 
 function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {

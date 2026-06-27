@@ -18,9 +18,10 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { hostname, userInfo, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import { createNamedLogger } from '../shared/logger.js';
 import { encryptJson, decryptJson, isEncryptedBlob, type EncryptedBlob } from './crypto.js';
+import { masterSecret } from './master-key.js';
 
 const logger = createNamedLogger('excubitor.config');
 
@@ -55,13 +56,6 @@ function configPath(): string {
     process.env.XDG_CONFIG_HOME ??
     join(homedir(), '.config');
   return join(base, 'Excubitor', 'config.enc');
-}
-
-/** master secret: env override → マシン束縛値 (hostname + user)。 */
-function masterSecret(): string {
-  const override = process.env.EXCUBITOR_MASTER_KEY;
-  if (override && override.length > 0) return override;
-  return `excubitor:${hostname()}:${userInfo().username}`;
 }
 
 /** 暗号化ファイルを復号して読む。 未存在 / 復号失敗は空 config 扱い。 */
