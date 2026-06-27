@@ -3,6 +3,8 @@
  *
  * ピアの base_url + token を使って相手の federation API (`/api/v1/federation/*`) を叩く。
  * すべて Authorization: Bearer <peer.token> を付ける (相手ノードの agent token と一致する想定)。
+ * ピアが Cloudflare Access の後ろにある場合は CF-Access Service Token ヘッダも付与し、
+ * Access 境界を突破する (origin で agent token が本番 authz)。
  * 失敗 (接続不可 / 認証エラー / タイムアウト) は throw せず {ok:false} を返し、 集約は degrade する。
  */
 
@@ -31,6 +33,9 @@ async function call<T>(
       method,
       headers: {
         authorization: `Bearer ${peer.token}`,
+        ...(peer.cf_access_id && peer.cf_access_secret
+          ? { 'CF-Access-Client-Id': peer.cf_access_id, 'CF-Access-Client-Secret': peer.cf_access_secret }
+          : {}),
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
