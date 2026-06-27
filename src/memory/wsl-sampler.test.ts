@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDistroList, parseMeminfo, parseVmmem } from './wsl-sampler.js';
+import { parseDistroList, parseMeminfo, parseVmmem, parseProcStat, cpuPctFromStat } from './wsl-sampler.js';
 
 describe('parseDistroList', () => {
   it('distro 名を抽出し docker-desktop 系を除外', () => {
@@ -26,6 +26,27 @@ describe('parseMeminfo', () => {
   });
   it('必須キー欠落は null', () => {
     expect(parseMeminfo('MemTotal: 100 kB')).toBeNull();
+  });
+});
+
+describe('parseProcStat / cpuPctFromStat', () => {
+  it('集計 cpu 行から busy/total を算出 (idle+iowait を除外)', () => {
+    // user nice system idle iowait irq softirq steal
+    const raw = 'cpu  100 0 50 800 50 0 0 0\ncpu0 50 0 25 400 25 0 0 0\n';
+    const r = parseProcStat(raw)!;
+    expect(r.total).toBe(100 + 0 + 50 + 800 + 50); // 1000
+    expect(r.busy).toBe(1000 - (800 + 50)); // total - (idle+iowait) = 150
+  });
+  it('cpu 行が無ければ null', () => {
+    expect(parseProcStat('intr 123\nctxt 456')).toBeNull();
+  });
+  it('2 tick の delta から CPU% (busy 増 / total 増)', () => {
+    const prev = { busy: 150, total: 1000 };
+    const curr = { busy: 150 + 90, total: 1000 + 100 }; // 90/100 = 90%
+    expect(cpuPctFromStat(prev, curr)).toBe(90);
+  });
+  it('時間が進んでいない (dTotal<=0) は null', () => {
+    expect(cpuPctFromStat({ busy: 1, total: 10 }, { busy: 1, total: 10 })).toBeNull();
   });
 });
 

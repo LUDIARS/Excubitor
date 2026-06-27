@@ -9,6 +9,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import type { MemorySample } from './types.js';
 import type { LeakSample } from './leak.js';
+import type { CpuSample } from './cpu-alert.js';
 
 /** 1 tick 分のサンプルをまとめて insert。 */
 export function insertSamples(samples: MemorySample[]): void {
@@ -87,6 +88,15 @@ export function toLeakSamples(rows: SeriesRow[]): LeakSample[] {
   const out: LeakSample[] = [];
   for (const r of rows) {
     if (r.rss != null) out.push({ t: r.t, rss: r.rss });
+  }
+  return out;
+}
+
+/** SeriesRow を CPU 判定用 CpuSample へ (cpu が null の行は除外)。 */
+export function toCpuSamples(rows: SeriesRow[]): CpuSample[] {
+  const out: CpuSample[] = [];
+  for (const r of rows) {
+    if (r.cpu != null) out.push({ t: r.t, cpu: r.cpu });
   }
   return out;
 }
