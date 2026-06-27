@@ -57,6 +57,9 @@ const MemoryMonitorServiceSchema = z.object({
   metrics_url: z.string().optional(),
   leak_window_min: z.number().positive().default(60),
   leak_threshold_mb_per_hr: z.number().positive().default(50),
+  /** CPU 高止まりアラートの per-service 上書き (省略時は cpu_alert グローバル値)。 */
+  cpu_threshold_pct: z.number().positive().optional(),
+  cpu_window_min: z.number().positive().optional(),
 });
 
 const ServiceSchema = z.object({
@@ -197,12 +200,26 @@ const WslMonitorSchema = z.object({
   leak_threshold_mb_per_hr: z.number().positive().default(200),
 });
 
+/**
+ * CPU 高止まりアラート設定 (catalog top-level)。 leak (メモリ) とは別軸。
+ * 観測窓内で threshold_pct 以上のサンプルが sustained_ratio を超えたら error_task 起票。
+ * 瞬間スパイクで起票しないよう「継続している割合」で判定する。
+ */
+const CpuAlertSchema = z.object({
+  enabled: z.boolean().default(true),
+  threshold_pct: z.number().positive().default(85),
+  window_min: z.number().positive().default(15),
+  sustained_ratio: z.number().min(0).max(1).default(0.8),
+  min_samples: z.number().positive().default(8),
+});
+
 /** メモリ監視のグローバル設定 (catalog top-level、 省略時は既定値)。 */
 const MemoryGlobalSchema = z.object({
   enabled: z.boolean().default(true),
   interval_sec: z.number().positive().default(60),
   retention_hours: z.number().positive().default(48),
   wsl: WslMonitorSchema.default({}),
+  cpu_alert: CpuAlertSchema.default({}),
 });
 
 const CatalogSchema = z.object({

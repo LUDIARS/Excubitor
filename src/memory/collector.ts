@@ -17,11 +17,13 @@ import { sampleWsl } from './wsl-sampler.js';
 import { sampleHost } from './host-sampler.js';
 import { recordAndComputeCpuPct } from './cpu-rate.js';
 import { detectLeak, type LeakResult } from './leak.js';
+import { detectSustainedCpu, type CpuAlertResult } from './cpu-alert.js';
 import {
   insertSamples,
   pruneSamples,
   querySeries,
   toLeakSamples,
+  toCpuSamples,
   raiseLeakTask,
 } from './store.js';
 import type { MemorySample } from './types.js';
@@ -62,11 +64,12 @@ export interface CollectResult {
   wslSamples: number;
   hostSamples: number;
   leaksRaised: number;
+  cpuAlertsRaised: number;
 }
 
 export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult> {
   const cfg = catalog.memory_monitor;
-  if (!cfg.enabled) return { serviceSamples: 0, wslSamples: 0, hostSamples: 0, leaksRaised: 0 };
+  if (!cfg.enabled) return { serviceSamples: 0, wslSamples: 0, hostSamples: 0, leaksRaised: 0, cpuAlertsRaised: 0 };
 
   const now = Date.now();
   const cpuCount = os.cpus().length;
@@ -168,14 +171,15 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
   // 剪定
   pruneSamples(Date.now() - cfg.retention_hours * 3_600_000);
 
-  // leak 判定
+  // leak 判定 (メモリ) + CPU 高止まり判定
   const leaksRaised = detectAndRaise(catalog, running);
+  const cpuAlertsRaised = detectAndRaiseCpu(catalog, running);
 
   logger.debug(
-    { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised },
+    { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised, cpuAlertsRaised },
     'memory tick complete',
   );
-  return { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised };
+  return { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised, cpuAlertsRaised };
 }
 
 /** 全ターゲットの leak を判定し leaking なら起票。 起票件数を返す。 */
@@ -231,6 +235,67 @@ function detectAndRaise(catalog: Catalog, running: Map<string, RunningInstance>)
   }
 
   return raised;
+}
+
+/**
+ * 全ターゲット (service / host / wsl) の CPU 高止まりを判定し high なら起票。 起票件数を返す。
+ * leak (メモリ) とは別軸・別 dedup プレフィックス (`[cpu-high]`)。
+ */
+function detectAndRaiseCpu(catalog: Catalog, running: Map<string, RunningInstance>): number {
+  const alert = catalog.memory_monitor.cpu_alert;
+  if (!alert.enabled) return 0;
+  let raised = 0;
+  const now = Date.now();
+
+  const run = (label: string, kind: string, key: string, source: string, instanceId: string | null,
+               thresholdPct: number, windowMin: number): void => {
+    const windowMs = windowMin * 60_000;
+    const series = querySeries(kind, key, now - windowMs, source);
+    const result = detectSustainedCpu(toCpuSamples(series), {
+      windowMs,
+      thresholdPct,
+      sustainedRatio: alert.sustained_ratio,
+      minSamples: alert.min_samples,
+    });
+    if (result.verdict === 'high') {
+      const outcome = raiseLeakTask({
+        serviceInstanceId: instanceId,
+        dedupPrefix: `[cpu-high] ${label}`,
+        summary: cpuSummary(label, result, thresholdPct),
+        severity: 'warn',
+      });
+      if (outcome === 'created') raised += 1;
+    }
+  };
+
+  // services (running のみ)
+  for (const svc of catalog.services) {
+    if (svc.memory?.enabled === false) continue;
+    const inst = running.get(svc.code);
+    if (!inst) continue;
+    const thresholdPct = svc.memory?.cpu_threshold_pct ?? alert.threshold_pct;
+    const windowMin = svc.memory?.cpu_window_min ?? alert.window_min;
+    run(svc.code, 'service', svc.code, primarySource(svc), inst.instanceId, thresholdPct, windowMin);
+  }
+
+  // host (マシン全体)
+  run('host', 'host', 'host', 'host', null, alert.threshold_pct, alert.window_min);
+
+  // WSL distro (vmmem は CPU を持たないので除外)
+  if (catalog.memory_monitor.wsl.enabled) {
+    const windowMs = alert.window_min * 60_000;
+    for (const key of wslTargetKeys(now - windowMs)) {
+      if (key === 'vmmem') continue;
+      run(`wsl:${key}`, 'wsl', key, 'wsl', null, alert.threshold_pct, alert.window_min);
+    }
+  }
+
+  return raised;
+}
+
+function cpuSummary(label: string, r: CpuAlertResult, thresholdPct: number): string {
+  const spanMin = Math.round(r.spanMs / 60_000);
+  return `[cpu-high] ${label} CPU ${r.avgPct}%平均 / ${r.maxPct}%最大 (≥${thresholdPct}% が ${(r.highRatio * 100).toFixed(0)}% 継続, ${spanMin}min/${r.samples}サンプル)`;
 }
 
 /** window 内に WSL サンプルがある target_key 一覧。 */
