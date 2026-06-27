@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Catalog } from '../catalog/loader.js';
-import { checkAllUpdates, checkUpdate, recentCommits } from './checker.js';
+import { checkAllUpdates, checkUpdate, recentCommits, branchStatus } from './checker.js';
 import { applyUpdate } from './apply.js';
 
 const ApplyBodySchema = z.object({
@@ -35,6 +35,14 @@ export function buildUpdateRouter(getCatalog: () => Catalog): Hono {
     const limit = Math.max(1, Math.min(50, isFinite(limitRaw) ? limitRaw : 5));
     const commits = await recentCommits(svc, limit);
     return c.json({ code, commits });
+  });
+
+  // ブランチ状況: 現在ブランチ / ローカル+リモート一覧 / ahead-behind / dirty。
+  app.get('/api/v1/services/:code/branches', async (c) => {
+    const code = c.req.param('code');
+    const svc = getCatalog().services.find((s) => s.code === code);
+    if (!svc) return c.json({ error: 'not_found' }, 404);
+    return c.json(await branchStatus(svc));
   });
 
   app.get('/api/v1/services/:code/update', async (c) => {

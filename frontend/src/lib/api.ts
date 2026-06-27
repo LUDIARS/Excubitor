@@ -435,7 +435,7 @@ export interface MemoryLeak {
 }
 
 export interface MemoryCard {
-  target_kind: 'service' | 'wsl';
+  target_kind: 'service' | 'wsl' | 'host';
   target_key: string;
   name: string;
   primary_source: string;
@@ -444,16 +444,19 @@ export interface MemoryCard {
   heap_total_bytes: number | null;
   external_bytes: number | null;
   array_buffers_bytes: number | null;
+  cpu_pct: number | null;
   pid: number | null;
   detail: Record<string, unknown> | null;
   sampled_at: number;
   leak: MemoryLeak;
   spark: Array<{ t: number; rss: number }>;
+  cpu_spark: Array<{ t: number; cpu: number }>;
 }
 
 export interface MemorySummary {
   services: MemoryCard[];
   wsl: MemoryCard[];
+  host: MemoryCard | null;
 }
 
 export function fetchMemorySummary(): Promise<MemorySummary> {
@@ -467,6 +470,7 @@ export interface MemorySeriesPoint {
   heap_total: number | null;
   external: number | null;
   array_buffers: number | null;
+  cpu: number | null;
 }
 
 export function fetchMemorySeries(
@@ -528,6 +532,118 @@ export function setCorpusPref(code: string, usesCorpus: boolean | null) {
   return putJSON<{ ok: boolean; code: string; uses_corpus: boolean | null }>(
     `/api/v1/services/${encodeURIComponent(code)}/corpus-pref`,
     { uses_corpus: usesCorpus },
+  );
+}
+
+// ─────────────── Branch status (ブランチ状況) ───────────────
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface BranchStatus {
+  code: string;
+  repoDir: string | null;
+  current: string | null;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  branches: BranchInfo[];
+  note: string | null;
+}
+
+export function fetchBranchStatus(code: string): Promise<BranchStatus> {
+  return getJSON<BranchStatus>(`/api/v1/services/${encodeURIComponent(code)}/branches`);
+}
+
+// ─────────────── Federation (他拠点連携) ───────────────
+export interface PeerView {
+  id: string;
+  name: string;
+  base_url: string;
+  token_hint: string;
+  enabled: boolean;
+  last_ok_at: number | null;
+  last_error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface NodeService {
+  code: string;
+  name: string;
+  state: string;
+  port: number | null;
+  git_branch: string | null;
+}
+
+export interface NodeSummary {
+  service: string;
+  services_total: number;
+  up: number;
+  down: number;
+  unknown: number;
+  open_errors: number;
+}
+
+export interface NodeHost {
+  used_mem_bytes?: number | null;
+  cpu_pct?: number | null;
+  totalMemBytes?: number;
+  freeMemBytes?: number;
+  cpuCount?: number;
+  sampled_at?: number;
+}
+
+export interface FederationNode {
+  peer_id: string | null;
+  name: string;
+  base_url: string | null;
+  ok: boolean;
+  error: string | null;
+  node?: string;
+  summary: NodeSummary | null;
+  services: NodeService[];
+  host: NodeHost | null;
+}
+
+export interface FederationView {
+  local: FederationNode;
+  peers: FederationNode[];
+}
+
+export function fetchPeers(): Promise<PeerView[]> {
+  return getJSON<{ peers: PeerView[] }>('/api/v1/peers').then((d) => d.peers);
+}
+
+export function addPeer(input: { name: string; base_url: string; token: string }) {
+  return postJSON<{ ok: boolean; peer: PeerView }>('/api/v1/peers', input);
+}
+
+export function updatePeer(id: string, patch: { name?: string; base_url?: string; token?: string; enabled?: boolean }) {
+  return patchJSON<{ ok: boolean; peer: PeerView }>(`/api/v1/peers/${encodeURIComponent(id)}`, patch);
+}
+
+export function deletePeer(id: string) {
+  return fetch(`/api/v1/peers/${encodeURIComponent(id)}`, { method: 'DELETE' }).then((r) => r.json());
+}
+
+export function testPeer(id: string) {
+  return postJSON<{ ok: boolean; status: number | null; error: string | null; node: string | null }>(
+    `/api/v1/peers/${encodeURIComponent(id)}/test`,
+    {},
+  );
+}
+
+export function fetchFederation(): Promise<FederationView> {
+  return getJSON<FederationView>('/api/v1/federation/services');
+}
+
+export function remoteControl(peerId: string, code: string, action: ControlAction) {
+  return postJSON<{ ok: boolean; status: number | null; error: string | null; result: unknown }>(
+    `/api/v1/peers/${encodeURIComponent(peerId)}/services/${encodeURIComponent(code)}/control`,
+    { action },
   );
 }
 

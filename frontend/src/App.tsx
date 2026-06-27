@@ -6,17 +6,19 @@ import Memory from './pages/Memory';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
 import Config from './pages/Config';
+import Federation from './pages/Federation';
 import { fetchLaunchPlan, fetchSystem } from './lib/api';
 
-type Tab = 'launch' | 'launcher' | 'monitor' | 'memory' | 'catalog' | 'errors' | 'config';
+type Tab = 'launch' | 'launcher' | 'monitor' | 'memory' | 'federation' | 'catalog' | 'errors' | 'config';
 
-const TAB_IDS: Tab[] = ['launch', 'launcher', 'monitor', 'memory', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['launch', 'launcher', 'monitor', 'memory', 'federation', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'launch', label: 'Launch' },
   { id: 'launcher', label: 'Launcher' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'memory', label: 'Memory' },
+  { id: 'federation', label: 'Federation' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'errors', label: 'Errors' },
   { id: 'config', label: 'Config' },
@@ -69,6 +71,7 @@ export default function App() {
         {tab === 'launcher' && <Launcher />}
         {tab === 'monitor' && <Monitor />}
         {tab === 'memory' && <Memory />}
+        {tab === 'federation' && <Federation />}
         {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}
         {tab === 'config' && <Config />}

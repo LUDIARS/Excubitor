@@ -5,14 +5,17 @@
  * O(1) のコストに抑える。 サービスは catalog から、 instance/pid は service_instances から解決する。
  */
 
+import os from 'node:os';
 import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Catalog, Service } from '../catalog/loader.js';
-import { listProcesses, sumTreeRss } from './process-sampler.js';
+import { listProcesses, sumTreeRss, sumTreeCpu } from './process-sampler.js';
 import { sampleDockerStats } from './docker-sampler.js';
 import { fetchMemoryMetrics } from './metrics-sampler.js';
 import { sampleWsl } from './wsl-sampler.js';
+import { sampleHost } from './host-sampler.js';
+import { recordAndComputeCpuPct } from './cpu-rate.js';
 import { detectLeak, type LeakResult } from './leak.js';
 import {
   insertSamples,
@@ -57,21 +60,25 @@ function loadRunningInstances(): Map<string, RunningInstance> {
 export interface CollectResult {
   serviceSamples: number;
   wslSamples: number;
+  hostSamples: number;
   leaksRaised: number;
 }
 
 export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult> {
   const cfg = catalog.memory_monitor;
-  if (!cfg.enabled) return { serviceSamples: 0, wslSamples: 0, leaksRaised: 0 };
+  if (!cfg.enabled) return { serviceSamples: 0, wslSamples: 0, hostSamples: 0, leaksRaised: 0 };
 
+  const now = Date.now();
+  const cpuCount = os.cpus().length;
   const running = loadRunningInstances();
   const needProcess = catalog.services.some((s) => isProcessRuntime(s) && running.has(s.code));
   const needDocker = catalog.services.some((s) => isDockerRuntime(s) && running.has(s.code));
 
-  // OS 呼び出しは tick あたり 1 回。
-  const [procList, dockerStats] = await Promise.all([
+  // OS 呼び出しは tick あたり 1 回。 host (マシン全体) は常に採る。
+  const [procList, dockerStats, host] = await Promise.all([
     needProcess ? listProcesses() : Promise.resolve(null),
     needDocker ? sampleDockerStats() : Promise.resolve(null),
+    sampleHost(),
   ]);
 
   const samples: MemorySample[] = [];
@@ -91,17 +98,21 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
           serviceInstanceId: inst.instanceId,
           source: 'docker',
           rssBytes: stat.usedBytes,
+          cpuPct: stat.cpuPercent,
           detail: { container: name, limitBytes: stat.limitBytes, percent: stat.percent },
         });
       }
     } else if (isProcessRuntime(svc) && procList && inst.pid != null) {
       const tree = sumTreeRss(procList, inst.pid);
+      const cpuMs = sumTreeCpu(procList, inst.pid);
+      const cpuPct = recordAndComputeCpuPct(svc.code, cpuMs, now, inst.pid, cpuCount);
       samples.push({
         targetKind: 'service',
         targetKey: svc.code,
         serviceInstanceId: inst.instanceId,
         source: 'process',
         rssBytes: tree.rssBytes,
+        cpuPct,
         pid: inst.pid,
         detail: { procCount: tree.procCount },
       });
@@ -136,7 +147,22 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
     }
   }
 
-  const all = [...samples, ...wslSamples];
+  // host (マシン全体) サンプル: rss=使用メモリ、 cpu=全体使用率、 detail に総量等。
+  const hostSample: MemorySample = {
+    targetKind: 'host',
+    targetKey: 'host',
+    serviceInstanceId: null,
+    source: 'host',
+    rssBytes: host.usedMemBytes,
+    cpuPct: host.cpuPct,
+    detail: {
+      totalMemBytes: host.totalMemBytes,
+      freeMemBytes: host.freeMemBytes,
+      cpuCount: host.cpuCount,
+    },
+  };
+
+  const all = [...samples, ...wslSamples, hostSample];
   insertSamples(all);
 
   // 剪定
@@ -146,10 +172,10 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
   const leaksRaised = detectAndRaise(catalog, running);
 
   logger.debug(
-    { serviceSamples: samples.length, wslSamples: wslSamples.length, leaksRaised },
+    { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised },
     'memory tick complete',
   );
-  return { serviceSamples: samples.length, wslSamples: wslSamples.length, leaksRaised };
+  return { serviceSamples: samples.length, wslSamples: wslSamples.length, hostSamples: 1, leaksRaised };
 }
 
 /** 全ターゲットの leak を判定し leaking なら起票。 起票件数を返す。 */

@@ -33,6 +33,15 @@ export default function Memory() {
       {data === null && !error && <div className="empty-state">読み込み中…</div>}
       {data && (
         <>
+          {data.host && (
+            <>
+              <h2 className="mem-section-title">マシン全体</h2>
+              <div className="mem-grid">
+                <HostCard c={data.host} />
+              </div>
+            </>
+          )}
+
           <h2 className="mem-section-title">サービス</h2>
           {data.services.length === 0 ? (
             <div className="empty-state">running なサービスのメモリサンプルがまだありません。</div>
@@ -76,7 +85,7 @@ function MemCard({ c }: { c: MemoryCard }) {
         <span className="mem-name">{c.name}</span>
         <span className={`mem-badge ${c.leak.verdict}`}>{VERDICT_LABEL[c.leak.verdict]}</span>
       </div>
-      <div className="mem-rss">{formatBytes(c.rss_bytes)}</div>
+      <div className="mem-rss">{formatBytes(c.rss_bytes)}{c.cpu_pct != null && <span className="mem-cpu"> · CPU {c.cpu_pct.toFixed(1)}%</span>}</div>
       <Sparkline points={c.spark} color={verdictColor} />
       <div className="mem-meta">
         <span>傾き: {slopeMb >= 0 ? '+' : ''}{slopeMb.toFixed(1)} MB/h</span>
@@ -92,6 +101,29 @@ function MemCard({ c }: { c: MemoryCard }) {
           {c.external_bytes != null && <> · external {formatBytes(c.external_bytes)}</>}
         </div>
       )}
+    </article>
+  );
+}
+
+function HostCard({ c }: { c: MemoryCard }) {
+  const total = typeof c.detail?.totalMemBytes === 'number' ? c.detail.totalMemBytes : null;
+  const memPct = total && c.rss_bytes != null ? (c.rss_bytes / total) * 100 : null;
+  return (
+    <article className="mem-card host">
+      <div className="mem-card-head">
+        <span className="mem-name">{c.name}</span>
+        {c.cpu_pct != null && <span className="mem-badge ok">CPU {c.cpu_pct.toFixed(1)}%</span>}
+      </div>
+      <div className="mem-rss">
+        メモリ {formatBytes(c.rss_bytes)}
+        {total != null && <> / {formatBytes(total)}</>}
+        {memPct != null && <span className="mem-cpu"> ({memPct.toFixed(0)}%)</span>}
+      </div>
+      <Sparkline points={c.cpu_spark.map((p) => ({ t: p.t, rss: p.cpu }))} color="#34d399" />
+      <div className="mem-meta">
+        <span>CPU 使用率の推移</span>
+        {typeof c.detail?.cpuCount === 'number' && <span> · {c.detail.cpuCount} コア</span>}
+      </div>
     </article>
   );
 }

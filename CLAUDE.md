@@ -18,7 +18,10 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起
 | `src/process/` | autostart (一括起動) + secret 注入 + restart_policy |
 | `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector + SSE (`/logs` 単一/横断, `/logs/recent`) |
 | `src/scanner/ports.ts` | ポート衝突検知 (netstat/ss/tasklist 解析 → 重複宣言 / LISTEN 占有 / foreign 衝突)。 `/api/v1/ports` |
-| `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポートを公開 |
+| `src/memory/` | メモリ + **CPU** 監視。 プロセスツリー RSS / docker stats / WSL / **マシン全体 (host)** を周期サンプリング → 時系列 + leak 検知。 CPU% は累積 tick の tick 間 delta から算出 (`cpu-rate.ts`)。 `/api/v1/memory/summary` (services/wsl/host) |
+| `src/update/` | git pull (更新適用) + アップデート/ブランチ状況確認 (`/api/v1/services/:code/update`・`/branches`・`/api/v1/updates`) |
+| `src/federation/` | **他拠点 Excubitor 連携**。 remote_peers (base_url + agent token) を保持し、 local + 全ピアのサービス/host を集約 (`/api/v1/federation/services`) + リモート操作プロキシ。 公開面 (`/api/v1/federation/node\|control\|update`) は agent token 認証 |
+| `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポート/メモリCPU を公開 + 制御 (control/update/branch/federation) |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
 | `src/release/` | リリースマニフェスト (`releases/*.yaml`) から自己完結ランナブル配布物を焼く (build→assemble→launcher→archive)。 spec/release.md / `npm run release` |
 | `src/server.ts` | main entry。`bootObservability()` + Hono serve |
@@ -37,8 +40,15 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起
 ```bash
 npm install
 npm run dev        # tsx watch src/server.ts (backend)
+npm run dev:safe   # 同上 + プレーンモード (--safe: 何も auto-launch しない)
 cd frontend && npm run dev   # Vite (17333)
 ```
+
+- **`start-excubitor.bat` はプレーンモード起動** (`npm run dev:safe`)。 Excubitor 本体
+  (監視 / スキャン / Web GUI / 制御 API) だけ立ち上げ、 autostart も保存済み起動セットの
+  auto-launch もスキップする。 サービスは Launch タブから手動で起動する。
+  通常起動 (auto-launch あり) は `npm run dev` / `npm start`。
+- プレーンモードの実体は SafeMode (`src/safe-mode.ts`: env `EXCUBITOR_SAFE_MODE=1` or argv `--safe`)。
 
 ## tier (ローカルアプリ / SaaS の挙動分離)
 
@@ -70,6 +80,11 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
 - 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
 - `uses_corpus` (catalog) は UI から `service_prefs` (DB) で上書きできる。 起動セットに含めると Corpus を自動補完。
+- **他拠点連携 (federation)**: ピアの認証は各ノードの agent token (secret-agent と共用、
+  `EXCUBITOR_AGENT_TOKEN` or token ファイル) を Bearer で交換する。 ローカル DB (remote_peers) に
+  相手の base_url + token を平文保存するため DB ファイル自体を機密扱いにする。 公開面
+  (`/api/v1/federation/*` の node/control/update) のみ token 認証、 ピア管理 (CRUD) は loopback 依存。
+  拠点名は `EXCUBITOR_NODE_NAME` (既定 hostname)。 拠点間通信は Tailscale 等のプライベート網を前提。
 - catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
   設計書 §9 の Phase C/D で対応予定。 ローカルアプリ (local-app) の catalog 追加 (#90) は exec
   パスを各リポのビルド出力で実在確認してから (hora-app 以外は follow-up)。
