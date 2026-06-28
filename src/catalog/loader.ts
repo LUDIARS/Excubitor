@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
+import { readAutoServicesRaw } from './auto-catalog-file.js';
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -250,8 +251,22 @@ export function serviceTier(svc: Service): Tier {
 export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const absPath = resolve(process.cwd(), path);
   const raw = readFileSync(absPath, 'utf8');
-  const parsed = load(raw);
-  return CatalogSchema.parse(parsed);
+  const parsed = (load(raw) ?? {}) as { services?: unknown[]; [k: string]: unknown };
+  const baseServices = Array.isArray(parsed.services) ? parsed.services : [];
+
+  // スキャンが生成した自動カタログをマージする。 手書き services.yaml に同 code が
+  // あれば手書きを優先 (auto を捨てる)。 不正な auto エントリは個別に弾く (全体を壊さない)。
+  const baseCodes = new Set(
+    baseServices.map((s) => (s as { code?: unknown }).code).filter((c): c is string => typeof c === 'string'),
+  );
+  const autoServices: unknown[] = [];
+  for (const entry of readAutoServicesRaw()) {
+    const code = (entry as { code?: unknown }).code;
+    if (typeof code !== 'string' || baseCodes.has(code)) continue;
+    if (ServiceSchema.safeParse(entry).success) autoServices.push(entry);
+  }
+
+  return CatalogSchema.parse({ ...parsed, services: [...baseServices, ...autoServices] });
 }
 
 
