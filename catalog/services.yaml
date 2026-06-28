@@ -269,17 +269,60 @@ services:
     tier: saas
     project_code: schedula
     component: backend
-    port: 3000
+    # Actio (3000) と port 競合するため 3300 へ移設。Schedula は BACKEND_PORT ?? PORT ?? 3000 を
+    # 読む (src/index.ts) ので env: で BACKEND_PORT=3300 を spawn env に注入して別ポートで bind させる。
+    port: 3300
     repo: LUDIARS/Schedula
     runtime: node
     cwd: E:/Document/Ars/Schedula
     command: npm run dev
+    env:
+      BACKEND_PORT: "3300"
     autostart: false
     health:
       type: tcp
       interval_sec: 30
     provides:
       SCHEDULA_URL: http://${host}:${port}
+
+  - code: pagus
+    name: Pagus (AI 村シミュレーション)
+    tier: personal
+    project_code: pagus
+    component: backend
+    # 権威サーバ (WS :4310)。client (:4320) は frontend のため catalog 対象外。
+    port: 4310
+    repo: LUDIARS/Pagus
+    runtime: node
+    cwd: E:/Document/Ars/Pagus
+    command: npm run dev
+    # start-pagus.bat: stale :4310/:4320 を解放 → server(WS) + client を起動 (PAGUS_BRAIN=llm)。
+    start_script: E:/Document/Ars/start-pagus.bat
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PAGUS_WS_URL: ws://${host}:${port}
+
+  - code: peregrinatio
+    name: Peregrinatio
+    tier: personal
+    project_code: peregrinatio
+    component: backend
+    port: 8090
+    repo: LUDIARS/Peregrinatio
+    runtime: node
+    cwd: E:/Document/Ars/Peregrinatio
+    command: npm run dev
+    # start-peregrinatio.bat: stale :8090 を解放 → web を single-origin dist にビルドして :8090 で配信。
+    start_script: E:/Document/Ars/start-peregrinatio.bat
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PEREGRINATIO_URL: http://${host}:${port}
 
   - code: aedilis
     name: Aedilis (施設予約)
