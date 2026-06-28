@@ -408,6 +408,33 @@ export function fetchDiscovery(): Promise<DiscoveryResult> {
   return getJSON<DiscoveryResult>('/api/v1/discovery');
 }
 
+// ─── scan (自動カタログ生成) ───
+export interface ScanResult {
+  created: string[];
+  ports: Record<string, number>;
+  skipped: Array<{ name: string; reason: string }>;
+  scannedRoot: string;
+  catalog_total: number;
+}
+
+/** 未登録 repo を解析し、 実行可能なものを services.auto.yaml に自動生成 (port も検出)。 */
+export function scanCatalog(): Promise<ScanResult> {
+  return postJSON<ScanResult>('/api/v1/discovery/scan', {});
+}
+
+// ─── liveness (稼働率) ───
+export interface LivenessSeries {
+  code: string;
+  window_min: number;
+  uptime_ratio: number | null;
+  series: Array<{ t: number; ok: number }>;
+}
+
+/** サービスの稼働率時系列 (liveness_history の ok 1/0) + uptime 比率。 */
+export function fetchLiveness(code: string, windowMin = 120): Promise<LivenessSeries> {
+  return getJSON<LivenessSeries>(`/api/v1/services/${encodeURIComponent(code)}/liveness?window_min=${windowMin}`);
+}
+
 export function fetchTopology(): Promise<Record<string, string>> {
   return getJSON<{ env: Record<string, string> }>('/api/v1/topology').then((d) => d.env);
 }
