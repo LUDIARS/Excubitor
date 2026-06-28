@@ -503,7 +503,9 @@ services:
     tier: personal
     project_code: concordia
     component: backend
-    port: 17330
+    # backend は concordia.config.json server.port = 11111 を bind する (loopback)。
+    # 旧値 17330 は実体と不一致で health probe が常に落ちていた。
+    port: 11111
     repo: LUDIARS/Concordia
     runtime: node
     cwd: E:/Document/Ars/Concordia
@@ -520,7 +522,7 @@ services:
     # root (/) は build 済み web UI (web/dist) を配信するため、 開いても 404 にならない。
     health:
       type: http
-      url: http://localhost:17330/health
+      url: http://localhost:11111/health
       interval_sec: 30
     provides:
       CONCORDIA_URL: http://${host}:${port}
