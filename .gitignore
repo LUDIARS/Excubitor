@@ -14,3 +14,5 @@ coverage/
 data/
 logs/
 frontend/logs/
+# スキャンが自動生成するカタログ (マシン毎、 手書き services.yaml とは別管理)
+catalog/services.auto.yaml

@@ -109,16 +109,21 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
-  const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
+  // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
+  const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
     setTopologyFromCatalog(fresh);
     fileTailHandle.refresh(fresh);
     logger.info(
-      { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length },
-      'catalog reloaded from file change',
+      { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length, reason },
+      'catalog reloaded',
     );
+    return fresh.services.length;
+  };
+  const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
+    await reloadCatalog('file change');
   });
   // SafeMode: 何も起動せず Excubitor 本体だけ立ち上げる (autostart / auto-launch を抑止)。
   // 監視・スキャン・Web GUI・制御 API は通常どおり動くので、 起動後に手動で立ち上げられる。
@@ -163,8 +168,8 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)
   app.route('/', buildUpdateRouter(() => currentCatalog!));
 
-  // 新規サービス検出 (/api/v1/discovery)
-  app.route('/', buildDiscoveryRouter(() => currentCatalog!));
+  // 新規サービス検出 + スキャン自動カタログ (/api/v1/discovery[, /scan])
+  app.route('/', buildDiscoveryRouter(() => currentCatalog!, () => reloadCatalog('scan')));
 
   // リリースビルド (/api/v1/releases — 自己完結ランナブル配布物の組み立て)
   app.route('/', buildReleaseRouter(() => currentCatalog));
@@ -275,6 +280,25 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       LIMIT ${limit}
     `);
     return c.json({ logs: rows });
+  });
+
+  // 稼働率の時系列 (liveness_history の ok 1/0)。 起動中サービスのメトリクスグラフ用。
+  app.get('/api/v1/services/:code/liveness', (c) => {
+    const code = c.req.param('code');
+    const windowMin = Math.max(1, Math.min(1440, Number(c.req.query('window_min') ?? 120)));
+    const since = Date.now() - windowMin * 60_000;
+    const rows = db().all(drizzleSql`
+      SELECT lh.probed_at AS t, lh.ok AS ok
+      FROM liveness_history lh
+      JOIN service_instances si ON si.id = lh.service_instance_id
+      JOIN services s ON s.id = si.service_id
+      WHERE s.code = ${code} AND lh.probed_at >= ${since}
+      ORDER BY lh.probed_at ASC
+      LIMIT 2000
+    `) as Array<{ t: number; ok: number }>;
+    const series = rows.map((r) => ({ t: Number(r.t), ok: Number(r.ok) }));
+    const ratio = series.length > 0 ? series.reduce((a, s) => a + s.ok, 0) / series.length : null;
+    return c.json({ code, window_min: windowMin, uptime_ratio: ratio, series });
   });
 
   app.get('/api/v1/error-tasks', (c) => {
