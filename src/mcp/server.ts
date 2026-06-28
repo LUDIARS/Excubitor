@@ -110,6 +110,26 @@ server.tool(
 );
 
 server.tool(
+  'excubitor_llm_logs',
+  'LLM 使用ログを全サービス横断で取得する。通常ログとは別の llm channel に記録されたプロンプト・トークン数・コストを返す。codes で絞り込み可。',
+  {
+    codes: z.array(z.string()).optional().describe('絞り込むサービスコード配列 (省略で全サービス)'),
+    limit: z.number().int().positive().max(5000).optional().describe('最大件数 (既定 500)'),
+  },
+  async ({ codes, limit }) => {
+    try {
+      const params = new URLSearchParams();
+      if (codes && codes.length > 0) params.set('codes', codes.join(','));
+      if (limit) params.set('limit', String(limit));
+      const qs = params.toString();
+      return jsonContent(await apiGet(`/api/v1/logs/llm${qs ? `?${qs}` : ''}`));
+    } catch (err) {
+      return errorContent(err);
+    }
+  },
+);
+
+server.tool(
   'excubitor_ports',
   'ポート占有・衝突レポート (catalog 宣言 port の重複、 LISTEN 占有、 foreign 衝突)。',
   {},
