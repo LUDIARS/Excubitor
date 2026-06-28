@@ -5,8 +5,8 @@
   "description": "LUDIARS service liveness, log aggregation, and error triage monitor server.",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "dev:safe": "tsx watch src/server.ts --safe",
+    "dev": "node --watch --import tsx src/server.ts",
+    "dev:safe": "node --watch --import tsx src/server.ts --safe",
     "build": "tsc",
     "start": "node dist/server.js",
     "start:safe": "node dist/server.js --safe",
