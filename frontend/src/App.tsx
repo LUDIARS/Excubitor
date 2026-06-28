@@ -1,21 +1,17 @@
 import { useEffect, useState } from 'react';
-import Launch from './pages/Launch';
-import Launcher from './pages/Launcher';
 import Monitor from './pages/Monitor';
 import Memory from './pages/Memory';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
 import Config from './pages/Config';
 import Federation from './pages/Federation';
-import { fetchLaunchPlan, fetchSystem } from './lib/api';
+import { fetchSystem } from './lib/api';
 
-type Tab = 'launch' | 'launcher' | 'monitor' | 'memory' | 'federation' | 'catalog' | 'errors' | 'config';
+type Tab = 'monitor' | 'memory' | 'federation' | 'catalog' | 'errors' | 'config';
 
-const TAB_IDS: Tab[] = ['launch', 'launcher', 'monitor', 'memory', 'federation', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['monitor', 'memory', 'federation', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'launch', label: 'Launch' },
-  { id: 'launcher', label: 'Launcher' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'memory', label: 'Memory' },
   { id: 'federation', label: 'Federation' },
@@ -27,18 +23,12 @@ const TABS: { id: Tab; label: string }[] = [
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return TAB_IDS.includes(h) ? h : 'launch';
+    return TAB_IDS.includes(h) ? h : 'monitor';
   });
 
   const [safeMode, setSafeMode] = useState(false);
 
-  // 初回 (未設定) なら強制的にウィザード (Launch) を出す。
   useEffect(() => {
-    void fetchLaunchPlan()
-      .then((p) => {
-        if (!p.profile.configured) setTab('launch');
-      })
-      .catch(() => {});
     void fetchSystem()
       .then((s) => setSafeMode(s.safe_mode))
       .catch(() => {});
@@ -67,8 +57,6 @@ export default function App() {
         </nav>
       </header>
       <main className="container">
-        {tab === 'launch' && <Launch />}
-        {tab === 'launcher' && <Launcher />}
         {tab === 'monitor' && <Monitor />}
         {tab === 'memory' && <Memory />}
         {tab === 'federation' && <Federation />}
