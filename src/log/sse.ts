@@ -9,11 +9,13 @@
  * (= ストリーム欠落は許容)。 永続化された過去ログは /logs/recent で取得する。
  */
 
+import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
+import { listVestigiumServices, recent } from './vestigium-reader.js';
 
 /** `?codes=a,b,c` を Set に。 空/未指定なら undefined (= 全サービス)。 */
 function parseCodes(raw: string | undefined): Set<string> | undefined {
@@ -109,6 +111,31 @@ export function buildLogStreamRouter(): Hono {
           ORDER BY sil.ts DESC LIMIT ${limit}`)
       : db().all(sql`${base} ORDER BY sil.ts DESC LIMIT ${limit}`);
     return c.json({ logs: rows });
+  });
+
+  // LLM 使用ログ専用 — Vestigium 'llm' channel を全サービス横断で読む。
+  // 通常ログ (bus/SSE) とは別経路 (Vestigium JSONL 直読み)。
+  // ?codes=a,b で絞り込み、?limit= で最大件数 (既定 500)。
+  app.get('/api/v1/logs/llm', (c) => {
+    const logsRoot = process.env.VESTIGIUM_LOGS_DIR ?? path.join(process.cwd(), 'logs');
+    const codes = parseCodes(c.req.query('codes'));
+    const limitRaw = Number(c.req.query('limit') ?? 500);
+    const limit = Math.max(1, Math.min(5000, isFinite(limitRaw) ? limitRaw : 500));
+
+    const services = listVestigiumServices(logsRoot);
+    const targets = codes ? services.filter((s) => codes.has(s)) : services;
+
+    const all: ReturnType<typeof recent> = [];
+    for (const svc of targets) {
+      const records = recent({
+        logPath: path.join(logsRoot, svc),
+        channel: ['llm'],
+        limit,
+      });
+      for (const r of records) all.push(r);
+    }
+    all.sort((a, b) => b.ts - a.ts);
+    return c.json({ logs: all.slice(0, limit) });
   });
 
   return app;
