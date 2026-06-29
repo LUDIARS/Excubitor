@@ -300,7 +300,7 @@ function ServiceRow({
         <div className="svc-row-actions">
           {(isProcess || isDocker) && (
             <>
-              {!running && <button disabled={busy} onClick={() => void act('start')} title="起動">▶</button>}
+              {!running && <button className="start" disabled={busy} onClick={() => void act('start')} title="起動">▶ 起動</button>}
               {running && <button disabled={busy} onClick={() => void act('stop')} title="停止">■</button>}
               <button disabled={busy} onClick={() => void act('restart')} title="再起動">↻</button>
               <button disabled={busy} onClick={onShowLogs} title="ログ">≡</button>
