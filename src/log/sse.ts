@@ -15,6 +15,7 @@ import { streamSSE } from 'hono/streaming';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
+import { sharedLogsRoot } from './logs-root.js';
 import { listVestigiumServices, recent } from './vestigium-reader.js';
 
 /** `?codes=a,b,c` を Set に。 空/未指定なら undefined (= 全サービス)。 */
@@ -117,7 +118,7 @@ export function buildLogStreamRouter(): Hono {
   // 通常ログ (bus/SSE) とは別経路 (Vestigium JSONL 直読み)。
   // ?codes=a,b で絞り込み、?limit= で最大件数 (既定 500)。
   app.get('/api/v1/logs/llm', (c) => {
-    const logsRoot = process.env.VESTIGIUM_LOGS_DIR ?? path.join(process.cwd(), 'logs');
+    const logsRoot = sharedLogsRoot();
     const codes = parseCodes(c.req.query('codes'));
     const limitRaw = Number(c.req.query('limit') ?? 500);
     const limit = Math.max(1, Math.min(5000, isFinite(limitRaw) ? limitRaw : 500));
