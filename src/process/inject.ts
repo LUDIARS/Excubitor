@@ -13,6 +13,7 @@ import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
 import { resolveServiceInfisical } from '../secrets/config-store.js';
+import { sharedLogsRoot } from '../log/logs-root.js';
 import { getTopologyEnv } from './topology.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
@@ -20,13 +21,16 @@ const logger = createNamedLogger('excubitor.process.inject');
 export { hasIdentity };
 
 /**
- * Vestigium ログ先を spawn 子に伝える env。 catalog の `log_path` (= `<root>/<code>` 規約) があれば
- * その親 `<root>` を `VESTIGIUM_LOGS_DIR` として渡す。 サービス側 Vestigium は `<root>/<code>/` に書き、
- * Excubitor の file-tail (log_path) と一致する。 log_path 未設定なら空 — サービスは自分の cwd/logs を
- * 既定にする (= 「ログ dir は Excubitor からもらう、 無ければ cwd/logs」)。 純関数 (テスト可能)。
+ * Vestigium ログ先を spawn 子に伝える env。 **全サービスに共有ルート `<root>` を渡す**。
+ * サービス側 Vestigium は `<root>/<code>/` に書き、 Excubitor の file-tail がそこを自動発見して
+ * tail する (= log_path を catalog に明示しなくても全サービスのログが log bus に乗る)。
+ *
+ * catalog に `log_path` (= `<root>/<code>` 規約) があればその親を優先 (個別に root をずらしたい
+ * サービス向けの上書き)。 無ければ `sharedLogsRoot()` を既定にする。 純関数 (テスト可能)。
  */
 export function vestigiumEnvFor(svc: Pick<Service, 'log_path'>): Record<string, string> {
-  return svc.log_path ? { VESTIGIUM_LOGS_DIR: path.dirname(svc.log_path) } : {};
+  const root = svc.log_path ? path.dirname(svc.log_path) : sharedLogsRoot();
+  return { VESTIGIUM_LOGS_DIR: root };
 }
 
 /**

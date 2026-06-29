@@ -47,7 +47,7 @@ Corpus が大規模 Hub の役割を担っていくにあたり、**サービス
 2. **scanner** — docker / プロセス / git / package version の周期スキャン → 死活 state。
 3. **control** — `start` / `stop` / `restart` を API + UI から (docker-compose / node / dev-process-md)。
 4. **process** — `autostart` による一括起動 (= `dev.bat` 代替)、 secret 注入、 restart_policy。
-5. **log** — docker-tail / file-tail (Vestigium JSONL 優先) / process-bridge を log bus に集約 + 保存。
+5. **log** — docker-tail / file-tail (Vestigium JSONL、 共有ログルート配下の `<code>/` を全サービス自動発見) / process-bridge を log bus に集約 + 保存。
 6. **error** — error_rules でパターン検知 → error_tasks triage キュー + 通知。
 7. **auto_fix** — error_task から Claude Code CLI を spawn し修正 PR まで (任意)。
 8. **Web UI** — Monitor / Catalog / Errors / LogsDrawer (Concordia から移植)。

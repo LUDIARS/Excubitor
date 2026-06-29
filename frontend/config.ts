@@ -24,6 +24,7 @@ export const config = {
   allowedHosts: [
     'localhost',
     'excubitor.vtn-game.com',
+    'ex.ai-run-do.com',
   ],
 
   /**
