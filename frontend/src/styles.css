@@ -590,6 +590,17 @@ button.danger { color: var(--err); border-color: rgba(248,113,113,0.4); }
 .svc-row-branch { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }
 .svc-row-actions { display: flex; gap: 4px; align-items: center; }
 .svc-row-actions button { padding: 3px 7px; font-size: 12px; }
+/* 起動ボタンは主要アクションとして大きく・目立たせる。 */
+.svc-row-actions button.start {
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #052e16;
+  background: var(--ok, #34d399);
+  border-color: var(--ok, #34d399);
+  border-radius: 6px;
+}
+.svc-row-actions button.start:hover:not(:disabled) { filter: brightness(1.08); }
 .svc-row-metrics { display: flex; gap: 12px; align-items: center; margin-left: auto; }
 
 .metric-graph { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
