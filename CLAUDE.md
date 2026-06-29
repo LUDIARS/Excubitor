@@ -16,7 +16,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / エラー検知 / 起
 | `src/scanner/` | docker / プロセス / git / version の周期スキャン → 死活 state |
 | `src/control/` | start / stop / restart (docker-compose / node / dev-process-md) |
 | `src/process/` | autostart (一括起動) + secret 注入 + restart_policy |
-| `src/log/` | docker-tail / file-tail (Vestigium JSONL) / process-bridge → log bus + error-detector + SSE (`/logs` 単一/横断, `/logs/recent`) |
+| `src/log/` | docker-tail / file-tail (Vestigium JSONL, 共有ルート `logs-root.ts` 配下の `<code>/` を全サービス自動発見) / process-bridge → log bus + error-detector + SSE (`/logs` 単一/横断, `/logs/recent`) |
 | `src/scanner/ports.ts` | ポート衝突検知 (netstat/ss/tasklist 解析 → 重複宣言 / LISTEN 占有 / foreign 衝突)。 `/api/v1/ports` |
 | `src/memory/` | メモリ + **CPU** 監視。 プロセスツリー RSS / docker stats / WSL / **マシン全体 (host)** を周期サンプリング → 時系列 + leak 検知。 CPU% は累積 tick の tick 間 delta から算出 (`cpu-rate.ts`)。 `/api/v1/memory/summary` (services/wsl/host) |
 | `src/update/` | git pull (更新適用) + アップデート/ブランチ状況確認 (`/api/v1/services/:code/update`・`/branches`・`/api/v1/updates`) |
