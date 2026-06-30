@@ -1,16 +1,27 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { dirname, resolve } from "node:path";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { arsRoot, domainRoot } from "./roots.js";
+import { setDomainRootOverride } from "../secrets/config-store.js";
 
-const ENV_KEYS = ["EXCUBITOR_ARS_ROOT", "LUDIARS_ROOT", "EXCUBITOR_DOMAIN_ROOT"] as const;
+const ENV_KEYS = ["EXCUBITOR_ARS_ROOT", "LUDIARS_ROOT", "EXCUBITOR_DOMAIN_ROOT", "EXCUBITOR_CONFIG_PATH"] as const;
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
+let tempConfigDir: string | null = null;
+
+beforeEach(() => {
+  tempConfigDir = mkdtempSync(join(tmpdir(), "excubitor-roots-"));
+  process.env.EXCUBITOR_CONFIG_PATH = join(tempConfigDir, "config.enc");
+});
 
 afterEach(() => {
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
+  if (tempConfigDir) rmSync(tempConfigDir, { recursive: true, force: true });
+  tempConfigDir = null;
 });
 
 describe("arsRoot", () => {
@@ -34,10 +45,24 @@ describe("arsRoot", () => {
   });
 });
 
+describe("domainRoot saved config", () => {
+  it("uses saved config when EXCUBITOR_DOMAIN_ROOT is not set", () => {
+    delete process.env.EXCUBITOR_DOMAIN_ROOT;
+    setDomainRootOverride("ai-run-do.com");
+    expect(domainRoot()).toBe(".ai-run-do.com");
+  });
+
+  it("prefers EXCUBITOR_DOMAIN_ROOT over saved config", () => {
+    setDomainRootOverride(".ai-run-do.com");
+    process.env.EXCUBITOR_DOMAIN_ROOT = ".example.test";
+    expect(domainRoot()).toBe(".example.test");
+  });
+});
+
 describe("domainRoot", () => {
   it("既定は .melpot.dev", () => {
     delete process.env.EXCUBITOR_DOMAIN_ROOT;
-    expect(domainRoot()).toBe(".melpot.dev");
+    expect(domainRoot()).toBe("");
   });
 
   it("EXCUBITOR_DOMAIN_ROOT で上書きできる", () => {
