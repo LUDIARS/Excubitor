@@ -14,6 +14,13 @@
 # バックエンド単独になった論理サービスは管理名から "-backend" 等の役割サフィックスを外して
 # 純粋なプロジェクト名 (code=プロジェクトコード / name=プロジェクト名) を採用する。
 
+global:
+  env:
+    # *.melpot.dev を全サービスの Vite dev server allowedHosts に一括許可。
+    # LUDIARS_ALLOWED_HOSTS を読む全サービス (Actio/Cernere/Nuntius/Schedula/Excubitor/
+    # Pagus/Signum/Praeforma/Peregrinatio) に自動注入される。
+    LUDIARS_ALLOWED_HOSTS: ".melpot.dev"
+
 services:
   # ─────────────── LUDIARS 共有インフラ (tier: infra / monitor_only) ───────────────
   - code: infra-postgres
@@ -381,7 +388,7 @@ services:
     name: Praeforma (仕様↔実装)
     tier: saas
     project_code: praeforma
-    component: server
+    component: backend
     port: 8889
     repo: LUDIARS/Praeforma
     runtime: node
@@ -393,6 +400,24 @@ services:
       interval_sec: 30
     provides:
       PRAEFORMA_URL: http://${host}:${port}
+      PRAEFORMA_API_URL: http://${host}:${port}
+
+  - code: praeforma-web
+    name: Praeforma Web (wireframe editor)
+    tier: saas
+    project_code: praeforma
+    component: frontend
+    port: 5177
+    repo: LUDIARS/Praeforma
+    runtime: node
+    cwd: E:/Document/Ars/Praeforma
+    command: npm run dev:web
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PRAEFORMA_WEB_URL: http://${host}:${port}
 
   - code: signum
     name: Signum (コンテンツ署名)

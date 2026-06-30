@@ -45,6 +45,7 @@ import { applyInfisicalToEnv } from './secrets/config-store.js';
 import { reconcileProcesses } from './process/reconcile.js';
 import { detectSafeMode, setSafeMode, isSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
+import { setGlobalEnv } from './process/inject.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
@@ -95,6 +96,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // catalog から topology env (URL/port) を構築。 spawn 時に全サービスへ注入する。
   setTopologyFromCatalog(currentCatalog);
+  setGlobalEnv(currentCatalog.global?.env ?? {});
 
   // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
   // detached 起動なので Excubitor 再起動を跨いでサービスは生きており、 ここで管理下に戻す。
@@ -115,6 +117,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
     setTopologyFromCatalog(fresh);
+    setGlobalEnv(fresh.global?.env ?? {});
     fileTailHandle.refresh(fresh);
     logger.info(
       { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length, reason },
@@ -452,6 +455,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     const code = c.req.param('code');
     const svc = findService(code);
     if (!svc) return c.json({ error: 'not_found' }, 404);
+    if (svc.disabled) return c.json({ error: 'service_disabled' }, 400);
 
     const body = await c.req.json().catch(() => ({}));
     const parsed = ControlBodySchema.safeParse(body);
