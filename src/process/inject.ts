@@ -20,6 +20,14 @@ const logger = createNamedLogger('excubitor.process.inject');
 
 export { hasIdentity };
 
+/** catalog の `global.env` から設定されるグローバル env。 起動時 / catalog reload 時に更新。 */
+let _globalEnv: Record<string, string> = {};
+
+/** catalog reload 後に呼び出して全サービス共通 env を更新する。 */
+export function setGlobalEnv(env: Record<string, string>): void {
+  _globalEnv = env;
+}
+
 /**
  * Vestigium ログ先を spawn 子に伝える env。 **全サービスに共有ルート `<root>` を渡す**。
  * サービス側 Vestigium は `<root>/<code>/` に書き、 Excubitor の file-tail がそこを自動発見して
@@ -48,7 +56,8 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const vestigiumEnv = vestigiumEnvFor(svc);
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  if (!cfg || !cfg.inject) return { ...vestigiumEnv, ...topology, ...staticEnv };
+  // 優先順位: vestigium < global < topology < 静的 env (catalog) < secret。
+  if (!cfg || !cfg.inject) return { ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv };
 
   const id = readIdentity();
   if (!id) {
@@ -68,6 +77,6 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  // 優先順位: vestigium < topology < 静的 env (catalog) < secret。
-  return { ...vestigiumEnv, ...topology, ...staticEnv, ...env };
+  // 優先順位: vestigium < global < topology < 静的 env (catalog) < secret。
+  return { ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env };
 }
