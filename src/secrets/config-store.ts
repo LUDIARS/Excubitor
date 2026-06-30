@@ -45,6 +45,38 @@ interface InfisicalIdentity {
 interface ExcubitorConfig {
   infisical?: InfisicalIdentity;
   services?: Record<string, ServiceInfisical>;
+  settings?: {
+    domainRoot?: string;
+  };
+}
+
+export const DEFAULT_DOMAIN_ROOT = '';
+
+export type DomainRootSource = 'env' | 'config' | 'unset';
+
+export interface DomainRootStatus {
+  value: string;
+  source: DomainRootSource;
+  configured: boolean;
+  env: string | null;
+  default_value: string;
+  storePath: string;
+}
+
+export function normalizeDomainRoot(input: string): string {
+  const trimmed = input.trim().toLowerCase().replace(/\/+$/, '');
+  if (!trimmed) throw new Error('domain root is required');
+  if (trimmed.includes('://') || trimmed.includes('/') || trimmed.includes(',') || /\s/.test(trimmed)) {
+    throw new Error('domain root must be a hostname suffix such as example.com');
+  }
+  if (trimmed === 'localhost') return trimmed;
+  const dotted = trimmed.startsWith('.') ? trimmed : `.${trimmed}`;
+  const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+  const pattern = new RegExp(`^\\.(?:${label}\\.)+${label}$`);
+  if (!pattern.test(dotted)) {
+    throw new Error('domain root must be a hostname suffix such as example.com');
+  }
+  return dotted;
 }
 
 /** 保存先: env override → AppData (Win) / ~/.config (他)。 いずれもリポジトリ外。 */
@@ -81,6 +113,42 @@ function writeConfig(cfg: ExcubitorConfig): void {
   mkdirSync(dirname(path), { recursive: true });
   const blob = encryptJson(cfg, masterSecret());
   writeFileSync(path, JSON.stringify(blob), 'utf8');
+}
+
+export function getDomainRootOverride(): string | null {
+  const raw = readConfig().settings?.domainRoot;
+  if (!raw) return null;
+  try {
+    return normalizeDomainRoot(raw);
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, value: raw }, 'stored domain root is invalid - ignoring');
+    return null;
+  }
+}
+
+export function setDomainRootOverride(input: string): string {
+  const value = normalizeDomainRoot(input);
+  const cfg = readConfig();
+  cfg.settings = { ...(cfg.settings ?? {}), domainRoot: value };
+  writeConfig(cfg);
+  logger.info({ domainRoot: value }, 'saved domain root setting');
+  return value;
+}
+
+export function getDomainRootStatus(): DomainRootStatus {
+  const envValue = (process.env.EXCUBITOR_DOMAIN_ROOT ?? '').trim();
+  const env = envValue ? normalizeDomainRoot(envValue) : null;
+  const configured = getDomainRootOverride();
+  const value = env ?? configured ?? DEFAULT_DOMAIN_ROOT;
+  const source: DomainRootSource = env ? 'env' : configured ? 'config' : 'unset';
+  return {
+    value,
+    source,
+    configured: configured !== null,
+    env,
+    default_value: DEFAULT_DOMAIN_ROOT,
+    storePath: configPath(),
+  };
 }
 
 // ─────────────── Identity ───────────────

@@ -5,6 +5,7 @@ import {
   saveIdentity,
   testIdentity,
   saveServices,
+  saveDomainRoot,
   type CatalogService,
   type ConfigInfisical,
   type ServiceInfisical,
@@ -44,6 +45,7 @@ export default function Config() {
   const [environment, setEnvironment] = useState('dev');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [domainRootDraft, setDomainRootDraft] = useState('');
 
   // services editor
   const [rows, setRows] = useState<SvcRow[]>([]);
@@ -55,6 +57,7 @@ export default function Config() {
     setCatalog(svcs);
     if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
     if (c.identity.environment) setEnvironment(c.identity.environment);
+    setDomainRootDraft(c.domain_root.value);
     setRows(toRows(c.services));
   };
 
@@ -96,6 +99,16 @@ export default function Config() {
     }
   };
 
+  const submitDomainRoot = async () => {
+    setBusy('domain-root');
+    try {
+      await saveDomainRoot(domainRootDraft);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const updateRow = (i: number, patch: Partial<SvcRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRow = () =>
@@ -105,9 +118,41 @@ export default function Config() {
   if (!cfg) return <div className="config">読み込み中…</div>;
 
   const id = cfg.identity;
+  const domainRoot = cfg.domain_root;
 
   return (
     <div className="config">
+      <section className="config-card">
+        <h2>Domain root</h2>
+        <p className="muted">
+          Injected into all services through catalog global.env as <code>LUDIARS_ALLOWED_HOSTS</code>.
+          Current: <strong>{domainRoot.value || '(unset)'}</strong> ({domainRoot.source})
+        </p>
+        <p className="muted small">
+          Saved at <code>{domainRoot.storePath}</code>.
+          {domainRoot.env ? <> <code>EXCUBITOR_DOMAIN_ROOT</code> is set, so env takes precedence.</> : null}
+        </p>
+        <div className="config-form">
+          <label>
+            Domain root
+            <input
+              value={domainRootDraft}
+              onChange={(e) => setDomainRootDraft(e.target.value)}
+              placeholder="example.com"
+            />
+          </label>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null || !domainRootDraft.trim()}
+              onClick={() => void submitDomainRoot()}
+            >
+              {busy === 'domain-root' ? 'Saving...' : 'Save domain root'}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section className="config-card">
         <h2>Infisical machine identity</h2>
         <p className="muted">
