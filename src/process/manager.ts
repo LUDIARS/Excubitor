@@ -143,6 +143,23 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
       : svc.start_script
         ? dirname(svc.start_script)
         : undefined);
+  // #req1: Windows でコンソールウィンドウを出さずに起動する (バックグラウンド常駐)。
+  //
+  // Windows の CreateProcess 仕様上、 windowsHide が立てる CREATE_NO_WINDOW は
+  // detached が立てる DETACHED_PROCESS と併用すると「無視」される
+  // (https://learn.microsoft.com/windows/win32/procthread/process-creation-flags)。
+  // 旧実装は detached:true + windowsHide:true を併用していたため窓抑止が効かず、
+  // コンソール非保持の cmd.exe が自前で新規コンソール窓を出していた。
+  //
+  // → Windows では detached を外し windowsHide(=CREATE_NO_WINDOW)を有効化する。
+  //   cmd.exe は「窓を持たない自前コンソール」上でコマンドを走らせる。
+  //   - 再起動耐性: Windows は親終了で子を連鎖終了しない (detached 不要で生存)。
+  //     boot 時の pid 再採用 (reconcile/adoptProcess) もそのまま機能。
+  //   - Ctrl-C 巻き添え防止: CREATE_NO_WINDOW の子は親と別コンソールを持つため、
+  //     Excubitor 側コンソールの Ctrl-C は届かない。
+  //   - 停止は taskkill /T /F (killService)、 ログは fd 直結なので detached と無関係。
+  // 非 Windows は setsid/プロセスグループ生存のため従来どおり detached を維持する。
+  const detached = process.platform !== 'win32';
   const child = spawn(cmd, args, {
     cwd: resolvedCwd,
     // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
@@ -150,11 +167,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     shell: svc.runtime !== 'app',
     env: { ...process.env, ...(opts.env ?? {}) },
     stdio: ['ignore', stdoutFd, stderrFd],
-    // detached: Excubitor 自身が再起動/停止してもサービスを道連れにしない
-    // (= 監視コアの状態がサービスに影響しない)。 boot 時に pid で再採用する。
-    detached: true,
-    // #req1: Windows でコンソールウィンドウを出さずに起動する (バックグラウンド常駐)。
-    // detached + shell の cmd.exe 窓 / アプリ窓を SW_HIDE で抑止する。
+    detached,
     windowsHide: true,
   });
   // 親 (Excubitor) の event loop を子に縛られないよう unref。
@@ -165,7 +178,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   const restartCount = opts.initialRestartCount ?? 0;
   const spawned: SpawnedProcess = { code: svc.code, child, startedAt: new Date(), restartCount };
   processes.set(svc.code, spawned);
-  logger.info({ code: svc.code, pid: child.pid, restartCount }, 'spawned (detached)');
+  logger.info({ code: svc.code, pid: child.pid, restartCount, detached }, 'spawned (windowless)');
 
   await updateState(svc.code, 'running', child.pid ?? null);
 
