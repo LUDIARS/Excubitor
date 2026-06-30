@@ -54,6 +54,8 @@ import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
 import { buildFederationRouter } from './federation/router.js';
+import { arsRoot } from './shared/roots.js';
+import { reconcileMcpJson } from './mcp/mcp-json.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -85,6 +87,16 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // 各サービスは同じトークン (env or token ファイル) で /api/v1/secrets/resolve を叩く。
   getOrCreateAgentToken();
   logger.info({ tokenPath: agentTokenPath() }, 'secret-agent token ready');
+
+  // .mcp.json (ワークスペース直下) の excubitor エントリを arsRoot 由来パスに整合する。
+  // 自分の MCP サーバ (Excubitor/src/mcp/server.ts) を指すので Excubitor が own。
+  // E:/Document/Ars 固定だと別ドライブのマシンで MCP が起動できないのを解消。
+  try {
+    const r = reconcileMcpJson(arsRoot());
+    if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
+  }
 
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
