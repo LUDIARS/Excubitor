@@ -16,13 +16,13 @@ import { createNamedLogger } from '../shared/logger.js';
 import { safeExec } from '../shared/exec.js';
 import { repoDirOf } from '../update/checker.js';
 import type { Catalog } from '../catalog/loader.js';
+import { arsRoot } from '../shared/roots.js';
 
 const logger = createNamedLogger('excubitor.discovery');
 
-/** Ars ワークスペースのルート (env override 可)。 */
-export function arsRoot(): string {
-  return process.env.EXCUBITOR_ARS_ROOT?.replace(/[\\/]+$/, '') || 'E:/Document/Ars';
-}
+// ワークスペースルートは shared/roots.ts に集約 (env EXCUBITOR_ARS_ROOT / LUDIARS_ROOT
+// → cwd の親)。 後方互換のため discovery からも re-export する。
+export { arsRoot };
 
 export interface DiscoveredRepo {
   name: string;

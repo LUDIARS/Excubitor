@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
 import { readAutoServicesRaw } from './auto-catalog-file.js';
+import { arsRoot, domainRoot } from '../shared/roots.js';
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -110,7 +111,7 @@ const ServiceSchema = z.object({
    * `command` より優先してこのスクリプトを spawn する。 既存の start-<service>.bat
    * (git pull → 関連リポ build → npm run dev) をそのまま Excubitor から「ウィンドウ無し」で
    * 起動するための口。 cwd 省略時はスクリプトのあるディレクトリで実行する。
-   * 例: start_script: E:/Document/Ars/start-concordia.bat
+   * 例: start_script: ${ARS_ROOT}/start-concordia.bat
    */
   start_script: z.string().optional(),
   compose_file: z.string().optional(),
@@ -132,7 +133,7 @@ const ServiceSchema = z.object({
    * Vestigium が吐ぁEJSONL ログのチE��レクトリ、E
    * 設定があれば observability は file-tail でこちらを読み、E
    * 旧 process-bridge (spawn ↁEstdout capture) より優先する、E
-   * 侁E `E:/Document/Ars/logs/cernere`
+   * 例: `${ARS_ROOT}/logs/cernere`
    */
   log_path: z.string().optional(),
   /**
@@ -159,7 +160,7 @@ const ServiceSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   /**
    * runtime=app 専用。 起動する実行ファイル (絶対パス推奨) と引数。
-   * 例: exec: E:/Document/Ars/Hora/src-tauri/target/release/hora.exe
+   * 例: exec: ${ARS_ROOT}/Hora/src-tauri/target/release/hora.exe
    * dev 起動 (npm run tauri dev 等) は runtime=node + command で表現する。
    */
   exec: z.string().optional(),
@@ -262,7 +263,12 @@ export function serviceTier(svc: Service): Tier {
 export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const absPath = resolve(process.cwd(), path);
   const raw = readFileSync(absPath, 'utf8');
-  const parsed = (load(raw) ?? {}) as { services?: unknown[]; [k: string]: unknown };
+  // ${ARS_ROOT} / ${DOMAIN_ROOT} をマシン依存の実値に補間してから parse する
+  // (catalog にドライブ/ドメインを焼き込まず、 env or cwd の親から解決する)。
+  const interpolated = raw
+    .replaceAll('${ARS_ROOT}', arsRoot())
+    .replaceAll('${DOMAIN_ROOT}', domainRoot());
+  const parsed = (load(interpolated) ?? {}) as { services?: unknown[]; [k: string]: unknown };
   const baseServices = Array.isArray(parsed.services) ? parsed.services : [];
 
   // スキャンが生成した自動カタログをマージする。 手書き services.yaml に同 code が
