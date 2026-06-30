@@ -175,7 +175,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   app.route('/', buildLaunchRouter(() => currentCatalog!));
 
   // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
-  app.route('/', buildConfigRouter());
+  app.route('/', buildConfigRouter({ onDomainRootChanged: () => reloadCatalog('domain root change') }));
 
   // secret-agent (/api/v1/secrets/resolve — service code → resolved secret、 token 認証)
   app.route('/', buildSecretAgentRouter((code) => findService(code)?.infisical));
