@@ -14,6 +14,8 @@ import {
   applyInfisicalToEnv,
   getServiceMap,
   setServiceMap,
+  getDomainRootStatus,
+  setDomainRootOverride,
 } from './config-store.js';
 import { verifyIdentity } from './infisical.js';
 
@@ -37,13 +39,36 @@ const ServicesSchema = z.object({
   services: z.record(z.string(), ServiceInfisicalSchema),
 });
 
-export function buildConfigRouter(): Hono {
+const DomainRootSchema = z.object({
+  domain_root: z.string().min(1),
+});
+
+export interface ConfigRouterDeps {
+  onDomainRootChanged?: () => unknown | Promise<unknown>;
+}
+
+export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
   const app = new Hono();
 
   // identity の状態 (configured / siteUrl / clientId ヒント) + サービスマッピング。
   app.get('/api/v1/config/infisical', (c) =>
-    c.json({ identity: getIdentityStatus(), services: getServiceMap() }),
+    c.json({ identity: getIdentityStatus(), services: getServiceMap(), domain_root: getDomainRootStatus() }),
   );
+
+  app.get('/api/v1/config/domain-root', (c) => c.json({ domain_root: getDomainRootStatus() }));
+
+  app.put('/api/v1/config/domain-root', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = DomainRootSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      setDomainRootOverride(parsed.data.domain_root);
+      await deps.onDomainRootChanged?.();
+      return c.json({ ok: true, domain_root: getDomainRootStatus() });
+    } catch (err) {
+      return c.json({ error: 'invalid_domain_root', message: (err as Error).message }, 400);
+    }
+  });
 
   // identity を保存 (暗号化) し、 即 process.env に反映。
   app.put('/api/v1/config/infisical/identity', async (c) => {

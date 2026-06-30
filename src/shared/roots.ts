@@ -12,6 +12,7 @@
  */
 
 import { dirname, resolve } from "node:path";
+import { DEFAULT_DOMAIN_ROOT, getDomainRootOverride, normalizeDomainRoot } from "../secrets/config-store.js";
 
 /** 末尾スラッシュを除去し、 forward-slash に正規化する (catalog の path 表記と揃える)。 */
 function normalizeRoot(p: string): string {
@@ -39,5 +40,7 @@ export function arsRoot(): string {
  * env `EXCUBITOR_DOMAIN_ROOT` で上書き、 未設定なら `.melpot.dev`。
  */
 export function domainRoot(): string {
-  return (process.env.EXCUBITOR_DOMAIN_ROOT ?? "").trim() || ".melpot.dev";
+  const env = (process.env.EXCUBITOR_DOMAIN_ROOT ?? "").trim();
+  if (env) return normalizeDomainRoot(env);
+  return getDomainRootOverride() ?? DEFAULT_DOMAIN_ROOT;
 }

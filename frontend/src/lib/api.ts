@@ -255,9 +255,19 @@ export interface ServiceInfisical {
   exclude?: string[];
 }
 
+export interface DomainRootStatus {
+  value: string;
+  source: 'env' | 'config' | 'unset';
+  configured: boolean;
+  env: string | null;
+  default_value: string;
+  storePath: string;
+}
+
 export interface ConfigInfisical {
   identity: IdentityStatus;
   services: Record<string, ServiceInfisical>;
+  domain_root: DomainRootStatus;
 }
 
 export interface IdentityInput {
@@ -393,6 +403,12 @@ export function saveServices(services: Record<string, ServiceInfisical>) {
     '/api/v1/config/infisical/services',
     { services },
   );
+}
+
+export function saveDomainRoot(domainRoot: string) {
+  return putJSON<{ ok: boolean; domain_root: DomainRootStatus }>('/api/v1/config/domain-root', {
+    domain_root: domainRoot,
+  });
 }
 
 // ─── updates / discovery ───
