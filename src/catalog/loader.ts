@@ -66,6 +66,8 @@ const MemoryMonitorServiceSchema = z.object({
 const ServiceSchema = z.object({
   code: z.string(),
   name: z.string(),
+  disabled: z.boolean().default(false),
+  description: z.string().optional(),
   /**
    * デプロイ/挙動クラス。 ローカルアプリ と SaaS で Excubitor の扱いを分けるための分類。
    * - saas      : 多人数向けにデプロイするバックエンド Web サービス (SaaS ランチャーが管理)
@@ -85,6 +87,8 @@ const ServiceSchema = z.object({
   component: z.string().optional(),
   /** 主要Elistening port (host から見える�E)、E*/
   port: z.number().int().optional(),
+  frontend_url: z.string().optional(),
+  domain: z.string().optional(),
   /**
    * true のとぁEversion / git 惁E��の取得をスキチE�E (infra の DB 等、Eソースを管琁E��てなぁE��象向け)、E
    */
@@ -223,8 +227,15 @@ const MemoryGlobalSchema = z.object({
   cpu_alert: CpuAlertSchema.default({}),
 });
 
+const GlobalSchema = z.object({
+  /** 全サービス共通で注入する env。 サービス固有 env / secret より低優先。 */
+  env: z.record(z.string(), z.string()).optional(),
+});
+
 const CatalogSchema = z.object({
   services: z.array(ServiceSchema),
+  /** カタログ全体に適用するグローバル設定。 */
+  global: GlobalSchema.optional(),
   /** メモリ監視のグローバル設定 (interval / 保持期間 / WSL)。 */
   memory_monitor: MemoryGlobalSchema.default({}),
 });
