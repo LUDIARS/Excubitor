@@ -14,6 +14,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
 import { resolveServiceInfisical } from '../secrets/config-store.js';
 import { sharedLogsRoot } from '../log/logs-root.js';
+import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
@@ -42,6 +43,20 @@ export function vestigiumEnvFor(svc: Pick<Service, 'log_path'>): Record<string, 
 }
 
 /**
+ * LUDIARS ワークスペースルートを spawn 子に伝える env。 **全サービスに共有ルート `<root>` を渡す**。
+ *
+ * これまで各サービスが作業ディレクトリ (workspace root / spawn cwd) を `E:\Document\Ars` 等で
+ * 直書きしており、 別ドライブ (D:\LUDIARS) のマシンで壊れていた。 ルートの正本は Excubitor の
+ * `arsRoot()` (env `EXCUBITOR_ARS_ROOT` / `LUDIARS_ROOT` → cwd 親) なので、 それを `LUDIARS_ROOT`
+ * として子へ注入し、 各サービスはこの env を基準に作業ディレクトリを決める (ドライブ非依存)。
+ *
+ * 純関数 (テスト可能)。 `.env` ファイルには依存せず、 プロセス env として配る。
+ */
+export function arsRootEnvFor(): Record<string, string> {
+  return { LUDIARS_ROOT: arsRoot() };
+}
+
+/**
  * spawn する子プロセスに渡す env を解決する。
  * - 常に topology env (URL/port、 Excubitor が catalog から特定可能な情報) を含む
  * - infisical inject 設定があれば secret を fetch して topology に上書きマージ
@@ -52,12 +67,13 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const topology = getTopologyEnv();
   // サービス固有の静的 env (catalog の env:)。 topology より優先 (port 上書き等)。
   const staticEnv = svc.env ?? {};
-  // Vestigium ログ先 (最低優先 — catalog env: / secret で上書き可)。
+  // 共有ルート / Vestigium ログ先 (最低優先 — catalog env: / secret で上書き可)。
+  const arsRootEnv = arsRootEnvFor();
   const vestigiumEnv = vestigiumEnvFor(svc);
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  // 優先順位: vestigium < global < topology < 静的 env (catalog) < secret。
-  if (!cfg || !cfg.inject) return { ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv };
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret。
+  if (!cfg || !cfg.inject) return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv };
 
   const id = readIdentity();
   if (!id) {
@@ -77,6 +93,6 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  // 優先順位: vestigium < global < topology < 静的 env (catalog) < secret。
-  return { ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env };
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret。
+  return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env };
 }
