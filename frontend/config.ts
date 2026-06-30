@@ -51,5 +51,9 @@ export function resolveAllowedHosts(): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  return [...config.allowedHosts, ...extra];
+  const shared = (process.env.LUDIARS_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...config.allowedHosts, ...extra, ...shared];
 }
