@@ -57,6 +57,7 @@ import { buildFederationRouter } from './federation/router.js';
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
 import { runEmergencyAction } from './ops/emergency.js';
+import { writeDiagnostic } from './shared/diagnostic-log.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -173,6 +174,19 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
 
+  app.onError((err, c) => {
+    logger.error(
+      { err: err.stack ?? err.message, method: c.req.method, path: c.req.path },
+      'observability request failed',
+    );
+    writeDiagnostic('observability.request.failed', {
+      err: err.stack ?? err.message,
+      method: c.req.method,
+      path: c.req.path,
+    });
+    return c.json({ error: 'internal_server_error', message: err.message }, 500);
+  });
+
   // reviews router (path 冁E�Eで /api/v1/reviews を持つ ので root mount)
   app.route('/', buildReviewsRouter());
 
@@ -180,7 +194,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   app.route('/', buildHubRouter());
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)
-  app.route('/', buildLaunchRouter(() => currentCatalog!));
+  app.route('/', buildLaunchRouter(() => currentCatalog!, (reason) => reloadCatalog(reason)));
 
   // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
   app.route('/', buildConfigRouter({ onDomainRootChanged: () => reloadCatalog('domain root change') }));

@@ -16,6 +16,7 @@ export interface Component {
   disabled?: boolean;
   description?: string | null;
   component: string | null;
+  project_code?: string | null;
   runtime: string | null;
   state: string;
   port: number | null;
@@ -23,12 +24,13 @@ export interface Component {
   backend_port?: number | null;
   ports?: Array<{ role: string; port: number; env?: string | null }>;
   frontend_url?: string | null;
+  subdomain?: string | null;
   domain?: string | null;
   git: GitInfo;
   package_version: string | null;
   monitor_only: boolean;
   host: Host | null;
-  last_seen_at: string | null;
+  last_seen_at: number | null;
   docker_id: string | null;
   /** Vestigium JSONL ログを持つか (バッジ表示用)。 */
   has_vestigium?: boolean;
@@ -647,6 +649,18 @@ export function setCorpusPref(code: string, usesCorpus: boolean | null) {
   return putJSON<{ ok: boolean; code: string; uses_corpus: boolean | null }>(
     `/api/v1/services/${encodeURIComponent(code)}/corpus-pref`,
     { uses_corpus: usesCorpus },
+  );
+}
+
+export interface CatalogInfoInput {
+  project_code?: string | null;
+  subdomain?: string | null;
+}
+
+export function saveCatalogInfo(code: string, input: CatalogInfoInput) {
+  return putJSON<{ ok: boolean; code: string }>(
+    `/api/v1/services/${encodeURIComponent(code)}/catalog-info`,
+    input,
   );
 }
 
