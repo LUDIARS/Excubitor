@@ -100,6 +100,7 @@ const ServiceSchema = z.object({
   backend_port: z.number().int().optional(),
   ports: z.array(ManagedPortSchema).optional(),
   frontend_url: z.string().optional(),
+  subdomain: z.string().optional(),
   domain: z.string().optional(),
   /**
    * true のとぁEversion / git 惁E��の取得をスキチE�E (infra の DB 等、Eソースを管琁E��てなぁE��象向け)、E

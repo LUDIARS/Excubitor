@@ -23,6 +23,7 @@ export interface PlanService {
   backend_port: number | null;
   ports: Array<{ role: string; port: number; env?: string | null }>;
   frontend_url: string | null;
+  subdomain: string | null;
   domain: string | null;
   monitor_only: boolean;
   /** Excubitor が起動制御できる runtime か (raw docker は未対応)。 */
@@ -72,6 +73,7 @@ export function buildPlanProjects(
       backend_port: svc.backend_port ?? null,
       ports: svc.ports ?? [],
       frontend_url: svc.frontend_url ?? null,
+      subdomain: svc.subdomain ?? null,
       domain: svc.domain ?? null,
       monitor_only: svc.monitor_only,
       startable: !svc.disabled && STARTABLE_RUNTIMES.has(svc.runtime),
