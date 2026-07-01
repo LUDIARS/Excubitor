@@ -602,10 +602,13 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run dev
-    # 既存の start-concordia.bat (Concordia/Lictor/Vestigium を pull → Lictor build → npm run dev)
-    # をそのまま「ウィンドウ無し」で起動する。 単純な npm run dev では関連リポ同期/ビルドが漏れる。
-    start_script: ${ARS_ROOT}/start-concordia.bat
+    command: npm run dev:backend
+    env:
+      # Discord relay / egress can become busy under active Lictor sessions.
+      # Keep Web/API responsive by running Discord as the concordia-discord worker.
+      CONCORDIA_DISCORD_EMBEDDED: "0"
+    # backend only. Discord relay is split into concordia-discord so Web/API
+    # stays responsive even when gateway relay or transcript egress is busy.
     autostart: false
     # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
     # VESTIGIUM_LOGS_DIR=dirname(log_path)=${ARS_ROOT}/logs を注入し、 Concordia の Vestigium が
@@ -619,6 +622,23 @@ services:
       interval_sec: 30
     provides:
       CONCORDIA_URL: http://${host}:${port}
+
+  - code: concordia-discord
+    name: Concordia Discord Worker
+    tier: personal
+    project_code: concordia
+    component: worker
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: ${ARS_ROOT}/Concordia
+    command: npm run discord:worker
+    autostart: false
+    restart_policy: on-failure
+    max_restart: 5
+    log_path: ${ARS_ROOT}/logs/concordia-discord
+    health:
+      type: process
+      interval_sec: 30
 
   - code: concordia-web
     name: Concordia Web
