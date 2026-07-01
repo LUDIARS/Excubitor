@@ -573,6 +573,24 @@ services:
     # VESTIGIUM_LOGS_DIR=${ARS_ROOT}/logs を注入し、 Anatomia が <root>/anatomia/ に書く。
     log_path: ${ARS_ROOT}/logs/anatomia
 
+  - code: thaleia
+    name: Thaleia (unified spec/domain view)
+    tier: personal
+    project_code: thaleia
+    component: backend
+    port: 8890
+    repo: LUDIARS/Thaleia
+    runtime: node
+    cwd: ${ARS_ROOT}/Thaleia
+    command: npm run start
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8890/health
+      interval_sec: 30
+    provides:
+      THALEIA_URL: http://${host}:${port}
+
   - code: concordia
     name: Concordia (AI 協調)
     tier: personal
