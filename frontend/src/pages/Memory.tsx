@@ -29,22 +29,22 @@ export default function Memory() {
 
   return (
     <div className="memory">
-      {error && <div className="error-banner">エラー: {error}</div>}
-      {data === null && !error && <div className="empty-state">読み込み中…</div>}
+      {error && <div className="error-banner">Error: {error}</div>}
+      {data === null && !error && <div className="empty-state">Loading...</div>}
       {data && (
         <>
           {data.host && (
             <>
-              <h2 className="mem-section-title">マシン全体</h2>
+              <h2 className="mem-section-title">Host</h2>
               <div className="mem-grid">
                 <HostCard c={data.host} />
               </div>
             </>
           )}
 
-          <h2 className="mem-section-title">サービス</h2>
+          <h2 className="mem-section-title">Services</h2>
           {data.services.length === 0 ? (
-            <div className="empty-state">running なサービスのメモリサンプルがまだありません。</div>
+            <div className="empty-state">No running service samples yet.</div>
           ) : (
             <div className="mem-grid">
               {data.services.map((c) => (
@@ -53,9 +53,9 @@ export default function Memory() {
             </div>
           )}
 
-          <h2 className="mem-section-title">WSL バックエンド</h2>
+          <h2 className="mem-section-title">WSL</h2>
           {data.wsl.length === 0 ? (
-            <div className="empty-state">WSL サンプルなし (WSL 未起動 / 無効)。</div>
+            <div className="empty-state">No WSL samples.</div>
           ) : (
             <div className="mem-grid">
               {data.wsl.map((c) => (
@@ -70,35 +70,47 @@ export default function Memory() {
 }
 
 const VERDICT_LABEL: Record<LeakVerdict, string> = {
-  insufficient: 'データ不足',
-  ok: '正常',
-  suspect: '疑い',
-  leaking: 'リーク',
+  insufficient: 'no data',
+  ok: 'ok',
+  suspect: 'suspect',
+  leaking: 'leaking',
 };
 
 function MemCard({ c }: { c: MemoryCard }) {
   const slopeMb = c.leak.slopeBytesPerHour / (1024 * 1024);
-  const verdictColor = c.leak.verdict === 'leaking' ? '#f87171' : c.leak.verdict === 'suspect' ? '#fbbf24' : '#60a5fa';
+  const verdictColor = c.budget.ok === false
+    ? '#f87171'
+    : c.leak.verdict === 'leaking'
+      ? '#f87171'
+      : c.leak.verdict === 'suspect'
+        ? '#fbbf24'
+        : '#60a5fa';
   return (
-    <article className={`mem-card ${c.leak.verdict}`}>
+    <article className={`mem-card ${c.leak.verdict} ${c.budget.ok === false ? 'over-budget' : ''}`}>
       <div className="mem-card-head">
         <span className="mem-name">{c.name}</span>
-        <span className={`mem-badge ${c.leak.verdict}`}>{VERDICT_LABEL[c.leak.verdict]}</span>
+        <span className={`mem-badge ${c.budget.ok === false ? 'over-budget' : c.leak.verdict}`}>
+          {c.budget.ok === false ? 'over budget' : VERDICT_LABEL[c.leak.verdict]}
+        </span>
       </div>
-      <div className="mem-rss">{formatBytes(c.rss_bytes)}{c.cpu_pct != null && <span className="mem-cpu"> · CPU {c.cpu_pct.toFixed(1)}%</span>}</div>
+      <div className="mem-rss">
+        {formatBytes(c.rss_bytes)}
+        {c.cpu_pct != null && <span className="mem-cpu"> CPU {c.cpu_pct.toFixed(1)}%</span>}
+      </div>
       <Sparkline points={c.spark} color={verdictColor} />
+      <BudgetLine c={c} />
       <div className="mem-meta">
-        <span>傾き: {slopeMb >= 0 ? '+' : ''}{slopeMb.toFixed(1)} MB/h</span>
+        <span>slope {slopeMb >= 0 ? '+' : ''}{slopeMb.toFixed(1)} MB/h</span>
         {c.leak.verdict !== 'insufficient' && (
-          <span> · 単調 {(c.leak.monotonicRatio * 100).toFixed(0)}%</span>
+          <span> monotonic {(c.leak.monotonicRatio * 100).toFixed(0)}%</span>
         )}
-        <span> · {c.primary_source}</span>
-        {c.pid != null && <span> · pid {c.pid}</span>}
+        <span> {c.primary_source}</span>
+        {c.pid != null && <span> pid {c.pid}</span>}
       </div>
       {c.heap_used_bytes != null && (
         <div className="mem-heap">
           heap {formatBytes(c.heap_used_bytes)} / {formatBytes(c.heap_total_bytes)}
-          {c.external_bytes != null && <> · external {formatBytes(c.external_bytes)}</>}
+          {c.external_bytes != null && <> external {formatBytes(c.external_bytes)}</>}
         </div>
       )}
     </article>
@@ -115,21 +127,36 @@ function HostCard({ c }: { c: MemoryCard }) {
         {c.cpu_pct != null && <span className="mem-badge ok">CPU {c.cpu_pct.toFixed(1)}%</span>}
       </div>
       <div className="mem-rss">
-        メモリ {formatBytes(c.rss_bytes)}
+        Memory {formatBytes(c.rss_bytes)}
         {total != null && <> / {formatBytes(total)}</>}
         {memPct != null && <span className="mem-cpu"> ({memPct.toFixed(0)}%)</span>}
       </div>
       <Sparkline points={c.cpu_spark.map((p) => ({ t: p.t, rss: p.cpu }))} color="#34d399" />
       <div className="mem-meta">
-        <span>CPU 使用率の推移</span>
-        {typeof c.detail?.cpuCount === 'number' && <span> · {c.detail.cpuCount} コア</span>}
+        <span>CPU usage trend</span>
+        {typeof c.detail?.cpuCount === 'number' && <span> {c.detail.cpuCount} cores</span>}
       </div>
     </article>
   );
 }
 
+function BudgetLine({ c }: { c: MemoryCard }) {
+  const hasBudget = c.budget.rss_budget_bytes != null || c.budget.cpu_budget_pct != null;
+  if (!hasBudget) return <div className="mem-budget muted">No budget set</div>;
+  return (
+    <div className={`mem-budget ${c.budget.ok === false ? 'bad' : 'ok'}`}>
+      {c.budget.rss_budget_bytes != null && (
+        <span>Memory {c.budget.rss_ok === false ? 'over' : 'ok'} / {formatBytes(c.budget.rss_budget_bytes)}</span>
+      )}
+      {c.budget.cpu_budget_pct != null && (
+        <span>CPU {c.budget.cpu_ok === false ? 'over' : 'ok'} / {c.budget.cpu_budget_pct}%</span>
+      )}
+    </div>
+  );
+}
+
 function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || !isFinite(bytes)) return '—';
+  if (bytes == null || !isFinite(bytes)) return '-';
   if (bytes < 1024) return `${bytes} B`;
   const mib = bytes / 1024 ** 2;
   if (mib < 1024) return `${mib.toFixed(1)} MiB`;

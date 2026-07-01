@@ -20,6 +20,10 @@ export async function runAutostart(
 
   for (const svc of catalog.services) {
     if (!svc.autostart) continue;
+    if (svc.disabled) {
+      skipped.push(svc.code);
+      continue;
+    }
     // app は GUI 製品なので既定では autostart しないが、 catalog で autostart=true を
     // 明示したものは opt-in として起動する (node / dev-process-md と同じ spawn 経路)。
     if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md' && svc.runtime !== 'app') {

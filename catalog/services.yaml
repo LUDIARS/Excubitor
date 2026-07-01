@@ -602,6 +602,23 @@ services:
     provides:
       CONCORDIA_URL: http://${host}:${port}
 
+  - code: concordia-web
+    name: Concordia Web
+    tier: personal
+    project_code: concordia
+    component: frontend
+    port: 10101
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: ${ARS_ROOT}/Concordia/web
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      CONCORDIA_WEB_URL: http://${host}:${port}
+
   - code: conciliator
     name: Conciliator (衝突検知)
     tier: personal
@@ -707,10 +724,13 @@ services:
 # 各サービスの RSS (プロセスツリー合算 / docker stats) を時系列で採取し、 単調増加トレンドを
 # leak として error_tasks に起票する。 WSL2 バックエンドは distro 内部 + Windows 側 vmmem を別軸で監視。
 # per-service の閾値は各サービスの memory: ブロックで上書きできる (既定 60 分窓 / 50MB/h)。
+# memory.rss_budget_mb / memory.cpu_budget_pct でサービスごとの予算を上書きできる。
 memory_monitor:
   enabled: true
   interval_sec: 60        # サンプリング間隔
   retention_hours: 48     # memory_samples の保持期間 (これより古い行は剪定)
+  default_service_rss_budget_mb: 1024
+  default_service_cpu_budget_pct: 80
   wsl:
     enabled: true
     distros: []           # 空 = `wsl -l -q` で自動検出 (docker-desktop 系は除外)

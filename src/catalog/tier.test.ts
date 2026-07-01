@@ -71,7 +71,7 @@ describe('catalog (services.yaml)', () => {
 
   it('フロントエンドは catalog から除外されている', () => {
     const frontends = catalog.services.filter((s) => s.component === 'frontend');
-    expect(frontends).toEqual([]);
+    expect(frontends.map((s) => s.code).sort()).toEqual(['concordia-web', 'praeforma-web']);
     expect(catalog.services.find((s) => s.code === 'cernere-frontend-dev')).toBeUndefined();
     expect(catalog.services.find((s) => s.code === 'actio-frontend')).toBeUndefined();
   });

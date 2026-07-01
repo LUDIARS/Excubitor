@@ -13,11 +13,12 @@ import type { Service } from '../catalog/loader.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap } from '../secrets/infisical.js';
 import { resolveServiceInfisical } from '../secrets/config-store.js';
 import { listListeners, type PortListener } from '../scanner/ports.js';
+import { managedPortsForService } from '../catalog/ports.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical' | 'start_script' | 'port';
+  kind: 'cwd' | 'compose_file' | 'infisical' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
 }
@@ -110,6 +111,19 @@ function checkPort(svc: Service, listeners: PortListener[]): PreflightCheck | nu
   };
 }
 
+function checkPorts(svc: Service, listeners: PortListener[]): PreflightCheck[] {
+  return managedPortsForService(svc).map((p) => {
+    const l = listeners.find((x) => x.port === p.port);
+    if (!l) return { kind: 'port' as const, status: 'ok' as const, detail: `${p.role} :${p.port} free` };
+    const who = l.processNames.length > 0 ? l.processNames.join(',') : `pid ${l.pids.join(',')}`;
+    return {
+      kind: 'port' as const,
+      status: 'warn' as const,
+      detail: `${p.role} :${p.port} already in use (${who})`,
+    };
+  });
+}
+
 /** 選択された service を preflight する。 */
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
@@ -123,10 +137,10 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
   const result: ServicePreflight[] = [];
   for (const svc of targets) {
     const checks = checkPaths(svc);
+    if (svc.disabled) checks.push({ kind: 'disabled', status: 'fail', detail: 'disabled in catalog' });
     const { check: infCheck, injected } = await checkInfisical(svc);
     checks.push(infCheck);
-    const portCheck = checkPort(svc, listeners);
-    if (portCheck) checks.push(portCheck);
+    checks.push(...checkPorts(svc, listeners));
     result.push({
       code: svc.code,
       name: svc.name,

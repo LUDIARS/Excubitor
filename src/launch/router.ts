@@ -146,11 +146,18 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
           return {
             code: s.code,
             name: s.name,
+            disabled: s.disabled,
+            description: s.description,
             component: s.component,
             runtime: s.runtime,
             tier: s.tier,
             state: s.state,
             port: s.port,
+            frontend_port: s.frontend_port,
+            backend_port: s.backend_port,
+            ports: s.ports,
+            frontend_url: s.frontend_url,
+            domain: s.domain,
             git: {
               branch: d?.git_branch ?? null,
               hash: d?.git_hash ?? null,
