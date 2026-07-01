@@ -10,6 +10,7 @@
 
 import { execCapture } from '../shared/exec.js';
 import type { Catalog, Service } from '../catalog/loader.js';
+import { managedPortsForService } from '../catalog/ports.js';
 
 export interface PortListener {
   port: number;
@@ -27,6 +28,7 @@ export interface DeclaredConflict {
 export interface ServicePortStatus {
   code: string;
   name: string;
+  role: string;
   port: number;
   state: string;
   /** port が LISTEN されているか。 */
@@ -158,16 +160,18 @@ export async function listListeners(): Promise<PortListener[]> {
 
 /** catalog 内で port を宣言している (port を持つ) 対象サービスを抽出する。 */
 function portfulServices(catalog: Catalog): Service[] {
-  return catalog.services.filter((s) => typeof s.port === 'number');
+  return catalog.services.filter((s) => managedPortsForService(s).length > 0);
 }
 
 /** catalog 内の port 重複宣言を検出する (infra の compose 共有等も含めて素朴に列挙)。 */
 export function detectDeclaredConflicts(catalog: Catalog): DeclaredConflict[] {
   const byPort = new Map<number, string[]>();
   for (const s of portfulServices(catalog)) {
-    const list = byPort.get(s.port!) ?? [];
-    list.push(s.code);
-    byPort.set(s.port!, list);
+    for (const p of managedPortsForService(s)) {
+      const list = byPort.get(p.port) ?? [];
+      list.push(`${s.code}:${p.role}`);
+      byPort.set(p.port, list);
+    }
   }
   return [...byPort.entries()]
     .filter(([, codes]) => codes.length > 1)
@@ -186,8 +190,8 @@ export async function buildPortReport(
   const listeners = await listListeners();
   const byPort = new Map(listeners.map((l) => [l.port, l]));
 
-  const services: ServicePortStatus[] = portfulServices(catalog).map((s) => {
-    const l = byPort.get(s.port!);
+  const services: ServicePortStatus[] = portfulServices(catalog).flatMap((s) => managedPortsForService(s).map((p) => {
+    const l = byPort.get(p.port);
     const state = stateByCode.get(s.code) ?? 'unknown';
     const listening = !!l;
     // 起動中サービスが port を掴んでいる = 正常。 停止中なのに掴まれている = foreign 占有。
@@ -195,14 +199,15 @@ export async function buildPortReport(
     return {
       code: s.code,
       name: s.name,
-      port: s.port!,
+      role: p.role,
+      port: p.port,
       state,
       listening,
       pids: l?.pids ?? [],
       processNames: l?.processNames ?? [],
       conflict,
     };
-  });
+  }));
 
   return {
     listeners,

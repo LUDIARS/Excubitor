@@ -63,6 +63,10 @@ export async function startSelection(
   for (let i = 0; i < tiers.length; i++) {
     const tier = tiers[i]!;
     for (const svc of tier.services) {
+      if (svc.disabled) {
+        results.push({ code: svc.code, ok: false, skipped: true, message: 'disabled in catalog' });
+        continue;
+      }
       if (notReady.has(svc.code)) {
         results.push({ code: svc.code, ok: false, skipped: true, message: 'preflight not ready' });
         continue;

@@ -19,6 +19,7 @@ import type { Catalog } from '../catalog/loader.js';
 import { arsRoot } from '../shared/roots.js';
 
 const logger = createNamedLogger('excubitor.discovery');
+const SELF_REPO_NAMES = new Set(['excubitor']);
 
 // ワークスペースルートは shared/roots.ts に集約 (env EXCUBITOR_ARS_ROOT / LUDIARS_ROOT
 // → cwd の親)。 後方互換のため discovery からも re-export する。
@@ -76,6 +77,7 @@ export async function discoverServices(catalog: Catalog): Promise<DiscoveryResul
   }
 
   for (const name of entries) {
+    if (SELF_REPO_NAMES.has(name.toLowerCase())) continue;
     const path = join(root, name);
     if (!existsSync(join(path, '.git'))) continue; // git repo のみ
     if (covered.has(normalize(path))) continue; // 既に catalog がカバー

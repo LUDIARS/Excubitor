@@ -116,6 +116,7 @@ export function analyzeRepo(repo: DiscoveredRepo): GeneratedService | null {
   const pkg = readPkg(repo.path);
   const code = toCode(repo.name);
   if (!code) return null;
+  if (code === 'excubitor') return null;
 
   const base = {
     code,

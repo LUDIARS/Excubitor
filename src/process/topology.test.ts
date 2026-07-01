@@ -23,6 +23,8 @@ function cat(services: Service[]): Catalog {
       enabled: true,
       interval_sec: 60,
       retention_hours: 48,
+      default_service_rss_budget_mb: 1024,
+      default_service_cpu_budget_pct: 80,
       wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
       cpu_alert: { enabled: true, threshold_pct: 85, window_min: 15, sustained_ratio: 0.8, min_samples: 8 },
     },

@@ -16,7 +16,15 @@ export function detectSafeMode(
   env: NodeJS.ProcessEnv = process.env,
   argv: string[] = process.argv,
 ): boolean {
+  if (env.EXCUBITOR_SERVICE_MODE === '1' || argv.includes('--service')) return false;
   return env.EXCUBITOR_SAFE_MODE === '1' || argv.includes('--safe');
+}
+
+export function detectServiceMode(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: string[] = process.argv,
+): boolean {
+  return env.EXCUBITOR_SERVICE_MODE === '1' || argv.includes('--service');
 }
 
 let safeMode = false;
