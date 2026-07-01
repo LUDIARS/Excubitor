@@ -57,11 +57,19 @@ const AutoFixSchema = z.object({
 const MemoryMonitorServiceSchema = z.object({
   enabled: z.boolean().default(true),
   metrics_url: z.string().optional(),
+  rss_budget_mb: z.number().positive().optional(),
+  cpu_budget_pct: z.number().positive().optional(),
   leak_window_min: z.number().positive().default(60),
   leak_threshold_mb_per_hr: z.number().positive().default(50),
   /** CPU 高止まりアラートの per-service 上書き (省略時は cpu_alert グローバル値)。 */
   cpu_threshold_pct: z.number().positive().optional(),
   cpu_window_min: z.number().positive().optional(),
+});
+
+const ManagedPortSchema = z.object({
+  role: z.string().default('service'),
+  port: z.number().int(),
+  env: z.string().optional(),
 });
 
 const ServiceSchema = z.object({
@@ -88,6 +96,9 @@ const ServiceSchema = z.object({
   component: z.string().optional(),
   /** 主要Elistening port (host から見える�E)、E*/
   port: z.number().int().optional(),
+  frontend_port: z.number().int().optional(),
+  backend_port: z.number().int().optional(),
+  ports: z.array(ManagedPortSchema).optional(),
   frontend_url: z.string().optional(),
   domain: z.string().optional(),
   /**
@@ -224,6 +235,8 @@ const MemoryGlobalSchema = z.object({
   enabled: z.boolean().default(true),
   interval_sec: z.number().positive().default(60),
   retention_hours: z.number().positive().default(48),
+  default_service_rss_budget_mb: z.number().positive().default(1024),
+  default_service_cpu_budget_pct: z.number().positive().default(80),
   wsl: WslMonitorSchema.default({}),
   cpu_alert: CpuAlertSchema.default({}),
 });

@@ -53,7 +53,7 @@ describe('detectDeclaredConflicts', () => {
   it('同一 port を宣言する複数サービスを検出する', () => {
     const catalog = { services: [mk('a', 3000), mk('b', 3000), mk('c', 4000)], memory_monitor: {} } as unknown as Catalog;
     const conflicts = detectDeclaredConflicts(catalog);
-    expect(conflicts).toEqual([{ port: 3000, codes: ['a', 'b'] }]);
+    expect(conflicts).toEqual([{ port: 3000, codes: ['a:service', 'b:service'] }]);
   });
 
   it('port 未宣言は無視する', () => {

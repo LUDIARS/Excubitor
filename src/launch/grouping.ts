@@ -11,12 +11,19 @@ const STARTABLE_RUNTIMES = new Set(['docker-compose', 'node', 'dev-process-md'])
 export interface PlanService {
   code: string;
   name: string;
+  disabled: boolean;
+  description: string | null;
   project_code: string;
   component: string | null;
   runtime: string;
   /** デプロイ/挙動クラス (saas / infra / personal / local-app)。 SaaS ランチャーの絞り込み軸。 */
   tier: Tier;
   port: number | null;
+  frontend_port: number | null;
+  backend_port: number | null;
+  ports: Array<{ role: string; port: number; env?: string | null }>;
+  frontend_url: string | null;
+  domain: string | null;
   monitor_only: boolean;
   /** Excubitor が起動制御できる runtime か (raw docker は未対応)。 */
   startable: boolean;
@@ -54,13 +61,20 @@ export function buildPlanProjects(
     const entry: PlanService = {
       code: svc.code,
       name: svc.name,
+      disabled: svc.disabled,
+      description: svc.description ?? null,
       project_code: project,
       component: svc.component ?? null,
       runtime: svc.runtime,
       tier: serviceTier(svc),
       port: svc.port ?? null,
+      frontend_port: svc.frontend_port ?? null,
+      backend_port: svc.backend_port ?? null,
+      ports: svc.ports ?? [],
+      frontend_url: svc.frontend_url ?? null,
+      domain: svc.domain ?? null,
       monitor_only: svc.monitor_only,
-      startable: STARTABLE_RUNTIMES.has(svc.runtime),
+      startable: !svc.disabled && STARTABLE_RUNTIMES.has(svc.runtime),
       start_tier: startTier(svc),
       state: stateByCode.get(svc.code) ?? 'unknown',
       selected: selection.has(svc.code),
