@@ -12,6 +12,9 @@ import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { type Catalog, type Tier, TIER_ORDER } from '../catalog/loader.js';
+import { updateServiceCatalogInfo } from '../catalog/editor.js';
+import { createNamedLogger } from '../shared/logger.js';
+import { writeDiagnostic } from '../shared/diagnostic-log.js';
 import { getLaunchProfile, saveLaunchProfile } from './profile.js';
 import { buildPlanProjects } from './grouping.js';
 import { runPreflight } from './preflight.js';
@@ -26,6 +29,13 @@ const SaveProfileSchema = z.object({
 const CodesSchema = z.object({
   codes: z.array(z.string()).optional(),
 });
+
+const CatalogInfoSchema = z.object({
+  project_code: z.string().trim().min(1).max(80).nullable().optional(),
+  subdomain: z.string().trim().max(120).nullable().optional(),
+});
+
+const logger = createNamedLogger('excubitor.launch.router');
 
 /** service_instances から code→state の map を作る。 */
 /** `?tier=saas,infra` を Tier の Set に解釈する (未指定/不正は undefined = 全 tier)。 */
@@ -48,7 +58,7 @@ function stateByCode(): Map<string, string> {
   return map;
 }
 
-export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
+export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: (reason: string) => Promise<number>): Hono {
   const app = new Hono();
 
   // 起動セット選択画面の plan (profile + project 別サービス)。
@@ -137,8 +147,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
       catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
     );
     const detail = instanceDetailByCode();
-    return c.json({
-      projects: projects.map((p) => ({
+    const view = projects.map((p) => ({
         project_code: p.project_code,
         project_name: p.project_code,
         components: p.services.map((s) => {
@@ -146,6 +155,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
           return {
             code: s.code,
             name: s.name,
+            project_code: s.project_code,
             disabled: s.disabled,
             description: s.description,
             component: s.component,
@@ -157,6 +167,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
             backend_port: s.backend_port,
             ports: s.ports,
             frontend_url: s.frontend_url,
+            subdomain: s.subdomain,
             domain: s.domain,
             git: {
               branch: d?.git_branch ?? null,
@@ -175,11 +186,68 @@ export function buildLaunchRouter(getCatalog: () => Catalog): Hono {
             docker_id: d?.docker_id ?? null,
           };
         }),
-      })),
-    });
+      }));
+    view.sort(compareProjectViews);
+    return c.json({ projects: view });
+  });
+
+  app.put('/api/v1/services/:code/catalog-info', async (c) => {
+    const code = c.req.param('code');
+    logger.info({ code }, 'catalog info update requested');
+    writeDiagnostic('catalogInfo.requested', { code });
+    if (!getCatalog().services.some((s) => s.code === code)) return c.json({ error: 'not_found' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = CatalogInfoSchema.safeParse(body);
+    if (!parsed.success) {
+      logger.warn({ code, detail: parsed.error.flatten() }, 'catalog info update invalid body');
+      writeDiagnostic('catalogInfo.invalidBody', { code, detail: parsed.error.flatten() });
+      return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    }
+
+    try {
+      const subdomain = cleanSubdomain(parsed.data.subdomain);
+      const domain = subdomain ? `${subdomain}\${DOMAIN_ROOT}` : null;
+      logger.info(
+        { code, project_code: parsed.data.project_code ?? null, subdomain, domain },
+        'writing catalog info',
+      );
+      writeDiagnostic('catalogInfo.write.start', {
+        code,
+        project_code: parsed.data.project_code ?? null,
+        subdomain,
+        domain,
+      });
+      const result = updateServiceCatalogInfo(code, {
+        project_code: parsed.data.project_code ?? null,
+        subdomain,
+        frontend_url: null,
+        domain,
+      });
+      await onCatalogChanged?.('catalog info edit');
+      logger.info({ code, updated: result.updated }, 'catalog info update complete');
+      writeDiagnostic('catalogInfo.write.complete', { code, updated: result.updated });
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.error({ code, err: (err as Error).stack ?? (err as Error).message }, 'catalog info update failed');
+      writeDiagnostic('catalogInfo.write.failed', { code, err: (err as Error).stack ?? (err as Error).message });
+      return c.json({ error: 'catalog_info_update_failed', message: (err as Error).message }, 400);
+    }
   });
 
   return app;
+}
+
+function cleanSubdomain(input: string | null | undefined): string | null {
+  const raw = input?.trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes('://') || raw.includes('/') || raw.includes(',')) {
+    throw new Error('subdomain must be a hostname label');
+  }
+  const label = raw.replace(/\.+$/, '');
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) {
+    throw new Error('subdomain must be a hostname label');
+  }
+  return label;
 }
 
 interface InstanceDetail {
@@ -189,6 +257,45 @@ interface InstanceDetail {
   package_version: string | null;
   last_seen_at: number | null;
   docker_id: string | null;
+}
+
+interface ProjectView {
+  project_code: string;
+  project_name: string;
+  components: Array<{
+    code: string;
+    name: string;
+    project_code: string;
+    subdomain: string | null;
+    frontend_url: string | null;
+    domain: string | null;
+    last_seen_at: number | null;
+  }>;
+}
+
+function compareProjectViews(a: ProjectView, b: ProjectView): number {
+  const ac = projectCatalogInfoComplete(a) ? 0 : 1;
+  const bc = projectCatalogInfoComplete(b) ? 0 : 1;
+  if (ac !== bc) return ac - bc;
+  const al = projectLastSeenAt(a);
+  const bl = projectLastSeenAt(b);
+  if (al !== bl) return bl - al;
+  return projectDisplayName(a).localeCompare(projectDisplayName(b));
+}
+
+function projectCatalogInfoComplete(project: ProjectView): boolean {
+  const frontend = project.components.find((c) => c.frontend_url || c.domain || c.subdomain);
+  if (!frontend) return false;
+  return Boolean(frontend.project_code && frontend.subdomain && frontend.domain);
+}
+
+function projectLastSeenAt(project: ProjectView): number {
+  return Math.max(0, ...project.components.map((c) => c.last_seen_at ?? 0));
+}
+
+function projectDisplayName(project: ProjectView): string {
+  const named = project.components.find((c) => c.name && c.name.toLowerCase() !== c.code.toLowerCase())?.name;
+  return named ?? project.project_name ?? project.project_code;
 }
 
 /** service_instances から code→詳細 (git/version/last_seen) を引く。 */

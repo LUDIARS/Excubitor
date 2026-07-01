@@ -8,7 +8,7 @@ import {
   fetchProjects, controlService, fetchPorts, setCorpusPref, applyUpdate,
   fetchLaunchPlan, saveLaunchProfile, launchStart, launchStop,
   fetchMemorySummary, fetchUpdates, fetchDiscovery, scanCatalog, fetchLiveness,
-  fetchCommits, fetchRecentLogs, emergencyService,
+  fetchCommits, fetchRecentLogs, emergencyService, saveCatalogInfo,
 } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 import MetricGraph from '../components/MetricGraph';
@@ -71,12 +71,7 @@ export default function Monitor() {
   );
   const rows = useMemo(() => {
     const all = projects ?? [];
-    return all.sort((a, b) => {
-      const ar = projectRunning(a) ? 0 : 1;
-      const br = projectRunning(b) ? 0 : 1;
-      if (ar !== br) return ar - br;
-      return projectDisplayName(a).localeCompare(projectDisplayName(b));
-    });
+    return [...all].sort(compareProjects);
   }, [projects]);
 
   const codes = useMemo(() => Array.from(selection), [selection]);
@@ -188,8 +183,8 @@ export default function Monitor() {
 
       {detailFor && (
         <ServiceDetailOverlay
-          c={detailFor}
-          port={primaryPortStatus(detailFor, portsByCode.get(detailFor.code) ?? [])}
+          c={latestComponent(projects, detailFor.code) ?? detailFor}
+          port={primaryPortStatus(latestComponent(projects, detailFor.code) ?? detailFor, portsByCode.get(detailFor.code) ?? [])}
           mem={memByCode.get(detailFor.code)}
           update={updates.get(detailFor.code)}
           onClose={() => setDetailFor(null)}
@@ -354,6 +349,8 @@ function ServiceDetailOverlay({
 }) {
   const [busy, setBusy] = useState(false);
   const [usesCorpus, setUsesCorpus] = useState<boolean>(c.uses_corpus ?? false);
+  const [projectCode, setProjectCode] = useState(c.project_code ?? c.code);
+  const [subdomain, setSubdomain] = useState(c.subdomain ?? '');
   const [live, setLive] = useState<LivenessSeries | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [logs, setLogs] = useState<RecentLogLine[]>([]);
@@ -362,6 +359,10 @@ function ServiceDetailOverlay({
   const url = frontendUrl(c);
 
   useEffect(() => setUsesCorpus(c.uses_corpus ?? false), [c.uses_corpus]);
+  useEffect(() => {
+    setProjectCode(c.project_code ?? c.code);
+    setSubdomain(c.subdomain ?? '');
+  }, [c.code, c.project_code, c.subdomain]);
   useEffect(() => {
     let stop = false;
     void fetchLiveness(c.code, 120).then((v) => { if (!stop) setLive(v); }).catch(() => {});
@@ -393,7 +394,26 @@ function ServiceDetailOverlay({
   const toggleCorpus = async () => {
     const next = !usesCorpus;
     setUsesCorpus(next);
-    try { await setCorpusPref(c.code, next); } catch { setUsesCorpus(!next); }
+    try {
+      await setCorpusPref(c.code, next);
+      await onChanged();
+    } catch {
+      setUsesCorpus(!next);
+    }
+  };
+  const saveInfo = async () => {
+    setBusy(true);
+    try {
+      await saveCatalogInfo(c.code, {
+        project_code: projectCode,
+        subdomain,
+      });
+      await onChanged();
+    } catch (e: unknown) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -474,9 +494,13 @@ function ServiceDetailOverlay({
         </section>
 
         <section className="detail-section">
-          <h3>Corpus / Settings</h3>
+          <h3>Catalog</h3>
           <div className="detail-settings">
             <label><input type="checkbox" checked={usesCorpus} onChange={() => void toggleCorpus()} /> Use Corpus</label>
+            <label>Project code <input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} /></label>
+            <label>Subdomain <input value={subdomain} onChange={(e) => setSubdomain(e.target.value)} placeholder="example" /></label>
+            <button disabled={busy} onClick={() => void saveInfo()}>Save catalog</button>
+            <span>Subdomain: <code>{c.subdomain ?? '-'}</code></span>
             <span>Domain: <code>{c.domain ?? '-'}</code></span>
             <span>Frontend URL: <code>{url ?? '-'}</code></span>
             <span>Start script: <code>{c.start_script ?? '-'}</code></span>
@@ -495,6 +519,10 @@ function frontendUrl(c: Component): string | null {
   return null;
 }
 
+function latestComponent(projects: Project[] | null, code: string): Component | null {
+  return projects?.flatMap((p) => p.components).find((c) => c.code === code) ?? null;
+}
+
 function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
@@ -510,6 +538,26 @@ function memoryPct(mem: MemoryCard | undefined): number | null {
 
 function projectRunning(project: Project): boolean {
   return project.components.length > 0 && project.components.every((c) => c.state === 'running');
+}
+
+function compareProjects(a: Project, b: Project): number {
+  const ac = projectCatalogInfoComplete(a) ? 0 : 1;
+  const bc = projectCatalogInfoComplete(b) ? 0 : 1;
+  if (ac !== bc) return ac - bc;
+  const al = projectLastSeenAt(a);
+  const bl = projectLastSeenAt(b);
+  if (al !== bl) return bl - al;
+  return projectDisplayName(a).localeCompare(projectDisplayName(b));
+}
+
+function projectCatalogInfoComplete(project: Project): boolean {
+  const frontend = project.components.find((c) => c.frontend_url || c.domain || c.subdomain);
+  if (!frontend) return false;
+  return Boolean(frontend.project_code && frontend.subdomain && frontend.domain);
+}
+
+function projectLastSeenAt(project: Project): number {
+  return Math.max(0, ...project.components.map((c) => c.last_seen_at ?? 0));
 }
 
 function projectDisplayName(project: Project): string {
