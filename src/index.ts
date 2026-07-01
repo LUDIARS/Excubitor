@@ -43,7 +43,7 @@ import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
 import { reconcileProcesses } from './process/reconcile.js';
-import { detectSafeMode, setSafeMode, isSafeMode } from './safe-mode.js';
+import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
 import { buildUpdateRouter } from './update/router.js';
@@ -56,11 +56,18 @@ import { buildMemoryRouter } from './memory/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
+import { runEmergencyAction } from './ops/emergency.js';
 
 const logger = createNamedLogger('concordia.observability');
 
 const ControlBodySchema = z.object({
   action: z.enum(['start', 'stop', 'restart']),
+});
+
+const EmergencyBodySchema = z.object({
+  action: z.enum(['kill-port', 'claude-port-fix']),
+  prompt: z.string().max(4000).optional(),
+  port: z.number().int().optional(),
 });
 
 interface ObservabilityHandle {
@@ -142,6 +149,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   });
   // SafeMode: 何も起動せず Excubitor 本体だけ立ち上げる (autostart / auto-launch を抑止)。
   // 監視・スキャン・Web GUI・制御 API は通常どおり動くので、 起動後に手動で立ち上げられる。
+  const serviceMode = detectServiceMode();
   const safeMode = detectSafeMode();
   setSafeMode(safeMode);
   if (safeMode) {
@@ -203,7 +211,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get('/api/v1/system', (c) =>
-    c.json({ service: 'excubitor', safe_mode: isSafeMode() }),
+    c.json({ service: 'excubitor', safe_mode: isSafeMode(), service_mode: serviceMode }),
   );
 
   // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
@@ -485,6 +493,39 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       stdout: result.stdout,
       stderr: result.stderr,
     });
+  });
+
+  app.post('/api/v1/services/:code/emergency', async (c) => {
+    const code = c.req.param('code');
+    const svc = findService(code);
+    if (!svc) return c.json({ error: 'not_found' }, 404);
+    if (svc.disabled) return c.json({ error: 'service_disabled' }, 400);
+
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = EmergencyBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    }
+    const actor = c.req.header('x-concordia-actor') ?? c.req.header('x-excubitor-actor') ?? 'anonymous';
+    const result = await runEmergencyAction(currentCatalog!, svc, parsed.data.action, parsed.data.prompt, parsed.data.port);
+    db().run(drizzleSql`
+      INSERT INTO audit_log (actor, action, target_type, target_id, payload)
+      VALUES (
+        ${actor},
+        ${'service.emergency.' + parsed.data.action},
+        ${'service'},
+        ${svc.code},
+        ${JSON.stringify({
+          ok: result.ok,
+          port: result.port,
+          pids: result.pids,
+          stdout_tail: result.stdout.slice(-500),
+          stderr_tail: result.stderr.slice(-500),
+        })}
+      )
+    `);
+    void syncDockerInstances(currentCatalog!).catch(() => {});
+    return c.json(result);
   });
 
   return {

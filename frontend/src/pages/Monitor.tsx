@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
   Project, Component, ControlAction, PortReport, ServicePortStatus,
-  LaunchPlan, MemoryCard, BranchStatus, UpdateStatus, DiscoveryResult, LivenessSeries,
+  LaunchPlan, MemoryCard, UpdateStatus, DiscoveryResult, LivenessSeries,
+  CommitInfo, RecentLogLine,
 } from '../lib/api';
 import {
-  fetchProjects, controlService, fetchPorts, setCorpusPref, fetchBranchStatus, applyUpdate,
+  fetchProjects, controlService, fetchPorts, setCorpusPref, applyUpdate,
   fetchLaunchPlan, saveLaunchProfile, launchStart, launchStop,
   fetchMemorySummary, fetchUpdates, fetchDiscovery, scanCatalog, fetchLiveness,
+  fetchCommits, fetchRecentLogs, emergencyService,
 } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 import MetricGraph from '../components/MetricGraph';
 
-/**
- * 統合 Monitor。 旧 Launch / Launcher / Monitor を 1 画面に集約する:
- *  - サービスを横 1 列の行で表示。 起動/停止/再起動/ログ/更新(pull)/ブランチ + 次回起動チェック。
- *  - 起動中の行のみメトリクスグラフ (稼働率 / CPU / メモリ) を出す。
- *  - 上部バーで起動セット保存・全起動/全停止・更新確認・スキャン。
- *  - スキャンは未登録 repo を解析して catalog を自動生成する。
- */
+const RUNNING_STATES = new Set(['running', 'pending']);
+
 export default function Monitor() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [ports, setPorts] = useState<PortReport | null>(null);
@@ -25,14 +22,11 @@ export default function Monitor() {
   const [memByCode, setMemByCode] = useState<Map<string, MemoryCard>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [logsOpenFor, setLogsOpenFor] = useState<string | null>(null);
-
-  // 起動セット選択 (profile.selection のローカル編集)。
+  const [detailFor, setDetailFor] = useState<Component | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [autoLaunch, setAutoLaunch] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-
-  // 更新確認 / 検出。
   const [updates, setUpdates] = useState<Map<string, UpdateStatus>>(new Map());
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
 
@@ -71,10 +65,21 @@ export default function Monitor() {
     () => new Set((plan?.projects ?? []).flatMap((p) => p.services).filter((s) => s.startable).map((s) => s.code)),
     [plan],
   );
-  const portByCode = useMemo(
-    () => new Map<string, ServicePortStatus>((ports?.services ?? []).map((s) => [s.code, s])),
+  const portsByCode = useMemo(
+    () => groupPortStatuses(ports?.services ?? []),
     [ports],
   );
+  const rows = useMemo(() => {
+    const all = projects ?? [];
+    return all.sort((a, b) => {
+      const ar = projectRunning(a) ? 0 : 1;
+      const br = projectRunning(b) ? 0 : 1;
+      if (ar !== br) return ar - br;
+      return projectDisplayName(a).localeCompare(projectDisplayName(b));
+    });
+  }, [projects]);
+
+  const codes = useMemo(() => Array.from(selection), [selection]);
 
   const toggleSelect = (code: string) => {
     setSelection((prev) => {
@@ -84,8 +89,6 @@ export default function Monitor() {
       return next;
     });
   };
-
-  const codes = useMemo(() => Array.from(selection), [selection]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -102,261 +105,471 @@ export default function Monitor() {
   const doSave = () => run('save', async () => {
     await saveLaunchProfile(codes, autoLaunch);
     await reloadPlan();
-    setMsg(`起動セットを保存しました (${codes.length} 件、 次回自動=${autoLaunch ? 'ON' : 'OFF'})`);
+    setMsg(`Saved launch set (${codes.length}, auto ${autoLaunch ? 'on' : 'off'})`);
   });
   const doStartSet = () => run('start', async () => {
     await saveLaunchProfile(codes, autoLaunch);
     const r = await launchStart(codes);
-    const ok = r.results.filter((x) => x.ok).length;
-    setMsg(`起動: ${ok}/${r.results.length} 成功`);
+    setMsg(`Started ${r.results.filter((x) => x.ok).length}/${r.results.length}`);
     await reloadCore();
   });
   const doStopSet = () => run('stop', async () => {
     await launchStop(codes);
-    setMsg('起動セットを停止しました');
+    setMsg('Stopped selected services');
     await reloadCore();
   });
   const doCheckUpdates = () => run('updates', async () => {
     const list = await fetchUpdates(true);
     setUpdates(new Map(list.map((u) => [u.code, u])));
-    const avail = list.filter((u) => u.available).length;
-    setMsg(`更新確認: ${avail} 件にアップデートあり`);
+    setMsg(`Updates available: ${list.filter((u) => u.available).length}`);
   });
   const doScan = () => run('scan', async () => {
     const r = await scanCatalog();
-    setMsg(`スキャン完了: ${r.created.length} 件を自動登録 / ポート ${Object.keys(r.ports).length} 件検出 / ${r.skipped.length} 件 skip (catalog ${r.catalog_total} 件)`);
+    setMsg(`Scan complete: created ${r.created.length}, ports ${Object.keys(r.ports).length}, skipped ${r.skipped.length}`);
     await Promise.all([reloadCore(), reloadPlan().catch(() => {}), fetchDiscovery().then(setDiscovery).catch(() => {})]);
   });
 
-  const allRows = useMemo(
-    () => (projects ?? []).flatMap((p) => p.components.map((c) => ({ project: p.project_code, c }))),
-    [projects],
-  );
-
   return (
     <div className="monitor">
-      {error && <div className="error-banner">エラー: {error}</div>}
+      {error && <div className="error-banner">Error: {error}</div>}
       {msg && <div className="launcher-msg">{msg}</div>}
       {ports?.hasConflict && (
         <div className="error-banner">
-          ⚠ ポート衝突: {ports.services.filter((s) => s.conflict).map((s) => `${s.code}(:${s.port})`).join(', ')}
+          Port conflicts: {ports.services.filter((s) => s.conflict).map((s) => `${s.code}(:${s.port})`).join(', ')}
         </div>
       )}
 
       <div className="monitor-bar">
         <div className="monitor-bar-info">
-          <strong>{selection.size}</strong> 件を起動セットに選択中
+          <strong>{selection.size}</strong> selected
           <label className="auto-launch">
-            <input type="checkbox" checked={autoLaunch} onChange={(e) => setAutoLaunch(e.target.checked)} /> 次回自動起動
+            <input type="checkbox" checked={autoLaunch} onChange={(e) => setAutoLaunch(e.target.checked)} /> auto launch
           </label>
         </div>
         <div className="monitor-bar-actions">
-          <button disabled={busy !== null} onClick={doSave}>{busy === 'save' ? '保存中…' : '起動セット保存'}</button>
+          <button disabled={busy !== null} onClick={doSave}>{busy === 'save' ? 'Saving...' : 'Save set'}</button>
           <button className="primary" disabled={busy !== null || selection.size === 0} onClick={doStartSet}>
-            {busy === 'start' ? '起動中…' : `セット起動 (${selection.size})`}
+            {busy === 'start' ? 'Starting...' : `Start (${selection.size})`}
           </button>
-          <button disabled={busy !== null} onClick={doStopSet}>{busy === 'stop' ? '停止中…' : 'セット停止'}</button>
+          <button disabled={busy !== null} onClick={doStopSet}>{busy === 'stop' ? 'Stopping...' : 'Stop set'}</button>
           <span className="bar-sep" />
-          <button disabled={busy !== null} onClick={doCheckUpdates}>{busy === 'updates' ? '確認中…' : '更新確認'}</button>
-          <button disabled={busy !== null} onClick={doScan} title="未登録 repo を解析してカタログ自動生成">
-            {busy === 'scan' ? 'スキャン中…' : 'スキャン'}
-          </button>
+          <button disabled={busy !== null} onClick={doCheckUpdates}>{busy === 'updates' ? 'Checking...' : 'Check updates'}</button>
+          <button disabled={busy !== null} onClick={doScan}>{busy === 'scan' ? 'Scanning...' : 'Scan catalog'}</button>
         </div>
       </div>
 
       {discovery && discovery.candidates.length > 0 && (
         <div className="discovery-strip">
-          未登録 {discovery.candidates.length} 件: {discovery.candidates.slice(0, 8).map((d) => d.name).join(', ')}
-          {discovery.candidates.length > 8 ? ' …' : ''} — 「スキャン」で実行可能なものを自動登録します。
+          Unregistered: {discovery.candidates.slice(0, 8).map((d) => d.name).join(', ')}
+          {discovery.candidates.length > 8 ? ' ...' : ''}
         </div>
       )}
 
-      {projects === null && <div className="empty-state">読み込み中…</div>}
-      {projects !== null && allRows.length === 0 && (
-        <div className="empty-state">登録サービスがありません。 「スキャン」で検出するか catalog/services.yaml を確認してください。</div>
-      )}
+      {projects === null && <div className="empty-state">Loading...</div>}
+      {projects !== null && rows.length === 0 && <div className="empty-state">No services registered.</div>}
 
       <div className="svc-rows">
-        {allRows.map(({ project, c }) => (
-          <ServiceRow
-            key={c.code}
+        {rows.map((project) => (
+          <ProjectRow
+            key={project.project_code}
             project={project}
-            c={c}
-            port={portByCode.get(c.code)}
-            mem={memByCode.get(c.code)}
-            update={updates.get(c.code)}
-            selectable={startableSet.has(c.code)}
-            selected={selection.has(c.code)}
-            onToggleSelect={() => toggleSelect(c.code)}
-            onShowLogs={() => setLogsOpenFor(c.code)}
+            portsByCode={portsByCode}
+            memByCode={memByCode}
+            updates={updates}
+            startableSet={startableSet}
+            selection={selection}
+            onToggleSelect={toggleSelect}
+            onShowLogs={setLogsOpenFor}
+            onShowDetail={setDetailFor}
             onChanged={reloadCore}
           />
         ))}
       </div>
 
+      {detailFor && (
+        <ServiceDetailOverlay
+          c={detailFor}
+          port={primaryPortStatus(detailFor, portsByCode.get(detailFor.code) ?? [])}
+          mem={memByCode.get(detailFor.code)}
+          update={updates.get(detailFor.code)}
+          onClose={() => setDetailFor(null)}
+          onChanged={reloadCore}
+          onShowLogs={() => setLogsOpenFor(detailFor.code)}
+        />
+      )}
       {logsOpenFor && <LogsDrawer code={logsOpenFor} onClose={() => setLogsOpenFor(null)} />}
     </div>
   );
 }
 
-function ServiceRow({
-  project, c, port, mem, update, selectable, selected, onToggleSelect, onShowLogs, onChanged,
+function ProjectRow({
+  project, portsByCode, memByCode, updates, startableSet, selection,
+  onToggleSelect, onShowLogs, onShowDetail, onChanged,
 }: {
-  project: string;
+  project: Project;
+  portsByCode: Map<string, ServicePortStatus[]>;
+  memByCode: Map<string, MemoryCard>;
+  updates: Map<string, UpdateStatus>;
+  startableSet: Set<string>;
+  selection: Set<string>;
+  onToggleSelect: (code: string) => void;
+  onShowLogs: (code: string) => void;
+  onShowDetail: (c: Component) => void;
+  onChanged: () => Promise<void>;
+}) {
+  const components = [...project.components].sort(componentSort);
+  const primary = components.find((c) => c.component === 'frontend') ?? components[0]!;
+  const branch = components.find((c) => c.git.branch)?.git;
+  const rowState = projectRunning(project) ? 'running' : 'stopped';
+  const running = rowState === 'running';
+  return (
+    <div className={`svc-row ${rowState} ${components.every((c) => c.disabled) ? 'disabled' : ''}`}>
+      <div className="svc-row-main project-row-main">
+        <span className={`dot ${running ? 'running' : 'stopped'}`} title={running ? 'all running' : 'one or more components down'} />
+        <div className="project-row-selects">
+          {components.map((c) => (
+            <label key={c.code} className="svc-row-select" title={startableSet.has(c.code) ? 'include in launch set' : 'not startable'}>
+              <input
+                type="checkbox"
+                disabled={!startableSet.has(c.code)}
+                checked={selection.has(c.code)}
+                onChange={() => onToggleSelect(c.code)}
+              />
+            </label>
+          ))}
+        </div>
+        <button className="svc-name-button project-name-button" onClick={() => onShowDetail(primary)}>
+          <span className="svc-row-name">{projectDisplayName(project)}</span>
+          <span className="svc-row-code">{branch?.branch ? `${branch.branch}${branch.dirty ? ' *' : ''}` : '-'}</span>
+        </button>
+        <div className="project-component-statuses">
+          {components.map((c) => (
+            <ComponentStatusLine
+              key={c.code}
+              c={c}
+              portStatuses={portsByCode.get(c.code) ?? []}
+              mem={memByCode.get(c.code)}
+              update={updates.get(c.code)}
+              onShowLogs={() => onShowLogs(c.code)}
+              onShowDetail={() => onShowDetail(c)}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ComponentStatusLine({
+  c, portStatuses, mem, update, onShowLogs, onShowDetail, onChanged,
+}: {
+  c: Component;
+  portStatuses: ServicePortStatus[];
+  mem: MemoryCard | undefined;
+  update: UpdateStatus | undefined;
+  onShowLogs: () => void;
+  onShowDetail: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [opsBusy, setOpsBusy] = useState(false);
+  const running = c.state === 'running';
+  const isControllable = !c.disabled && ['node', 'dev-process-md', 'app', 'docker-compose', 'docker'].includes(c.runtime ?? '');
+  const url = frontendUrl(c);
+  const port = primaryPortStatus(c, portStatuses);
+
+  const act = async (action: ControlAction) => {
+    setBusy(true);
+    try {
+      const r = await controlService(c.code, action);
+      if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const emergency = async (action: 'kill-port' | 'claude-port-fix', portOverride?: number) => {
+    setOpsBusy(true);
+    try {
+      const r = await emergencyService(c.code, action, undefined, portOverride);
+      if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
+      else alert(`${action}: ${r.stdout || `ok (${r.pids.join(', ') || 'no pid'})`}`);
+      await onChanged();
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
+  const memPct = memoryPct(mem);
+  return (
+    <div className={`component-status-line ${c.state} ${c.disabled ? 'disabled' : ''}`}>
+      <button className="component-status-main" onClick={onShowDetail}>
+        <span className={`dot ${c.state}`} title={c.state} />
+        <span className="component-status-role">{componentLabel(c)}</span>
+        <span className={`state-badge ${c.state}`}>{c.state}</span>
+        <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>{primaryPortLabel(c, port)}</span>
+      </button>
+      <div className="component-port-list">
+        {managedPorts(c).map((p) => (
+          <span className={`managed-port ${portStatusFor(p, portStatuses)?.conflict ? 'conflict' : ''}`} key={`${p.role}:${p.port}`}>
+            {p.role}: {p.port}
+            <button className="danger" disabled={opsBusy} onClick={() => void emergency('kill-port', p.port)}>Kill</button>
+          </span>
+        ))}
+      </div>
+      <div className="svc-row-tags component-status-tags">
+          {c.disabled && <span className="tag disabled">disabled</span>}
+          {c.runtime && <span className="tag">{c.runtime}</span>}
+          {url && running && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
+          {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>update</span>}
+      </div>
+      <div className="svc-row-actions">
+          {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
+          {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
+          {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
+          {managedPorts(c).length > 0 && <button disabled={opsBusy} onClick={() => void emergency('claude-port-fix')}>Claude ops</button>}
+          <button disabled={busy} onClick={onShowLogs}>Logs</button>
+      </div>
+      {running && (
+        <div className="svc-row-metrics">
+          <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
+          <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) + (memPct != null ? ` (${memPct.toFixed(0)}%)` : '') : '-'} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServiceDetailOverlay({
+  c, port, mem, update, onClose, onChanged, onShowLogs,
+}: {
   c: Component;
   port: ServicePortStatus | undefined;
   mem: MemoryCard | undefined;
   update: UpdateStatus | undefined;
-  selectable: boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
-  onShowLogs: () => void;
+  onClose: () => void;
   onChanged: () => Promise<void>;
+  onShowLogs: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [branch, setBranch] = useState<BranchStatus | null>(null);
-  const [showBranch, setShowBranch] = useState(false);
-  const [live, setLive] = useState<LivenessSeries | null>(null);
   const [usesCorpus, setUsesCorpus] = useState<boolean>(c.uses_corpus ?? false);
-
+  const [live, setLive] = useState<LivenessSeries | null>(null);
+  const [commits, setCommits] = useState<CommitInfo[]>([]);
+  const [logs, setLogs] = useState<RecentLogLine[]>([]);
   const running = c.state === 'running';
-  const isProcess = c.runtime === 'node' || c.runtime === 'dev-process-md' || c.runtime === 'app';
-  const isDocker = c.runtime === 'docker-compose' || c.runtime === 'docker';
-  const hasRepo = c.git.branch != null;
+  const isControllable = !c.disabled && ['node', 'dev-process-md', 'app', 'docker-compose', 'docker'].includes(c.runtime ?? '');
+  const url = frontendUrl(c);
 
   useEffect(() => setUsesCorpus(c.uses_corpus ?? false), [c.uses_corpus]);
-
-  // 稼働中のみ稼働率を取得 (CPU/メモリは memory summary 由来)。
   useEffect(() => {
-    if (!running) { setLive(null); return; }
     let stop = false;
-    const tick = () => void fetchLiveness(c.code, 120).then((l) => { if (!stop) setLive(l); }).catch(() => {});
-    tick();
-    const id = setInterval(tick, 15000);
-    return () => { stop = true; clearInterval(id); };
-  }, [running, c.code]);
+    void fetchLiveness(c.code, 120).then((v) => { if (!stop) setLive(v); }).catch(() => {});
+    void fetchCommits(c.code, 8).then((v) => { if (!stop) setCommits(v); }).catch(() => {});
+    void fetchRecentLogs(c.code, 80).then((v) => { if (!stop) setLogs(v); }).catch(() => {});
+    return () => { stop = true; };
+  }, [c.code]);
 
   const act = async (action: ControlAction) => {
-    if (!window.confirm(`${c.code} に対して ${action} を実行しますか?`)) return;
     setBusy(true);
     try {
       const r = await controlService(c.code, action);
-      if (!r.ok) alert(`${action} 失敗: ${r.stderr || r.stdout}`);
+      if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
       await onChanged();
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
-
   const update_ = async () => {
-    if (!window.confirm(`${c.code} を pull (更新) しますか? 起動中なら適用後に再起動します。`)) return;
     setBusy(true);
     try {
       const r = await applyUpdate(c.code, { install: true, restart: running });
-      if (!r.ok) {
-        const f = r.steps.find((s) => !s.ok);
-        alert(`更新失敗 (${c.code}): ${f ? `${f.step}: ${f.detail}` : 'unknown'}`);
-      }
-      if (showBranch) setBranch(await fetchBranchStatus(c.code).catch(() => null));
+      if (!r.ok) alert(`Update failed: ${r.steps.find((s) => !s.ok)?.detail ?? 'unknown'}`);
       await onChanged();
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const toggleBranch = async () => {
-    setShowBranch((v) => !v);
-    if (branch === null) setBranch(await fetchBranchStatus(c.code).catch(() => null));
-  };
-
   const toggleCorpus = async () => {
     const next = !usesCorpus;
     setUsesCorpus(next);
     try { await setCorpusPref(c.code, next); } catch { setUsesCorpus(!next); }
   };
 
-  const portConflict = port?.conflict;
-  const totalMem = mem?.detail?.['totalMemBytes'];
-  const memPct = mem?.rss_bytes != null && typeof totalMem === 'number' && totalMem > 0
-    ? (mem.rss_bytes / totalMem) * 100
-    : null;
-
   return (
-    <div className={`svc-row ${c.state}`}>
-      <div className="svc-row-main">
-        <span className={`dot ${c.state}`} title={c.state} />
-        <label className="svc-row-select" title={selectable ? '次回起動セットに含める' : '起動非対応'}>
-          <input type="checkbox" disabled={!selectable} checked={selected} onChange={onToggleSelect} />
-        </label>
-        <div className="svc-row-id">
-          <span className="svc-row-name">{c.component ?? c.name}</span>
-          <span className="svc-row-code">{c.code}</span>
-        </div>
-        <div className="svc-row-tags">
-          <span className="tag pcode">{project}</span>
-          <span className={`state-badge ${c.state}`}>{c.state}</span>
-          {c.runtime && <span className="tag">{c.runtime}</span>}
-          {c.tier && <span className="tag tier">{c.tier}</span>}
-          <span className={`cc-port ${portConflict ? 'conflict' : ''}`}>{c.port ? `:${c.port}` : '—'}</span>
-          {c.git.branch && <code className="svc-row-branch">{c.git.branch}{c.git.dirty ? ' *' : ''}</code>}
-          {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>更新あり</span>}
-        </div>
-        <div className="svc-row-actions">
-          {(isProcess || isDocker) && (
-            <>
-              {!running && <button className="start" disabled={busy} onClick={() => void act('start')} title="起動">▶ 起動</button>}
-              {running && <button disabled={busy} onClick={() => void act('stop')} title="停止">■</button>}
-              <button disabled={busy} onClick={() => void act('restart')} title="再起動">↻</button>
-              <button disabled={busy} onClick={onShowLogs} title="ログ">≡</button>
-            </>
-          )}
-          {hasRepo && <button disabled={busy} onClick={() => void update_()} title="git pull">⇩</button>}
-          {hasRepo && <button disabled={busy} onClick={() => void toggleBranch()} title="ブランチ">⎇</button>}
-          <button className={`corpus-toggle ${usesCorpus ? 'on' : ''}`} onClick={() => void toggleCorpus()} title="Corpus 連携">
-            Corpus
-          </button>
-        </div>
-        {running && (
-          <div className="svc-row-metrics">
-            <MetricGraph
-              label="稼働率" color="#34d399"
-              points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok * 100 }))}
-              value={live?.uptime_ratio != null ? `${Math.round(live.uptime_ratio * 100)}%` : '—'}
-            />
-            <MetricGraph
-              label="CPU" color="#f59e0b"
-              points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))}
-              value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '—'}
-            />
-            <MetricGraph
-              label="メモリ" color="#60a5fa"
-              points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))}
-              value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) + (memPct != null ? ` (${memPct.toFixed(0)}%)` : '') : '—'}
-            />
+    <div className="detail-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
+        <header className="detail-head">
+          <div>
+            <h2>{c.name}</h2>
+            <div className="detail-sub">{c.code} {c.component ? `/${c.component}` : ''}</div>
           </div>
-        )}
-      </div>
+          <button className="close" onClick={onClose}>Close</button>
+        </header>
 
-      {showBranch && (
-        <div className="cc-branch">
-          {branch === null ? <span className="muted">読み込み中…</span> : (
-            <>
-              <span>現在 <code>{branch.current ?? '—'}</code>
-                {branch.ahead > 0 && <span className="ahead"> ↑{branch.ahead}</span>}
-                {branch.behind > 0 && <span className="behind"> ↓{branch.behind}</span>}
-                {branch.dirty && <span className="dirty-flag"> (dirty)</span>}
-              </span>
-              <span className="cc-branch-list">
-                {branch.branches.map((b) => (
-                  <span key={`${b.remote ? 'r' : 'l'}:${b.name}`} className={`branch-pill ${b.current ? 'current' : ''} ${b.remote ? 'remote' : 'local'}`}>
-                    {b.remote ? `origin/${b.name}` : b.name}
-                  </span>
-                ))}
-              </span>
-            </>
-          )}
-        </div>
-      )}
+        <section className="detail-section">
+          <h3>Overview</h3>
+          <p>{c.description || 'No description in catalog.'}</p>
+          <div className="detail-tags">
+            <span className={`state-badge ${c.state}`}>{c.state}</span>
+            {c.disabled && <span className="tag disabled">disabled</span>}
+            {c.runtime && <span className="tag">{c.runtime}</span>}
+            {c.port && <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>:{c.port}</span>}
+            {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+          </div>
+        </section>
+
+        <section className="detail-section">
+          <h3>Controls</h3>
+          <div className="detail-actions">
+            {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
+            {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
+            {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
+            <button disabled={busy} onClick={() => void update_()}>Update</button>
+            <button onClick={onShowLogs}>Live logs</button>
+          </div>
+        </section>
+
+        <section className="detail-grid">
+          <div className="detail-section">
+            <h3>Metrics</h3>
+            <MetricGraph label="Liveness" color="#34d399" points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok * 100 }))} value={live?.uptime_ratio != null ? `${Math.round(live.uptime_ratio * 100)}%` : '-'} />
+            <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
+            <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'} />
+          </div>
+          <div className="detail-section">
+            <h3>CPU / Memory</h3>
+            <dl className="detail-kv">
+              <dt>PID</dt><dd>{mem?.pid ?? '-'}</dd>
+              <dt>RSS</dt><dd>{mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'}</dd>
+              <dt>Heap used</dt><dd>{mem?.heap_used_bytes != null ? fmtMiB(mem.heap_used_bytes) : '-'}</dd>
+              <dt>Heap total</dt><dd>{mem?.heap_total_bytes != null ? fmtMiB(mem.heap_total_bytes) : '-'}</dd>
+              <dt>CPU</dt><dd>{mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'}</dd>
+              <dt>Leak</dt><dd>{mem?.leak.verdict ?? '-'}</dd>
+            </dl>
+          </div>
+        </section>
+
+        <section className="detail-grid">
+          <div className="detail-section">
+            <h3>Logs</h3>
+            <div className="detail-log-list">
+              {logs.length === 0 && <span className="muted">No recent logs.</span>}
+              {logs.slice(0, 12).map((l) => <div className="detail-log" key={l.id}>{String(l.line)}</div>)}
+            </div>
+          </div>
+          <div className="detail-section">
+            <h3>GitHub Logs</h3>
+            <div className="commit-list">
+              {commits.length === 0 && <span className="muted">No commits available.</span>}
+              {commits.map((cm) => (
+                <div className="commit-row" key={cm.hash}>
+                  <code>{cm.hash}</code>
+                  <span className="commit-subject">{cm.subject}</span>
+                  <span className="commit-rel">{cm.relative}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="detail-section">
+          <h3>Corpus / Settings</h3>
+          <div className="detail-settings">
+            <label><input type="checkbox" checked={usesCorpus} onChange={() => void toggleCorpus()} /> Use Corpus</label>
+            <span>Domain: <code>{c.domain ?? '-'}</code></span>
+            <span>Frontend URL: <code>{url ?? '-'}</code></span>
+            <span>Start script: <code>{c.start_script ?? '-'}</code></span>
+            <span>Log path: <code>{c.log_path ?? '-'}</code></span>
+            <span>Autostart: <code>{String(c.autostart ?? false)}</code></span>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
 
+function frontendUrl(c: Component): string | null {
+  if (c.frontend_url) return c.frontend_url;
+  if (c.domain) return c.domain.startsWith('http') ? c.domain : `https://${c.domain}`;
+  return null;
+}
+
+function shortUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
 function fmtMiB(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(0)}MiB`;
+}
+
+function memoryPct(mem: MemoryCard | undefined): number | null {
+  const total = mem?.detail?.['totalMemBytes'];
+  return mem?.rss_bytes != null && typeof total === 'number' && total > 0 ? (mem.rss_bytes / total) * 100 : null;
+}
+
+function projectRunning(project: Project): boolean {
+  return project.components.length > 0 && project.components.every((c) => c.state === 'running');
+}
+
+function projectDisplayName(project: Project): string {
+  const explicit = project.project_name && project.project_name !== project.project_code ? project.project_name : null;
+  const named = project.components.find((c) => c.name && c.name.toLowerCase() !== c.code.toLowerCase())?.name;
+  return explicit ?? named ?? project.project_code;
+}
+
+function componentLabel(c: Component): string {
+  return (c.component ?? 'service').replace(/^\w/, (s) => s.toUpperCase());
+}
+
+function componentSort(a: Component, b: Component): number {
+  const weight = (c: Component) => c.component === 'frontend' ? 0 : c.component === 'backend' ? 1 : 2;
+  const d = weight(a) - weight(b);
+  return d !== 0 ? d : a.code.localeCompare(b.code);
+}
+
+function managedPorts(c: Component): Array<{ role: string; port: number }> {
+  const out: Array<{ role: string; port: number }> = [];
+  const seen = new Set<number>();
+  const add = (role: string, port: number | null | undefined) => {
+    if (typeof port !== 'number' || seen.has(port)) return;
+    seen.add(port);
+    out.push({ role, port });
+  };
+  add(c.component ?? 'service', c.port);
+  add('frontend', c.frontend_port);
+  add('backend', c.backend_port);
+  for (const p of c.ports ?? []) add(p.role, p.port);
+  return out;
+}
+
+function primaryPortLabel(c: Component, port: ServicePortStatus | undefined): string {
+  if (c.port) return `:${c.port}`;
+  const first = managedPorts(c)[0];
+  return first ? `:${first.port}` : (port ? `:${port.port}` : '-');
+}
+
+function groupPortStatuses(list: ServicePortStatus[]): Map<string, ServicePortStatus[]> {
+  const map = new Map<string, ServicePortStatus[]>();
+  for (const item of list) {
+    const arr = map.get(item.code) ?? [];
+    arr.push(item);
+    map.set(item.code, arr);
+  }
+  return map;
+}
+
+function primaryPortStatus(c: Component, statuses: ServicePortStatus[]): ServicePortStatus | undefined {
+  if (statuses.length === 0) return undefined;
+  if (c.port != null) return statuses.find((s) => s.port === c.port) ?? statuses[0];
+  const first = managedPorts(c)[0];
+  return first ? portStatusFor(first, statuses) ?? statuses[0] : statuses[0];
+}
+
+function portStatusFor(
+  port: { role: string; port: number },
+  statuses: ServicePortStatus[],
+): ServicePortStatus | undefined {
+  return statuses.find((s) => s.port === port.port && s.role === port.role)
+    ?? statuses.find((s) => s.port === port.port);
 }

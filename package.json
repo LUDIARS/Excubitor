@@ -9,6 +9,8 @@
     "dev:safe": "node --watch --import tsx src/server.ts --safe",
     "build": "tsc",
     "start": "node dist/server.js",
+    "service": "node dist/service-runner.js",
+    "start:service": "node dist/server.js --service",
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",
     "release": "tsx src/release/cli.ts",

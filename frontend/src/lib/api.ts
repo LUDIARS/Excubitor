@@ -13,10 +13,17 @@ export interface GitInfo {
 export interface Component {
   code: string;
   name: string;
+  disabled?: boolean;
+  description?: string | null;
   component: string | null;
   runtime: string | null;
   state: string;
   port: number | null;
+  frontend_port?: number | null;
+  backend_port?: number | null;
+  ports?: Array<{ role: string; port: number; env?: string | null }>;
+  frontend_url?: string | null;
+  domain?: string | null;
   git: GitInfo;
   package_version: string | null;
   monitor_only: boolean;
@@ -56,6 +63,7 @@ export interface DeclaredConflict {
 export interface ServicePortStatus {
   code: string;
   name: string;
+  role: string;
   port: number;
   state: string;
   listening: boolean;
@@ -124,6 +132,7 @@ export interface Project {
 }
 
 export type ControlAction = 'start' | 'stop' | 'restart';
+export type EmergencyAction = 'kill-port' | 'claude-port-fix';
 
 export interface ErrorTask {
   id: string;
@@ -335,6 +344,61 @@ export function controlService(code: string, action: ControlAction) {
   );
 }
 
+export interface EmergencyResult {
+  ok: boolean;
+  action: EmergencyAction;
+  code: string;
+  port: number | null;
+  pids: number[];
+  stdout: string;
+  stderr: string;
+  prompt?: string;
+}
+
+export function emergencyService(code: string, action: EmergencyAction, prompt?: string, port?: number) {
+  return postJSON<EmergencyResult>(
+    `/api/v1/services/${encodeURIComponent(code)}/emergency`,
+    { action, prompt, port },
+  );
+}
+
+export interface RecentLogLine {
+  id: string | number;
+  ts: number | string;
+  level: string | null;
+  code?: string;
+  line: string;
+}
+
+export function fetchRecentLogs(code: string, limit = 80): Promise<RecentLogLine[]> {
+  return getJSON<{ logs: RecentLogLine[] }>(
+    `/api/v1/services/${encodeURIComponent(code)}/logs/recent?limit=${limit}`,
+  ).then((d) => d.logs);
+}
+
+export function fetchAllRecentLogs(codes: string[] = [], limit = 500): Promise<RecentLogLine[]> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (codes.length > 0) q.set('codes', codes.join(','));
+  return getJSON<{ logs: RecentLogLine[] }>(`/api/v1/logs/recent?${q.toString()}`).then((d) => d.logs);
+}
+
+export interface VgLogLine {
+  ts: number;
+  service_code: string;
+  channel: string;
+  level?: string | null;
+  line?: string;
+  message?: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+export function fetchVgLogs(codes: string[] = [], limit = 500): Promise<VgLogLine[]> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (codes.length > 0) q.set('codes', codes.join(','));
+  return getJSON<{ logs: VgLogLine[] }>(`/api/v1/logs/llm?${q.toString()}`).then((d) => d.logs);
+}
+
 export function fetchErrorTasks(state?: string): Promise<ErrorTask[]> {
   const q = state ? `?state=${encodeURIComponent(state)}` : '';
   return getJSON<{ tasks: ErrorTask[] }>(`/api/v1/error-tasks${q}`).then((d) => d.tasks);
@@ -458,6 +522,7 @@ export function fetchTopology(): Promise<Record<string, string>> {
 export interface SystemInfo {
   service: string;
   safe_mode: boolean;
+  service_mode?: boolean;
 }
 
 export function fetchSystem(): Promise<SystemInfo> {
@@ -492,6 +557,13 @@ export interface MemoryCard {
   detail: Record<string, unknown> | null;
   sampled_at: number;
   leak: MemoryLeak;
+  budget: {
+    rss_budget_bytes: number | null;
+    cpu_budget_pct: number | null;
+    rss_ok: boolean | null;
+    cpu_ok: boolean | null;
+    ok: boolean | null;
+  };
   spark: Array<{ t: number; rss: number }>;
   cpu_spark: Array<{ t: number; cpu: number }>;
 }
