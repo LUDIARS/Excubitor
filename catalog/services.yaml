@@ -21,6 +21,27 @@ global:
     # Pagus/Signum/Praeforma/Peregrinatio) に自動注入される。
     LUDIARS_ALLOWED_HOSTS: "${DOMAIN_ROOT}"
 
+project_versions:
+  # patch is derived at runtime from build number env or git commit count.
+  concordia:
+    major: 2
+    minor: 1
+  discutere:
+    major: 2
+    minor: 0
+  excubitor:
+    major: 1
+    minor: 4
+  peregrinatio:
+    major: 0
+    minor: 8
+  pagus:
+    major: 0
+    minor: 6
+  memoria:
+    major: 3
+    minor: 1
+
 services:
   # ─────────────── LUDIARS 共有インフラ (tier: infra / monitor_only) ───────────────
   - code: infra-postgres
@@ -294,8 +315,10 @@ services:
 
   - code: pagus
     name: Pagus (AI 村シミュレーション)
+    domain: pagus${DOMAIN_ROOT}
     tier: personal
     project_code: pagus
+    subdomain: pagus
     component: backend
     # 権威サーバ (WS :4310)。client (:4320) は frontend のため catalog 対象外。
     port: 4310
@@ -314,8 +337,10 @@ services:
 
   - code: peregrinatio
     name: Peregrinatio
+    domain: pe${DOMAIN_ROOT}
     tier: personal
     project_code: peregrinatio
+    subdomain: pe
     component: backend
     port: 8090
     repo: LUDIARS/Peregrinatio
@@ -505,8 +530,10 @@ services:
   # 読むので、 Excubitor が起動時に env: BACKEND_PORT=3110 を注入して整合させる。
   - code: discutere
     name: Discutere (Discord 議論)
+    domain: di${DOMAIN_ROOT}
     tier: saas
     project_code: discutere
+    subdomain: di
     component: backend
     port: 3110
     repo: LUDIARS/Discutere
@@ -530,8 +557,10 @@ services:
   # 個人ローカル開発用 server (個人ログ専用、 port 5180)。 シェアサーバ (Hub) とは別。
   - code: memoria-server
     name: Memoria server (local)
+    domain: memoria${DOMAIN_ROOT}
     tier: personal
     project_code: memoria
+    subdomain: memoria
     component: server
     port: 5180
     repo: LUDIARS/Memoria
@@ -642,8 +671,10 @@ services:
 
   - code: concordia-web
     name: Concordia Web
+    domain: cc${DOMAIN_ROOT}
     tier: personal
     project_code: concordia
+    subdomain: cc
     component: frontend
     port: 10101
     repo: LUDIARS/Concordia

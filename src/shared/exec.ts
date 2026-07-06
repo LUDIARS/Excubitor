@@ -31,7 +31,8 @@ export function execCapture(
   shell = false,
 ): Promise<ExecResult> {
   return new Promise((resolveP) => {
-    const proc = spawn(cmd, args, { cwd, shell });
+    const needsShell = shell || (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(cmd));
+    const proc = spawn(cmd, args, { cwd, shell: needsShell, env: normalizedEnv() });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -50,4 +51,20 @@ export function execCapture(
     proc.on('error', (err) => finish({ ok: false, code: null, stdout, stderr: err.message }));
     proc.on('close', (code) => finish({ ok: code === 0, code, stdout, stderr }));
   });
+}
+
+function normalizedEnv(): NodeJS.ProcessEnv {
+  if (process.platform !== 'win32') return process.env;
+  const env: NodeJS.ProcessEnv = {};
+  let pathKey: string | null = null;
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.toLowerCase() === 'path') {
+      pathKey ??= key;
+      continue;
+    }
+    env[key] = value;
+  }
+  const pathValue = process.env.Path ?? process.env.PATH ?? process.env.path;
+  if (pathValue != null) env[pathKey ?? 'Path'] = pathValue;
+  return env;
 }

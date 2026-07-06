@@ -3,6 +3,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import { syncDockerInstances } from './sync.js';
 import { scanHostProcesses } from './host-process.js';
+import { syncHealthyServiceStates } from './health-state.js';
 import { type Catalog } from '../catalog/loader.js';
 import { ensureTail, stopTail, isTailingService } from '../log/docker-tail.js';
 
@@ -21,8 +22,14 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
   const tick = async () => {
     if (stopped) return;
     try {
-      const { scanned, matched } = await syncDockerInstances(catalog);
-      logger.debug({ scanned, matched }, 'docker scan complete');
+      let dockerScanOk = false;
+      try {
+        const { scanned, matched } = await syncDockerInstances(catalog);
+        dockerScanOk = true;
+        logger.debug({ scanned, matched }, 'docker scan complete');
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'docker scan failed');
+      }
 
       // host プロセススキャン (#91): runtime=app 等の process_match で外部起動の生存を反映。
       try {
@@ -32,6 +39,17 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
       }
 
       // running 中の docker サービスだけに docker logs -f を張めE(DB の state を見る)
+      try {
+        await syncHealthyServiceStates(catalog);
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'health state scan failed');
+      }
+
+      if (!dockerScanOk) {
+        if (!stopped) timer = setTimeout(tick, intervalMs);
+        return;
+      }
+
       const runningRows = db().all(sql`
         SELECT s.code
         FROM services s
@@ -54,7 +72,7 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
         }
       }
     } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'docker scan failed');
+      logger.warn({ err: (err as Error).message }, 'scanner tick failed');
     }
     if (!stopped) {
       timer = setTimeout(tick, intervalMs);
