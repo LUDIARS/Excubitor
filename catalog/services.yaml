@@ -633,11 +633,11 @@ services:
     cwd: ${ARS_ROOT}/Concordia
     command: npm run dev:backend
     env:
-      # Discord relay / egress can become busy under active Lictor sessions.
-      # Keep Web/API responsive by running Discord as the concordia-discord worker.
-      CONCORDIA_DISCORD_EMBEDDED: "0"
-    # backend only. Discord relay is split into concordia-discord so Web/API
-    # stays responsive even when gateway relay or transcript egress is busy.
+      # Cost サンプリング (全ログ JSONL 走査) が event loop を重くするため cost だけを
+      # concordia-cost worker へ分離する。chat (Discord/Slack) relay は backend embedded で
+      # 動かす — worker 分離 (concordia-discord) は WS bridge 越しの interaction 遅延で
+      # autocomplete が 3s ACK 窓を超え不安定だったため撤去した。
+      CONCORDIA_COST_MODE: worker
     autostart: false
     # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
     # VESTIGIUM_LOGS_DIR=dirname(log_path)=${ARS_ROOT}/logs を注入し、 Concordia の Vestigium が
@@ -652,19 +652,19 @@ services:
     provides:
       CONCORDIA_URL: http://${host}:${port}
 
-  - code: concordia-discord
-    name: Concordia Discord Worker
+  - code: concordia-cost
+    name: Concordia Cost Worker
     tier: personal
     project_code: concordia
     component: worker
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run discord:worker
+    command: npm run cost:worker
     autostart: false
     restart_policy: on-failure
     max_restart: 5
-    log_path: ${ARS_ROOT}/logs/concordia-discord
+    log_path: ${ARS_ROOT}/logs/concordia-cost
     health:
       type: process
       interval_sec: 30
