@@ -18,6 +18,7 @@ function svc(p: Partial<Service>): Service {
 /** Catalog リテラルに memory_monitor 既定を補って組む。 */
 function cat(services: Service[]): Catalog {
   return {
+    project_versions: {},
     services,
     memory_monitor: {
       enabled: true,

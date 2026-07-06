@@ -60,6 +60,10 @@ export async function applyUpdate(
   if (!status.branch) return fail('branch', 'ブランチを特定できません');
 
   // 2. fetch + pull --ff-only。
+  const main = await updateMainBranch(repoDir, status.branch);
+  steps.push({ step: 'main', ok: main.ok, detail: tail(main.stderr || main.stdout) });
+  if (!main.ok) return fail('main', tail(main.stderr || main.stdout || 'main update failed'));
+
   const fetch = await execCapture('git', ['fetch', '--quiet', 'origin', status.branch], repoDir, 60000);
   steps.push({ step: 'fetch', ok: fetch.ok, detail: tail(fetch.stderr || fetch.stdout) });
   if (!fetch.ok) return fail('fetch', tail(fetch.stderr));
@@ -111,6 +115,22 @@ function audit(code: string, actor: string, ok: boolean, steps: ApplyStep[]): vo
     INSERT INTO audit_log (actor, action, target_type, target_id, payload)
     VALUES (${actor}, ${'service.update'}, ${'service'}, ${code}, ${JSON.stringify({ ok, steps })})
   `);
+}
+
+async function updateMainBranch(repoDir: string, currentBranch: string) {
+  const fetchMain = await execCapture('git', ['fetch', '--quiet', 'origin', 'main'], repoDir, 60000);
+  if (!fetchMain.ok) return fetchMain;
+
+  if (currentBranch === 'main') {
+    return execCapture('git', ['merge', '--ff-only', 'origin/main'], repoDir, 60000);
+  }
+
+  return execCapture(
+    'git',
+    ['fetch', '--quiet', 'origin', 'main:refs/heads/main'],
+    repoDir,
+    60000,
+  );
 }
 
 function tail(s: string): string {

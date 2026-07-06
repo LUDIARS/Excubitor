@@ -6,6 +6,8 @@ import { controlDockerCompose, type ControlAction, type ControlResult } from './
 import { spawnService, killService, getRunningProcess } from '../process/manager.js';
 import { resolveInjectEnv } from '../process/inject.js';
 import { ensureTail } from '../log/docker-tail.js';
+import { runServiceBuild } from '../process/build.js';
+import { assertStartupEnv } from '../process/startup-env.js';
 
 const logger = createNamedLogger('excubitor.control');
 
@@ -30,8 +32,9 @@ export async function controlService(
     try {
       const injected = await resolveInjectEnv(svc);
       composeEnv = { ...injected, ...env };
+      if (action === 'start' || action === 'restart') assertStartupEnv(svc, composeEnv);
     } catch (err) {
-      return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveInjectEnv' };
+      return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
     }
     result = await controlDockerCompose(svc, action, composeEnv);
     if (result.ok && (action === 'start' || action === 'restart')) {
@@ -83,13 +86,19 @@ async function controlProcess(
       let env: Record<string, string>;
       try {
         env = { ...(await resolveInjectEnv(svc)), ...envOverride };
+        assertStartupEnv(svc, env);
       } catch (err) {
-        return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveInjectEnv' };
+        return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
+      }
+      const build = await runServiceBuild(svc, 'manual-start');
+      if (!build.ok) {
+        return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
       }
       const p = await spawnService(svc, { env });
+      const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
-        stdout: `spawned pid=${p.child.pid ?? '?'}`,
+        stdout: `${buildPrefix}spawned pid=${p.child.pid ?? '?'}`,
         stderr: '',
         exit_code: 0,
         command: `spawn ${svc.runtime}:${svc.code}`,
@@ -111,13 +120,19 @@ async function controlProcess(
       let env: Record<string, string>;
       try {
         env = { ...(await resolveInjectEnv(svc)), ...envOverride };
+        assertStartupEnv(svc, env);
       } catch (err) {
-        return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveInjectEnv' };
+        return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
+      }
+      const build = await runServiceBuild(svc, 'manual-restart');
+      if (!build.ok) {
+        return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
       }
       const p = await spawnService(svc, { env });
+      const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
-        stdout: `restarted pid=${p.child.pid ?? '?'}`,
+        stdout: `${buildPrefix}restarted pid=${p.child.pid ?? '?'}`,
         stderr: '',
         exit_code: 0,
         command: `restart ${svc.code}`,

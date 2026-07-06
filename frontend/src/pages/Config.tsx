@@ -30,6 +30,7 @@ function toMap(rows: SvcRow[]): Record<string, ServiceInfisical> {
       prefix: r.prefix ?? '',
       include: r.include,
       exclude: r.exclude,
+      required_env: r.required_env,
     };
   }
   return out;

@@ -33,6 +33,7 @@ export interface ServiceInfisical {
   prefix: string;
   include?: string[];
   exclude?: string[];
+  required_env?: string[];
 }
 
 interface InfisicalIdentity {
