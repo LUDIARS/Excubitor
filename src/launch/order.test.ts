@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { startTier, orderForStart, orderForStop } from './order.js';
+import { expandWithDependencies, startTier, orderForStart, orderForStop } from './order.js';
 import type { Service } from '../catalog/loader.js';
 
 function svc(code: string, project_code?: string): Service {
@@ -47,6 +47,32 @@ describe('orderForStart', () => {
     const tiers = orderForStart(services, ['corpus']);
     expect(tiers).toHaveLength(1);
     expect(tiers[0]!.services[0]!.code).toBe('corpus');
+  });
+  it('keeps requested order inside the same tier', () => {
+    const tiers = orderForStart([svc('a', 'a'), svc('b', 'b')], ['b', 'a']);
+    expect(tiers[0]!.services.map((s) => s.code)).toEqual(['b', 'a']);
+  });
+});
+
+describe('expandWithDependencies', () => {
+  it('adds transitive dependencies before the selected service', () => {
+    const services = [
+      svc('praeforma', 'praeforma'),
+      svc('anatomia', 'anatomia'),
+      { ...svc('thaleia', 'thaleia'), depends_on: ['anatomia', 'praeforma'] },
+    ];
+
+    expect(expandWithDependencies(services, ['thaleia'])).toEqual(['anatomia', 'praeforma', 'thaleia']);
+  });
+
+  it('keeps explicit selection order while de-duplicating dependencies', () => {
+    const services = [
+      svc('praeforma', 'praeforma'),
+      svc('anatomia', 'anatomia'),
+      { ...svc('thaleia', 'thaleia'), depends_on: ['anatomia', 'praeforma'] },
+    ];
+
+    expect(expandWithDependencies(services, ['praeforma', 'thaleia'])).toEqual(['praeforma', 'anatomia', 'thaleia']);
   });
 });
 

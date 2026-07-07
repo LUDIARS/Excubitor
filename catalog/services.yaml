@@ -294,8 +294,10 @@ services:
 
   - code: schedula
     name: Schedula (予定基盤)
+    domain: sc${DOMAIN_ROOT}
     tier: saas
     project_code: schedula
+    subdomain: sc
     component: backend
     # Actio (3000) と port 競合するため 3300 へ移設。Schedula は BACKEND_PORT ?? PORT ?? 3000 を
     # 読む (src/index.ts) ので env: で BACKEND_PORT=3300 を spawn env に注入して別ポートで bind させる。
@@ -304,6 +306,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Schedula
     command: npm run dev
+    allow_hot_reload: true
     env:
       BACKEND_PORT: "3300"
     autostart: false
@@ -326,6 +329,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Pagus
     command: npm run dev
+    allow_hot_reload: true
     # start-pagus.bat: stale :4310/:4320 を解放 → server(WS) + client を起動 (PAGUS_BRAIN=llm)。
     start_script: ${ARS_ROOT}/start-pagus.bat
     autostart: false
@@ -347,6 +351,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Peregrinatio
     command: npm run dev
+    allow_hot_reload: true
     # start-peregrinatio.bat: stale :8090 を解放 → web を single-origin dist にビルドして :8090 で配信。
     start_script: ${ARS_ROOT}/start-peregrinatio.bat
     autostart: false
@@ -366,6 +371,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Aedilis
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -383,6 +389,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Bibliotheca
     command: npm run dev
+    allow_hot_reload: true
     start_script: ${ARS_ROOT}/start-bibliotheca.bat
     autostart: false
     health:
@@ -401,6 +408,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Quaestor
     command: npm run dev
+    allow_hot_reload: true
     start_script: ${ARS_ROOT}/start-quaestor.bat
     autostart: false
     health:
@@ -419,6 +427,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Praeforma
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -437,6 +446,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Praeforma
     command: npm run dev:web
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -454,6 +464,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Signum
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -471,6 +482,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Ludellus-Server
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -488,6 +500,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/VantanHub
     command: npm run dev
+    allow_hot_reload: true
     # 学校生活 hub はフロントを Corpus 経由で統合する → 起動セットに含めると Corpus も自動起動。
     uses_corpus: true
     autostart: false
@@ -508,6 +521,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Tirocinium
     command: npm run dev:server
+    allow_hot_reload: true
     # start-tirocinium.bat は server(8084)+desktop(5178) を 1 プロセスツリーで起動 + port 掃除。
     start_script: ${ARS_ROOT}/start-tirocinium.bat
     autostart: false
@@ -540,6 +554,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Discutere
     command: npm run dev:server
+    allow_hot_reload: true
     # start-discutere.bat を使う。 BACKEND_PORT=3110 は env: で spawn env に注入され、
     # bat → npm → node が継承するので bat 自身が 3100 を書いていても 3110 で上がる。
     start_script: ${ARS_ROOT}/start-discutere.bat
@@ -567,6 +582,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Memoria/server
     command: npm run dev
+    allow_hot_reload: true
     # 既存 start-memoria.bat (cd Memoria/server → npm run dev) をウィンドウ無しで起動。
     start_script: ${ARS_ROOT}/start-memoria.bat
     autostart: false
@@ -583,8 +599,10 @@ services:
 
   - code: anatomia
     name: Anatomia (建築規約オラクル)
+    domain: anatomia${DOMAIN_ROOT}
     tier: personal
     project_code: anatomia
+    subdomain: anatomia
     component: backend
     port: 4200
     repo: LUDIARS/Anatomia
@@ -602,16 +620,46 @@ services:
     # VESTIGIUM_LOGS_DIR=${ARS_ROOT}/logs を注入し、 Anatomia が <root>/anatomia/ に書く。
     log_path: ${ARS_ROOT}/logs/anatomia
 
+  - code: augur
+    name: Augur (test planning)
+    tier: personal
+    project_code: augur
+    component: backend
+    port: 4210
+    repo: LUDIARS/Augur
+    runtime: node
+    cwd: ${ARS_ROOT}/Augur
+    command: npm run start
+    autostart: false
+    env:
+      AUGUR_PORT: "4210"
+    health:
+      type: http
+      url: http://localhost:4210/v1/health
+      interval_sec: 30
+    provides:
+      AUGUR_URL: http://${host}:${port}
+
   - code: thaleia
     name: Thaleia (unified spec/domain view)
     tier: personal
     project_code: thaleia
     component: backend
     port: 8890
+    depends_on:
+      - anatomia
+      - praeforma
     repo: LUDIARS/Thaleia
     runtime: node
     cwd: ${ARS_ROOT}/Thaleia
     command: npm run start
+    env:
+      THALEIA_PORT: "8890"
+      ANATOMIA_BASE_URL: http://127.0.0.1:4200
+      ANATOMIA_WEB_URL: http://127.0.0.1:4200
+      PRAEFORMA_BASE_URL: http://127.0.0.1:8889
+      PRAEFORMA_API_URL: http://127.0.0.1:8889
+      PRAEFORMA_WEB_URL: http://127.0.0.1:5177
     autostart: false
     health:
       type: http
@@ -631,13 +679,37 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run dev:backend
+    command: npm run start
+    allow_hot_reload: false
     env:
       # Cost サンプリング (全ログ JSONL 走査) が event loop を重くするため cost だけを
       # concordia-cost worker へ分離する。chat (Discord/Slack) relay は backend embedded で
       # 動かす — worker 分離 (concordia-discord) は WS bridge 越しの interaction 遅延で
       # autocomplete が 3s ACK 窓を超え不安定だったため撤去した。
+      NODE_ENV: production
       CONCORDIA_COST_MODE: worker
+      CONCORDIA_LOG_FILE: "0"
+      CONCORDIA_LOG_LEVEL: warn
+      CONCORDIA_HTTP_CACHE_ENABLED: "1"
+      CONCORDIA_HTTP_CACHE_REDIS_READ: "0"
+      CONCORDIA_HTTP_SLOW_MS: "60"
+      CONCORDIA_REDIS_URL: redis://127.0.0.1:6379
+      CONCORDIA_REDIS_TIMEOUT_MS: "8"
+      CONCORDIA_REDIS_READ_TIMEOUT_MS: "8"
+      CONCORDIA_REDIS_WRITE_TIMEOUT_MS: "500"
+      CONCORDIA_POST_LISTEN_STARTUP_DELAY_MS: "1000"
+      CONCORDIA_METRICS_START_DELAY_MS: "30000"
+      CONCORDIA_REPO_SCAN_CONCURRENCY: "4"
+      CONCORDIA_REPO_SCAN_GIT_TIMEOUT_MS: "1500"
+      CONCORDIA_WORK_REPOS_CACHE_REDIS_READ: "0"
+      CONCORDIA_WORK_REPOS_CACHE_INITIAL_WAIT_MS: "0"
+      CONCORDIA_WORK_REPOS_CACHE_REFRESH_DELAY_MS: "1000"
+      CONCORDIA_WORK_CONVERSATIONS_DEFAULT_LIMIT_PER_SESSION: "40"
+      CONCORDIA_WORK_CONVERSATIONS_DEFAULT_MAX_SESSIONS: "20"
+      CONCORDIA_DISCORD_EMBEDDED: "0"
+      CONCORDIA_SLACK_ENABLED: "0"
+      CONCORDIA_PR_RECONCILE_ENABLED: "0"
+      CONCORDIA_PR_FULL_SYNC_ENABLED: "0"
     autostart: false
     # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
     # VESTIGIUM_LOGS_DIR=dirname(log_path)=${ARS_ROOT}/logs を注入し、 Concordia の Vestigium が
@@ -681,6 +753,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Concordia/web
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
@@ -698,6 +771,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Conciliator
     command: npm run dev
+    allow_hot_reload: true
     autostart: false
     health:
       type: tcp
