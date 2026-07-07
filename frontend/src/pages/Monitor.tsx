@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import type {
   Project, Component, ControlAction, PortReport, ServicePortStatus,
   LaunchPlan, MemoryCard, UpdateStatus, DiscoveryResult, LivenessSeries,
-  CommitInfo, RecentLogLine,
+  CommitInfo, RecentLogLine, ServiceEnvConfig,
 } from '../lib/api';
 import {
   fetchProjects, controlService, fetchPorts, setCorpusPref, applyUpdate,
   fetchLaunchPlan, saveLaunchProfile, launchStart, launchStop,
   fetchMemorySummary, fetchUpdates, fetchDiscovery, scanCatalog, fetchLiveness,
   fetchCommits, fetchRecentLogs, emergencyService, saveCatalogInfo,
+  fetchServiceEnvConfig, saveServiceEnvConfig,
 } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 import MetricGraph from '../components/MetricGraph';
@@ -220,7 +221,7 @@ function ProjectRow({
   return (
     <div className={`svc-row ${rowState} ${components.every((c) => c.disabled) ? 'disabled' : ''}`}>
       <div className="svc-row-main project-row-main">
-        <span className={`dot ${running ? 'running' : 'stopped'}`} title={running ? 'all running' : 'one or more components down'} />
+        <span className={`dot ${running ? 'running' : 'stopped'}`} title={running ? 'one or more components running' : 'no running components'} />
         <div className="project-row-selects">
           {components.map((c) => (
             <label key={c.code} className="svc-row-select" title={startableSet.has(c.code) ? 'include in launch set' : 'not startable'}>
@@ -316,10 +317,11 @@ function ComponentStatusLine({
       <div className="svc-row-tags component-status-tags">
           {c.disabled && <span className="tag disabled">disabled</span>}
           {c.runtime && <span className="tag">{c.runtime}</span>}
-          {url && running && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
+          {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
           {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>update</span>}
       </div>
       <div className="svc-row-actions">
+          {url && <button disabled={busy} onClick={() => openFrontendUrl(url)}>Open</button>}
           {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
           {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
           {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
@@ -348,21 +350,16 @@ function ServiceDetailOverlay({
   onShowLogs: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [usesCorpus, setUsesCorpus] = useState<boolean>(c.uses_corpus ?? false);
-  const [projectCode, setProjectCode] = useState(c.project_code ?? c.code);
-  const [subdomain, setSubdomain] = useState(c.subdomain ?? '');
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
   const [live, setLive] = useState<LivenessSeries | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [logs, setLogs] = useState<RecentLogLine[]>([]);
   const running = c.state === 'running';
   const isControllable = !c.disabled && ['node', 'dev-process-md', 'app', 'docker-compose', 'docker'].includes(c.runtime ?? '');
   const url = frontendUrl(c);
+  const usesCorpus = c.uses_corpus ?? false;
 
-  useEffect(() => setUsesCorpus(c.uses_corpus ?? false), [c.uses_corpus]);
-  useEffect(() => {
-    setProjectCode(c.project_code ?? c.code);
-    setSubdomain(c.subdomain ?? '');
-  }, [c.code, c.project_code, c.subdomain]);
   useEffect(() => {
     let stop = false;
     void fetchLiveness(c.code, 120).then((v) => { if (!stop) setLive(v); }).catch(() => {});
@@ -391,132 +388,353 @@ function ServiceDetailOverlay({
       setBusy(false);
     }
   };
-  const toggleCorpus = async () => {
-    const next = !usesCorpus;
-    setUsesCorpus(next);
-    try {
-      await setCorpusPref(c.code, next);
-      await onChanged();
-    } catch {
-      setUsesCorpus(!next);
-    }
+  return (
+    <>
+      <div className="detail-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+        <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
+          <header className="detail-head">
+            <div>
+              <h2>{c.name}</h2>
+              <div className="detail-sub">{c.code} {c.component ? `/${c.component}` : ''}</div>
+            </div>
+            <button className="close" onClick={onClose}>Close</button>
+          </header>
+
+          <section className="detail-section">
+            <h3>Overview</h3>
+            <p>{c.description || 'No description in catalog.'}</p>
+            <div className="detail-tags">
+              <span className={`state-badge ${c.state}`}>{c.state}</span>
+              {c.disabled && <span className="tag disabled">disabled</span>}
+              {c.runtime && <span className="tag">{c.runtime}</span>}
+              {c.port && <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>:{c.port}</span>}
+              {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+            </div>
+          </section>
+
+          <section className="detail-section">
+            <h3>Controls</h3>
+            <div className="detail-actions">
+              {url && <button disabled={busy} onClick={() => openFrontendUrl(url)}>Open frontend</button>}
+              {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
+              {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
+              {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
+              <button disabled={busy} onClick={() => setEnvOpen(true)}>ENV</button>
+              <button disabled={busy} onClick={() => void update_()}>Update</button>
+              <button onClick={onShowLogs}>Live logs</button>
+            </div>
+          </section>
+
+          <section className="detail-grid">
+            <div className="detail-section">
+              <h3>Metrics</h3>
+              <MetricGraph label="Liveness" color="#34d399" points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok * 100 }))} value={live?.uptime_ratio != null ? `${Math.round(live.uptime_ratio * 100)}%` : '-'} />
+              <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
+              <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'} />
+            </div>
+            <div className="detail-section">
+              <h3>CPU / Memory</h3>
+              <dl className="detail-kv">
+                <dt>PID</dt><dd>{mem?.pid ?? '-'}</dd>
+                <dt>RSS</dt><dd>{mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'}</dd>
+                <dt>Heap used</dt><dd>{mem?.heap_used_bytes != null ? fmtMiB(mem.heap_used_bytes) : '-'}</dd>
+                <dt>Heap total</dt><dd>{mem?.heap_total_bytes != null ? fmtMiB(mem.heap_total_bytes) : '-'}</dd>
+                <dt>CPU</dt><dd>{mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'}</dd>
+                <dt>Leak</dt><dd>{mem?.leak.verdict ?? '-'}</dd>
+              </dl>
+            </div>
+          </section>
+
+          <section className="detail-grid">
+            <div className="detail-section">
+              <h3>Logs</h3>
+              <div className="detail-log-list">
+                {logs.length === 0 && <span className="muted">No recent logs.</span>}
+                {logs.slice(0, 12).map((l) => <div className="detail-log" key={l.id}>{String(l.line)}</div>)}
+              </div>
+            </div>
+            <div className="detail-section">
+              <h3>GitHub Logs</h3>
+              <div className="commit-list">
+                {commits.length === 0 && <span className="muted">No commits available.</span>}
+                {commits.map((cm) => (
+                  <div className="commit-row" key={cm.hash}>
+                    <code>{cm.hash}</code>
+                    <span className="commit-subject">{cm.subject}</span>
+                    <span className="commit-rel">{cm.relative}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="detail-section">
+            <h3>Catalog</h3>
+            <div className="detail-settings">
+              <button disabled={busy} onClick={() => setCatalogOpen(true)}>Edit catalog</button>
+              <label className="catalog-checkbox">
+                <input type="checkbox" checked={usesCorpus} disabled readOnly />
+                Use Corpus
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+      {catalogOpen && (
+        <CatalogEditWindow
+          c={c}
+          onClose={() => setCatalogOpen(false)}
+          onSaved={async () => {
+            setCatalogOpen(false);
+            await onChanged();
+          }}
+        />
+      )}
+      {envOpen && (
+        <EnvConfigWindow
+          c={c}
+          onClose={() => setEnvOpen(false)}
+          onSaved={async () => {
+            setEnvOpen(false);
+            await onChanged();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function EnvConfigWindow({
+  c, onClose, onSaved,
+}: {
+  c: Component;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [cfg, setCfg] = useState<ServiceEnvConfig | null>(null);
+  const [projectId, setProjectId] = useState('');
+  const [environment, setEnvironment] = useState('dev');
+  const [inject, setInject] = useState(true);
+  const [prefix, setPrefix] = useState('');
+  const [include, setInclude] = useState('');
+  const [exclude, setExclude] = useState('');
+  const [requiredEnv, setRequiredEnv] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setError(null);
+    const next = await fetchServiceEnvConfig(c.code);
+    const source = next.override ?? next.effective;
+    setCfg(next);
+    setProjectId(source?.project_id ?? '');
+    setEnvironment(source?.environment ?? 'dev');
+    setInject(source?.inject ?? true);
+    setPrefix(source?.prefix ?? '');
+    setInclude(joinList(source?.include));
+    setExclude(joinList(source?.exclude));
+    setRequiredEnv(joinList(source?.required_env ?? next.required_env));
   };
-  const saveInfo = async () => {
+
+  useEffect(() => {
+    void load().catch((e: unknown) => setError((e as Error).message));
+  }, [c.code]);
+
+  const save = async () => {
     setBusy(true);
+    setError(null);
     try {
-      await saveCatalogInfo(c.code, {
-        project_code: projectCode,
-        subdomain,
+      await saveServiceEnvConfig(c.code, {
+        project_id: projectId,
+        environment,
+        inject,
+        prefix,
+        include: splitList(include),
+        exclude: splitList(exclude),
+        required_env: splitList(requiredEnv),
       });
-      await onChanged();
+      await onSaved();
     } catch (e: unknown) {
-      alert((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="detail-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
-        <header className="detail-head">
+    <div className="catalog-window-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <form
+        className="catalog-window env-window"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <header className="catalog-window-head">
           <div>
-            <h2>{c.name}</h2>
-            <div className="detail-sub">{c.code} {c.component ? `/${c.component}` : ''}</div>
+            <h3>Infisical ENV</h3>
+            <div className="detail-sub">{c.code}</div>
           </div>
-          <button className="close" onClick={onClose}>Close</button>
+          <button type="button" className="close" onClick={onClose}>Close</button>
         </header>
+        {error && <div className="error-banner">Error: {error}</div>}
+        {cfg && (
+          <div className={`env-status ${cfg.status.ready ? 'ok' : 'fail'}`}>
+            {cfg.status.ready ? 'ready' : 'missing'} | required {cfg.status.required.length} | resolved {cfg.status.resolvedKeys ?? '-'}
+            {cfg.status.missing.length > 0 && <span> | {cfg.status.missing.join(', ')}</span>}
+            {cfg.status.error && <span> | {cfg.status.error}</span>}
+          </div>
+        )}
+        <label>
+          Project ID
+          <input value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="Infisical project UUID" />
+        </label>
+        <div className="env-window-grid">
+          <label>
+            Environment
+            <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+          </label>
+          <label>
+            Prefix
+            <input value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+          </label>
+        </div>
+        <label className="catalog-checkbox">
+          <input type="checkbox" checked={inject} onChange={(e) => setInject(e.target.checked)} />
+          Inject into service process
+        </label>
+        <label>
+          Required env
+          <textarea value={requiredEnv} onChange={(e) => setRequiredEnv(e.target.value)} placeholder="ONE_KEY, ANOTHER_KEY" />
+        </label>
+        <div className="env-window-grid">
+          <label>
+            Include
+            <textarea value={include} onChange={(e) => setInclude(e.target.value)} />
+          </label>
+          <label>
+            Exclude
+            <textarea value={exclude} onChange={(e) => setExclude(e.target.value)} />
+          </label>
+        </div>
+        <div className="catalog-window-actions">
+          <button type="submit" className="primary" disabled={busy || (inject && !projectId.trim())}>
+            {busy ? 'Saving...' : 'Save ENV'}
+          </button>
+          <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
-        <section className="detail-section">
-          <h3>Overview</h3>
-          <p>{c.description || 'No description in catalog.'}</p>
-          <div className="detail-tags">
-            <span className={`state-badge ${c.state}`}>{c.state}</span>
-            {c.disabled && <span className="tag disabled">disabled</span>}
-            {c.runtime && <span className="tag">{c.runtime}</span>}
-            {c.port && <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>:{c.port}</span>}
-            {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
-          </div>
-        </section>
+function CatalogEditWindow({
+  c, onClose, onSaved,
+}: {
+  c: Component;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [projectCode, setProjectCode] = useState(c.project_code ?? c.code);
+  const [subdomain, setSubdomain] = useState(c.subdomain ?? '');
+  const [usesCorpus, setUsesCorpus] = useState(c.uses_corpus ?? false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-        <section className="detail-section">
-          <h3>Controls</h3>
-          <div className="detail-actions">
-            {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
-            {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
-            {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
-            <button disabled={busy} onClick={() => void update_()}>Update</button>
-            <button onClick={onShowLogs}>Live logs</button>
-          </div>
-        </section>
+  useEffect(() => {
+    setProjectCode(c.project_code ?? c.code);
+    setSubdomain(c.subdomain ?? '');
+    setUsesCorpus(c.uses_corpus ?? false);
+  }, [c.code, c.project_code, c.subdomain, c.uses_corpus]);
 
-        <section className="detail-grid">
-          <div className="detail-section">
-            <h3>Metrics</h3>
-            <MetricGraph label="Liveness" color="#34d399" points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok * 100 }))} value={live?.uptime_ratio != null ? `${Math.round(live.uptime_ratio * 100)}%` : '-'} />
-            <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
-            <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'} />
-          </div>
-          <div className="detail-section">
-            <h3>CPU / Memory</h3>
-            <dl className="detail-kv">
-              <dt>PID</dt><dd>{mem?.pid ?? '-'}</dd>
-              <dt>RSS</dt><dd>{mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'}</dd>
-              <dt>Heap used</dt><dd>{mem?.heap_used_bytes != null ? fmtMiB(mem.heap_used_bytes) : '-'}</dd>
-              <dt>Heap total</dt><dd>{mem?.heap_total_bytes != null ? fmtMiB(mem.heap_total_bytes) : '-'}</dd>
-              <dt>CPU</dt><dd>{mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'}</dd>
-              <dt>Leak</dt><dd>{mem?.leak.verdict ?? '-'}</dd>
-            </dl>
-          </div>
-        </section>
+  const saveInfo = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await Promise.all([
+        saveCatalogInfo(c.code, {
+          project_code: projectCode,
+          subdomain,
+        }),
+        setCorpusPref(c.code, usesCorpus),
+      ]);
+      await onSaved();
+    } catch (e: unknown) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
-        <section className="detail-grid">
-          <div className="detail-section">
-            <h3>Logs</h3>
-            <div className="detail-log-list">
-              {logs.length === 0 && <span className="muted">No recent logs.</span>}
-              {logs.slice(0, 12).map((l) => <div className="detail-log" key={l.id}>{String(l.line)}</div>)}
-            </div>
+  return (
+    <div className="catalog-window-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <form
+        className="catalog-window"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void saveInfo();
+        }}
+      >
+        <header className="catalog-window-head">
+          <div>
+            <h3>Edit catalog</h3>
+            <div className="detail-sub">{c.code}</div>
           </div>
-          <div className="detail-section">
-            <h3>GitHub Logs</h3>
-            <div className="commit-list">
-              {commits.length === 0 && <span className="muted">No commits available.</span>}
-              {commits.map((cm) => (
-                <div className="commit-row" key={cm.hash}>
-                  <code>{cm.hash}</code>
-                  <span className="commit-subject">{cm.subject}</span>
-                  <span className="commit-rel">{cm.relative}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="detail-section">
-          <h3>Catalog</h3>
-          <div className="detail-settings">
-            <label><input type="checkbox" checked={usesCorpus} onChange={() => void toggleCorpus()} /> Use Corpus</label>
-            <label>Project code <input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} /></label>
-            <label>Subdomain <input value={subdomain} onChange={(e) => setSubdomain(e.target.value)} placeholder="example" /></label>
-            <button disabled={busy} onClick={() => void saveInfo()}>Save catalog</button>
-            <span>Subdomain: <code>{c.subdomain ?? '-'}</code></span>
-            <span>Domain: <code>{c.domain ?? '-'}</code></span>
-            <span>Frontend URL: <code>{url ?? '-'}</code></span>
-            <span>Start script: <code>{c.start_script ?? '-'}</code></span>
-            <span>Log path: <code>{c.log_path ?? '-'}</code></span>
-            <span>Autostart: <code>{String(c.autostart ?? false)}</code></span>
-          </div>
-        </section>
-      </div>
+          <button type="button" className="close" onClick={onClose}>Close</button>
+        </header>
+        {error && <div className="error-banner">Error: {error}</div>}
+        <label>
+          Project code
+          <input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
+        </label>
+        <label>
+          Subdomain
+          <input value={subdomain} onChange={(e) => setSubdomain(e.target.value)} placeholder="example" />
+        </label>
+        <label className="catalog-checkbox">
+          <input type="checkbox" checked={usesCorpus} onChange={(e) => setUsesCorpus(e.target.checked)} />
+          Use Corpus
+        </label>
+        <div className="catalog-window-actions">
+          <button type="submit" className="primary" disabled={busy || !projectCode.trim()}>
+            {busy ? 'Saving...' : 'Save catalog'}
+          </button>
+          <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
     </div>
   );
 }
 
 function frontendUrl(c: Component): string | null {
-  if (c.frontend_url) return c.frontend_url;
-  if (c.domain) return c.domain.startsWith('http') ? c.domain : `https://${c.domain}`;
+  if (c.frontend_url) return normalizeFrontendUrl(c.frontend_url);
+  if (c.domain) return normalizeFrontendUrl(c.domain);
+  if (c.code === 'excubitor') return window.location.origin;
+  if (c.component === 'frontend' && c.port) return `http://localhost:${c.port}`;
   return null;
+}
+
+function normalizeFrontendUrl(value: string): string {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function openFrontendUrl(url: string): void {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function joinList(value: string[] | undefined): string {
+  return (value ?? []).join('\n');
 }
 
 function latestComponent(projects: Project[] | null, code: string): Component | null {
@@ -537,7 +755,7 @@ function memoryPct(mem: MemoryCard | undefined): number | null {
 }
 
 function projectRunning(project: Project): boolean {
-  return project.components.length > 0 && project.components.every((c) => c.state === 'running');
+  return project.components.some((c) => RUNNING_STATES.has(c.state));
 }
 
 function compareProjects(a: Project, b: Project): number {

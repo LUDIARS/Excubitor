@@ -7,6 +7,7 @@ import Errors from './pages/Errors';
 import Config from './pages/Config';
 import Federation from './pages/Federation';
 import { fetchSystem } from './lib/api';
+import type { SystemInfo } from './lib/api';
 import { config } from '../config';
 
 type Tab = 'monitor' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
@@ -35,12 +36,14 @@ export default function App() {
 
   const [safeMode, setSafeMode] = useState(false);
   const [serviceMode, setServiceMode] = useState(false);
+  const [buildVersion, setBuildVersion] = useState<SystemInfo['build_version']>(null);
 
   useEffect(() => {
     void fetchSystem()
       .then((s) => {
         setSafeMode(s.safe_mode);
         setServiceMode(!!s.service_mode);
+        setBuildVersion(s.build_version ?? null);
       })
       .catch(() => {});
   }, []);
@@ -53,7 +56,12 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Excubitor</h1>
-        <span className="badge">v0.2</span>
+        <span
+          className="badge"
+          title={buildVersion?.git_hash ? `patch: ${buildVersion.patch_source}, git: ${buildVersion.git_hash}` : undefined}
+        >
+          v{buildVersion?.version ?? '1.4'}
+        </span>
         {safeMode && (
           <span className="badge badge-safe" title="SafeMode: 何も自動起動していません (手動で起動してください)">
             SAFE MODE

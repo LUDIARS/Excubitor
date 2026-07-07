@@ -20,6 +20,14 @@ import { buildPlanProjects } from './grouping.js';
 import { runPreflight } from './preflight.js';
 import { startSelection, stopSelection } from './orchestrator.js';
 import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
+import {
+  getServiceMap,
+  setServiceMap,
+  resolveServiceInfisical,
+  type ServiceInfisical,
+} from '../secrets/config-store.js';
+import { resolveInjectEnv } from '../process/inject.js';
+import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
 
 const SaveProfileSchema = z.object({
   selection: z.array(z.string()),
@@ -33,6 +41,17 @@ const CodesSchema = z.object({
 const CatalogInfoSchema = z.object({
   project_code: z.string().trim().min(1).max(80).nullable().optional(),
   subdomain: z.string().trim().max(120).nullable().optional(),
+  frontend_url: z.string().trim().max(300).nullable().optional(),
+});
+
+const ServiceEnvConfigSchema = z.object({
+  project_id: z.string().trim().max(200).nullable().optional(),
+  environment: z.string().trim().max(80).default('dev'),
+  inject: z.boolean().default(true),
+  prefix: z.string().trim().max(120).default(''),
+  include: z.array(z.string().trim().min(1)).optional(),
+  exclude: z.array(z.string().trim().min(1)).optional(),
+  required_env: z.array(z.string().trim().min(1)).optional(),
 });
 
 const logger = createNamedLogger('excubitor.launch.router');
@@ -140,6 +159,57 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
 
   // 既存 Catalog 画面用 (project 別グルーピング)。frontend api.ts fetchProjects が叩く。
   // git / version / last_seen は service_instances から補完してカードに詳細を出す (req6)。
+  app.get('/api/v1/services/:code/env-config', async (c) => {
+    const code = c.req.param('code');
+    const svc = getCatalog().services.find((s) => s.code === code);
+    if (!svc) return c.json({ error: 'not_found' }, 404);
+    const services = getServiceMap();
+    const override = services[code] ?? null;
+    return c.json({
+      code,
+      catalog: svc.infisical ?? null,
+      override,
+      effective: resolveServiceInfisical(code, svc.infisical) ?? null,
+      required_env: requiredEnvKeysForService(svc),
+      status: await serviceEnvStatus(svc),
+    });
+  });
+
+  app.put('/api/v1/services/:code/env-config', async (c) => {
+    const code = c.req.param('code');
+    const svc = getCatalog().services.find((s) => s.code === code);
+    if (!svc) return c.json({ error: 'not_found' }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = ServiceEnvConfigSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+
+    const services = getServiceMap();
+    const projectId = parsed.data.project_id?.trim() ?? '';
+    if (!projectId) {
+      delete services[code];
+    } else {
+      services[code] = normalizeServiceInfisical({
+        project_id: projectId,
+        environment: parsed.data.environment || 'dev',
+        inject: parsed.data.inject,
+        prefix: parsed.data.prefix ?? '',
+        include: parsed.data.include,
+        exclude: parsed.data.exclude,
+        required_env: parsed.data.required_env,
+      });
+    }
+    setServiceMap(services);
+
+    return c.json({
+      ok: true,
+      code,
+      override: services[code] ?? null,
+      effective: resolveServiceInfisical(code, svc.infisical) ?? null,
+      required_env: requiredEnvKeysForService(svc),
+      status: await serviceEnvStatus(svc),
+    });
+  });
+
   app.get('/api/v1/projects', (c) => {
     const profile = getLaunchProfile();
     const catalog = getCatalog();
@@ -205,24 +275,32 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
     }
 
     try {
-      const subdomain = cleanSubdomain(parsed.data.subdomain);
-      const domain = subdomain ? `${subdomain}\${DOMAIN_ROOT}` : null;
+      const patch: Parameters<typeof updateServiceCatalogInfo>[1] = {};
+      const hasProjectCode = Object.prototype.hasOwnProperty.call(parsed.data, 'project_code');
+      const hasSubdomain = Object.prototype.hasOwnProperty.call(parsed.data, 'subdomain');
+      const hasFrontendUrl = Object.prototype.hasOwnProperty.call(parsed.data, 'frontend_url');
+      const projectCode = hasProjectCode ? parsed.data.project_code ?? null : undefined;
+      const subdomain = hasSubdomain ? cleanSubdomain(parsed.data.subdomain) : undefined;
+      const frontendUrl = hasFrontendUrl ? cleanFrontendUrl(parsed.data.frontend_url) : undefined;
+      const domain = subdomain === undefined ? undefined : subdomain ? `${subdomain}\${DOMAIN_ROOT}` : null;
+      if (hasProjectCode) patch.project_code = projectCode ?? null;
+      if (hasSubdomain) {
+        patch.subdomain = subdomain ?? null;
+        patch.domain = domain ?? null;
+      }
+      if (hasFrontendUrl) patch.frontend_url = frontendUrl ?? null;
       logger.info(
-        { code, project_code: parsed.data.project_code ?? null, subdomain, domain },
+        { code, project_code: projectCode, subdomain, frontend_url: frontendUrl, domain },
         'writing catalog info',
       );
       writeDiagnostic('catalogInfo.write.start', {
         code,
-        project_code: parsed.data.project_code ?? null,
+        project_code: projectCode,
         subdomain,
+        frontend_url: frontendUrl,
         domain,
       });
-      const result = updateServiceCatalogInfo(code, {
-        project_code: parsed.data.project_code ?? null,
-        subdomain,
-        frontend_url: null,
-        domain,
-      });
+      const result = updateServiceCatalogInfo(code, patch);
       await onCatalogChanged?.('catalog info edit');
       logger.info({ code, updated: result.updated }, 'catalog info update complete');
       writeDiagnostic('catalogInfo.write.complete', { code, updated: result.updated });
@@ -237,6 +315,60 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
   return app;
 }
 
+function normalizeList(input: string[] | undefined): string[] | undefined {
+  if (!input) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of input) {
+    const value = raw.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function normalizeServiceInfisical(input: ServiceInfisical): ServiceInfisical {
+  return {
+    project_id: input.project_id.trim(),
+    environment: input.environment.trim() || 'dev',
+    inject: input.inject,
+    prefix: input.prefix?.trim() ?? '',
+    include: normalizeList(input.include),
+    exclude: normalizeList(input.exclude),
+    required_env: normalizeList(input.required_env),
+  };
+}
+
+async function serviceEnvStatus(svc: Catalog['services'][number]): Promise<{
+  ready: boolean;
+  required: string[];
+  missing: string[];
+  resolvedKeys: number | null;
+  error: string | null;
+}> {
+  const required = requiredEnvKeysForService(svc);
+  try {
+    const env = await resolveInjectEnv(svc);
+    const validation = validateStartupEnv(svc, env);
+    return {
+      ready: validation.ready,
+      required: validation.required,
+      missing: validation.missing,
+      resolvedKeys: Object.keys(env).length,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ready: false,
+      required,
+      missing: required,
+      resolvedKeys: null,
+      error: (err as Error).message,
+    };
+  }
+}
+
 function cleanSubdomain(input: string | null | undefined): string | null {
   const raw = input?.trim().toLowerCase();
   if (!raw) return null;
@@ -248,6 +380,18 @@ function cleanSubdomain(input: string | null | undefined): string | null {
     throw new Error('subdomain must be a hostname label');
   }
   return label;
+}
+
+function cleanFrontendUrl(input: string | null | undefined): string | null {
+  const raw = input?.trim();
+  if (!raw) return null;
+  const candidate = raw.includes('://') ? raw : `https://${raw}`;
+  const url = new URL(candidate);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('frontend_url must be an http or https URL');
+  }
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
 }
 
 interface InstanceDetail {

@@ -21,6 +21,27 @@ global:
     # Pagus/Signum/Praeforma/Peregrinatio) に自動注入される。
     LUDIARS_ALLOWED_HOSTS: "${DOMAIN_ROOT}"
 
+project_versions:
+  # patch is derived at runtime from build number env or git commit count.
+  concordia:
+    major: 2
+    minor: 1
+  discutere:
+    major: 2
+    minor: 0
+  excubitor:
+    major: 1
+    minor: 4
+  peregrinatio:
+    major: 0
+    minor: 8
+  pagus:
+    major: 0
+    minor: 6
+  memoria:
+    major: 3
+    minor: 1
+
 services:
   # ─────────────── LUDIARS 共有インフラ (tier: infra / monitor_only) ───────────────
   - code: infra-postgres
@@ -294,8 +315,10 @@ services:
 
   - code: pagus
     name: Pagus (AI 村シミュレーション)
+    domain: pagus${DOMAIN_ROOT}
     tier: personal
     project_code: pagus
+    subdomain: pagus
     component: backend
     # 権威サーバ (WS :4310)。client (:4320) は frontend のため catalog 対象外。
     port: 4310
@@ -314,8 +337,10 @@ services:
 
   - code: peregrinatio
     name: Peregrinatio
+    domain: pe${DOMAIN_ROOT}
     tier: personal
     project_code: peregrinatio
+    subdomain: pe
     component: backend
     port: 8090
     repo: LUDIARS/Peregrinatio
@@ -505,8 +530,10 @@ services:
   # 読むので、 Excubitor が起動時に env: BACKEND_PORT=3110 を注入して整合させる。
   - code: discutere
     name: Discutere (Discord 議論)
+    domain: di${DOMAIN_ROOT}
     tier: saas
     project_code: discutere
+    subdomain: di
     component: backend
     port: 3110
     repo: LUDIARS/Discutere
@@ -530,8 +557,10 @@ services:
   # 個人ローカル開発用 server (個人ログ専用、 port 5180)。 シェアサーバ (Hub) とは別。
   - code: memoria-server
     name: Memoria server (local)
+    domain: memoria${DOMAIN_ROOT}
     tier: personal
     project_code: memoria
+    subdomain: memoria
     component: server
     port: 5180
     repo: LUDIARS/Memoria
@@ -604,11 +633,11 @@ services:
     cwd: ${ARS_ROOT}/Concordia
     command: npm run dev:backend
     env:
-      # Discord relay / egress can become busy under active Lictor sessions.
-      # Keep Web/API responsive by running Discord as the concordia-discord worker.
-      CONCORDIA_DISCORD_EMBEDDED: "0"
-    # backend only. Discord relay is split into concordia-discord so Web/API
-    # stays responsive even when gateway relay or transcript egress is busy.
+      # Cost サンプリング (全ログ JSONL 走査) が event loop を重くするため cost だけを
+      # concordia-cost worker へ分離する。chat (Discord/Slack) relay は backend embedded で
+      # 動かす — worker 分離 (concordia-discord) は WS bridge 越しの interaction 遅延で
+      # autocomplete が 3s ACK 窓を超え不安定だったため撤去した。
+      CONCORDIA_COST_MODE: worker
     autostart: false
     # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
     # VESTIGIUM_LOGS_DIR=dirname(log_path)=${ARS_ROOT}/logs を注入し、 Concordia の Vestigium が
@@ -623,27 +652,29 @@ services:
     provides:
       CONCORDIA_URL: http://${host}:${port}
 
-  - code: concordia-discord
-    name: Concordia Discord Worker
+  - code: concordia-cost
+    name: Concordia Cost Worker
     tier: personal
     project_code: concordia
     component: worker
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run discord:worker
+    command: npm run cost:worker
     autostart: false
     restart_policy: on-failure
     max_restart: 5
-    log_path: ${ARS_ROOT}/logs/concordia-discord
+    log_path: ${ARS_ROOT}/logs/concordia-cost
     health:
       type: process
       interval_sec: 30
 
   - code: concordia-web
     name: Concordia Web
+    domain: cc${DOMAIN_ROOT}
     tier: personal
     project_code: concordia
+    subdomain: cc
     component: frontend
     port: 10101
     repo: LUDIARS/Concordia

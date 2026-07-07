@@ -14,13 +14,36 @@ import { readIdentity, fetchProjectSecrets, toEnvMap } from '../secrets/infisica
 import { resolveServiceInfisical } from '../secrets/config-store.js';
 import { listListeners, type PortListener } from '../scanner/ports.js';
 import { managedPortsForService } from '../catalog/ports.js';
+import { resolveInjectEnv } from '../process/inject.js';
+import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical' | 'start_script' | 'port' | 'disabled';
+  kind: 'cwd' | 'compose_file' | 'infisical' | 'env' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
+}
+
+async function checkRequiredEnv(svc: Service): Promise<PreflightCheck> {
+  const required = requiredEnvKeysForService(svc);
+  if (required.length === 0) {
+    return { kind: 'env', status: 'ok', detail: 'no required env configured' };
+  }
+  try {
+    const env = await resolveInjectEnv(svc);
+    const validation = validateStartupEnv(svc, env);
+    if (validation.ready) {
+      return { kind: 'env', status: 'ok', detail: `${validation.required.length} required env present` };
+    }
+    return {
+      kind: 'env',
+      status: 'fail',
+      detail: `missing required env: ${validation.missing.join(', ')}`,
+    };
+  } catch (err) {
+    return { kind: 'env', status: 'fail', detail: (err as Error).message };
+  }
 }
 
 export interface ServicePreflight {
@@ -128,7 +151,7 @@ function checkPorts(svc: Service, listeners: PortListener[]): PreflightCheck[] {
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
   const targets = services.filter((s) => want.has(s.code));
-  const needsIdentity = targets.some((s) => s.infisical?.inject);
+  const needsIdentity = targets.some((s) => resolveServiceInfisical(s.code, s.infisical)?.inject);
   const identityPresent = readIdentity() !== null;
 
   // port 占有は OS 呼び出し 1 回で全 listener を取得して使い回す。
@@ -140,6 +163,7 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
     if (svc.disabled) checks.push({ kind: 'disabled', status: 'fail', detail: 'disabled in catalog' });
     const { check: infCheck, injected } = await checkInfisical(svc);
     checks.push(infCheck);
+    checks.push(await checkRequiredEnv(svc));
     checks.push(...checkPorts(svc, listeners));
     result.push({
       code: svc.code,

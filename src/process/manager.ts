@@ -21,6 +21,8 @@ import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
 import { execCapture } from '../shared/exec.js';
 import { startProcessLog, stopProcessLog } from '../log/process-file.js';
+import { runServiceBuild } from './build.js';
+import { assertStartupEnv } from './startup-env.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -273,13 +275,31 @@ async function onExit(
   // exponential backoff: 1s, 2s, 4s, ...
   const delay = Math.min(30_000, 1000 * 2 ** prevRestartCount);
   setTimeout(() => {
-    void spawnService(svc, {
-      ...opts,
-      initialRestartCount: prevRestartCount + 1,
-    }).catch((err: unknown) =>
+    void autoRestartService(svc, opts, prevRestartCount).catch((err: unknown) =>
       logger.error({ code: svc.code, err: (err as Error).message }, 'auto-restart failed'),
     );
   }, delay);
+}
+
+async function autoRestartService(
+  svc: Service,
+  opts: SpawnOptions,
+  prevRestartCount: number,
+): Promise<void> {
+  assertStartupEnv(svc, opts.env ?? {});
+  const build = await runServiceBuild(svc, 'auto-restart');
+  if (!build.ok) {
+    logger.error(
+      { code: svc.code, command: build.command, stderr: build.stderr.slice(-500) },
+      'auto-restart build failed',
+    );
+    await raiseRestartBuildError(svc, build.command, build.stderr || build.stdout);
+    return;
+  }
+  await spawnService(svc, {
+      ...opts,
+      initialRestartCount: prevRestartCount + 1,
+    });
 }
 
 function splitCommand(input: string): string[] {
@@ -328,6 +348,24 @@ async function raiseRestartLimitError(
     SELECT ${newId}, si.id, 'fatal',
            ${'restart limit reached (max=' + max + ', exit_code=' + exitCode + ', signal=' + (signal ?? 'none') + ')'},
            NULL, unixepoch() * 1000, unixepoch() * 1000
+    FROM service_instances si
+    JOIN services s ON s.id = si.service_id
+    WHERE s.code = ${svc.code}
+    LIMIT 1
+  `);
+}
+
+async function raiseRestartBuildError(
+  svc: Service,
+  command: string,
+  output: string,
+): Promise<void> {
+  const newId = randomUUID();
+  db().run(sql`
+    INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
+    SELECT ${newId}, si.id, 'fatal',
+           ${'auto-restart build failed: ' + command},
+           ${output.slice(-2000)}, unixepoch() * 1000, unixepoch() * 1000
     FROM service_instances si
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${svc.code}

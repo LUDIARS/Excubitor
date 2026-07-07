@@ -216,7 +216,7 @@ export interface LaunchPlan {
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical';
+  kind: 'cwd' | 'compose_file' | 'infisical' | 'env' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
 }
@@ -264,6 +264,34 @@ export interface ServiceInfisical {
   prefix: string;
   include?: string[];
   exclude?: string[];
+  required_env?: string[];
+}
+
+export interface ServiceEnvStatus {
+  ready: boolean;
+  required: string[];
+  missing: string[];
+  resolvedKeys: number | null;
+  error: string | null;
+}
+
+export interface ServiceEnvConfig {
+  code: string;
+  catalog: ServiceInfisical | null;
+  override: ServiceInfisical | null;
+  effective: ServiceInfisical | null;
+  required_env: string[];
+  status: ServiceEnvStatus;
+}
+
+export interface ServiceEnvConfigInput {
+  project_id?: string | null;
+  environment?: string;
+  inject?: boolean;
+  prefix?: string;
+  include?: string[];
+  exclude?: string[];
+  required_env?: string[];
 }
 
 export interface DomainRootStatus {
@@ -471,6 +499,17 @@ export function saveServices(services: Record<string, ServiceInfisical>) {
   );
 }
 
+export function fetchServiceEnvConfig(code: string): Promise<ServiceEnvConfig> {
+  return getJSON<ServiceEnvConfig>(`/api/v1/services/${encodeURIComponent(code)}/env-config`);
+}
+
+export function saveServiceEnvConfig(code: string, input: ServiceEnvConfigInput) {
+  return putJSON<ServiceEnvConfig & { ok: boolean }>(
+    `/api/v1/services/${encodeURIComponent(code)}/env-config`,
+    input,
+  );
+}
+
 export function saveDomainRoot(domainRoot: string) {
   return putJSON<{ ok: boolean; domain_root: DomainRootStatus }>('/api/v1/config/domain-root', {
     domain_root: domainRoot,
@@ -525,6 +564,15 @@ export interface SystemInfo {
   service: string;
   safe_mode: boolean;
   service_mode?: boolean;
+  build_version?: {
+    project_code: string;
+    major: number;
+    minor: number;
+    patch: number;
+    version: string;
+    patch_source: 'env' | 'git' | 'fallback';
+    git_hash: string | null;
+  } | null;
 }
 
 export function fetchSystem(): Promise<SystemInfo> {
@@ -655,6 +703,7 @@ export function setCorpusPref(code: string, usesCorpus: boolean | null) {
 export interface CatalogInfoInput {
   project_code?: string | null;
   subdomain?: string | null;
+  frontend_url?: string | null;
 }
 
 export function saveCatalogInfo(code: string, input: CatalogInfoInput) {

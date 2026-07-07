@@ -26,6 +26,7 @@ const InfisicalSchema = z.object({
   prefix: z.string().default(''),
   include: z.array(z.string()).optional(),
   exclude: z.array(z.string()).optional(),
+  required_env: z.array(z.string()).optional(),
 });
 
 /**
@@ -70,6 +71,11 @@ const ManagedPortSchema = z.object({
   role: z.string().default('service'),
   port: z.number().int(),
   env: z.string().optional(),
+});
+
+const ProjectVersionSchema = z.object({
+  major: z.number().int().nonnegative(),
+  minor: z.number().int().nonnegative(),
 });
 
 const ServiceSchema = z.object({
@@ -170,6 +176,8 @@ const ServiceSchema = z.object({
    * 例 (discutere の port 競合回避): env: { BACKEND_PORT: "3110" }
    */
   env: z.record(z.string(), z.string()).optional(),
+  /** 起動前に空値を許容しない env 名。Infisical required_env/include と合算して検査する。 */
+  required_env: z.array(z.string()).default([]),
   /**
    * runtime=app 専用。 起動する実行ファイル (絶対パス推奨) と引数。
    * 例: exec: ${ARS_ROOT}/Hora/src-tauri/target/release/hora.exe
@@ -248,6 +256,7 @@ const GlobalSchema = z.object({
 });
 
 const CatalogSchema = z.object({
+  project_versions: z.record(ProjectVersionSchema).default({}),
   services: z.array(ServiceSchema),
   /** カタログ全体に適用するグローバル設定。 */
   global: GlobalSchema.optional(),

@@ -50,6 +50,7 @@ import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
+import { syncHealthyServiceStates } from './scanner/health-state.js';
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
@@ -58,6 +59,8 @@ import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
 import { runEmergencyAction } from './ops/emergency.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
+import { resolveBuildVersion } from './shared/build-version.js';
+import type { StartupNpmIssue } from './startup/npm-install.js';
 
 const logger = createNamedLogger('concordia.observability');
 
@@ -80,6 +83,33 @@ let currentCatalog: Catalog | null = null;
 
 function findService(code: string): Service | undefined {
   return currentCatalog?.services.find((s) => s.code === code);
+}
+
+export function recordStartupNpmIssues(issues: StartupNpmIssue[]): void {
+  for (const issue of issues) {
+    const existing = db().get(drizzleSql`
+      SELECT id, occurrence_count FROM error_tasks
+      WHERE service_instance_id IS NULL
+        AND summary = ${issue.summary}
+        AND state IN ('open', 'ack')
+      LIMIT 1
+    `) as { id: string; occurrence_count: number } | undefined;
+    if (existing) {
+      db().run(drizzleSql`
+        UPDATE error_tasks
+        SET occurrence_count = ${Number(existing.occurrence_count ?? 1) + 1},
+            log_excerpt = ${issue.detail},
+            last_seen_at = unixepoch() * 1000,
+            updated_at = unixepoch() * 1000
+        WHERE id = ${existing.id}
+      `);
+      continue;
+    }
+    db().run(drizzleSql`
+      INSERT INTO error_tasks (id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
+      VALUES (${randomUUID()}, 'error', ${issue.summary}, ${issue.detail}, unixepoch() * 1000, unixepoch() * 1000)
+    `);
+  }
 }
 
 export async function bootObservability(): Promise<ObservabilityHandle> {
@@ -121,6 +151,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
   // detached 起動なので Excubitor 再起動を跨いでサービスは生きており、 ここで管理下に戻す。
   reconcileProcesses(currentCatalog);
+  await syncHealthyServiceStates(currentCatalog);
 
   await seedDefaultRules();
   attachProcessBridge();
@@ -224,9 +255,17 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   app.route('/', buildFederationRouter(() => currentCatalog!));
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
-  app.get('/api/v1/system', (c) =>
-    c.json({ service: 'excubitor', safe_mode: isSafeMode(), service_mode: serviceMode }),
-  );
+  app.get('/api/v1/system', async (c) => {
+    const buildVersion = currentCatalog
+      ? await resolveBuildVersion(currentCatalog, 'excubitor', process.cwd())
+      : null;
+    return c.json({
+      service: 'excubitor',
+      safe_mode: isSafeMode(),
+      service_mode: serviceMode,
+      build_version: buildVersion,
+    });
+  });
 
   // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
   app.get('/api/v1/topology', (c) => c.json({ env: getTopologyEnv() }));
