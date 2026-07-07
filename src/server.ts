@@ -12,6 +12,14 @@ type Logger = {
 type CloseableServer = {
   close: () => void;
   on: (event: string, listener: (...args: unknown[]) => void) => void;
+  ref?: () => void;
+  requestTimeout?: number;
+  headersTimeout?: number;
+  keepAliveTimeout?: number;
+};
+
+type SocketLike = {
+  on: (event: string, listener: () => void) => void;
 };
 
 const fallbackLogger: Logger = {
@@ -25,6 +33,12 @@ let shutdown: (() => Promise<void>) | null = null;
 let closeDbFn: (() => void) | null = null;
 let stopping = false;
 let activeServer: CloseableServer | null = null;
+let connectionLogTimer: NodeJS.Timeout | null = null;
+const activeSockets = new Set<SocketLike>();
+const processStartedAt = Date.now();
+const requestTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_REQUEST_TIMEOUT_MS', 95_000);
+const headersTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_HEADERS_TIMEOUT_MS', 65_000);
+const keepAliveTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_KEEP_ALIVE_TIMEOUT_MS', 5_000);
 
 process.on('uncaughtException', (err) => {
   logger.error({ err: err.stack ?? err.message }, 'uncaught exception');
@@ -50,7 +64,15 @@ process.on('exit', (code) => {
 });
 
 try {
+  const startupNpmStartedAt = Date.now();
   const startupNpm = await runStartupNpmInstallAndAudit(process.cwd());
+  writeDiagnostic('server.startup.npm.complete', {
+    duration_ms: Date.now() - startupNpmStartedAt,
+    install_ok: startupNpm.installOk,
+    audit_ok: startupNpm.auditOk,
+    issues: startupNpm.issues.length,
+    skipped: startupNpm.skipped === true,
+  });
   const [
     serverModule,
     observabilityModule,
@@ -77,7 +99,7 @@ try {
 
   const booted = await bootObservability();
   shutdown = booted.shutdown;
-  writeDiagnostic('server.boot.complete');
+  writeDiagnostic('server.boot.complete', { duration_ms: Date.now() - processStartedAt });
   booted.router.onError((err, c) => {
     logger.error(
       { err: err.stack ?? err.message, method: c.req.method, path: c.req.path },
@@ -93,14 +115,38 @@ try {
 
   const server = serve({ fetch: booted.router.fetch, port, hostname: '127.0.0.1' }) as CloseableServer;
   activeServer = server;
+  server.ref?.();
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = headersTimeoutMs;
+  server.keepAliveTimeout = keepAliveTimeoutMs;
+  server.on('connection', (socket: unknown) => {
+    const tracked = socket as SocketLike;
+    activeSockets.add(tracked);
+    tracked.on('close', () => activeSockets.delete(tracked));
+  });
+  connectionLogTimer = setInterval(() => {
+    const payload = {
+      active_sockets: activeSockets.size,
+      request_timeout_ms: requestTimeoutMs,
+      headers_timeout_ms: headersTimeoutMs,
+      keep_alive_timeout_ms: keepAliveTimeoutMs,
+    };
+    logger.info(payload, 'backend connection summary');
+    if (activeSockets.size >= 50) writeDiagnostic('server.connections.high', payload);
+  }, 30_000);
+  connectionLogTimer.unref?.();
   server.on('listening', () => {
-    logger.info({ port }, 'Excubitor server listening');
-    writeDiagnostic('server.listening', { port });
+    logger.info({ port, requestTimeoutMs, headersTimeoutMs, keepAliveTimeoutMs }, 'Excubitor server listening');
+    writeDiagnostic('server.listening', { port, requestTimeoutMs, headersTimeoutMs, keepAliveTimeoutMs });
   });
   server.on('error', (err) => {
     const error = err instanceof Error ? err.stack ?? err.message : String(err);
-    logger.error({ err: error, port }, 'Excubitor server listen error');
-    writeDiagnostic('server.listen.error', { err: error, port });
+    const code = (err as NodeJS.ErrnoException).code ?? null;
+    logger.error({ err: error, code, port }, 'Excubitor server listen error');
+    writeDiagnostic('server.listen.error', { err: error, code, port });
+    if (code === 'EADDRINUSE') {
+      void shutdownAndExit(1, 'listen address already in use');
+    }
   });
   server.on('close', () => {
     logger.warn({ port }, 'Excubitor server closed');
@@ -114,18 +160,27 @@ try {
   process.exitCode = 1;
 }
 
-const stop = async () => {
+async function shutdownAndExit(exitCode: number, reason: string): Promise<void> {
   if (stopping) return;
   stopping = true;
-  logger.info('stopping Excubitor server');
-  writeDiagnostic('server.stopping');
+  logger.info({ reason, exitCode }, 'stopping Excubitor server');
+  writeDiagnostic('server.stopping', { reason, exitCode });
   await shutdown?.();
   activeServer?.close();
+  if (connectionLogTimer) clearInterval(connectionLogTimer);
+  activeSockets.clear();
   try { closeDbFn?.(); } catch (err) {
     logger.warn({ err: (err as Error).message }, 'closeDb failed');
   }
-  process.exit(0);
-};
+  process.exit(exitCode);
+}
+
+const stop = async () => shutdownAndExit(0, 'signal');
 
 process.on('SIGINT', () => { void stop(); });
 process.on('SIGTERM', () => { void stop(); });
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}

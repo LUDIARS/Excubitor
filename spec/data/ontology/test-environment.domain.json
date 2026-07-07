@@ -1,0 +1,14 @@
+{
+  "name": "test-environment",
+  "description": "Automated tests, test fixtures, and local specs used to verify Excubitor behavior.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/.+\\.test\\.ts$" },
+    { "pathPattern": "(^|/)src/[^/]+\\.test\\.ts$" },
+    { "pathPattern": "(^|/)spec/[^/]+/[^/]+$" },
+    { "pathPattern": "(^|/)review/[^/]+$" },
+    { "pathPattern": "(^|/)review/[^/]+/[^/]+$" }
+  ],
+  "cardTemplate": "Summarise the test-environment domain: automated coverage, fixture boundaries, local specs, and review artifacts."
+}

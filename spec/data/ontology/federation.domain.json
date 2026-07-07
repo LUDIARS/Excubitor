@@ -1,0 +1,13 @@
+{
+  "name": "federation",
+  "description": "Node-to-node federation, remote peer management, remote service proxying, and Corpus hub publication.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/federation/[^/]+$" },
+    { "pathPattern": "(^|/)src/hub/[^/]+$" },
+    { "pathPattern": "(^|/)src/mcp/server\\.ts$" },
+    { "pathPattern": "(^|/)frontend/src/pages/Federation\\.tsx$" }
+  ],
+  "cardTemplate": "Summarise the federation domain: peer auth, remote node snapshots, remote control/update proxying, and Corpus hub integration."
+}

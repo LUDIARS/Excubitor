@@ -1,0 +1,13 @@
+{
+  "name": "performance-monitoring",
+  "description": "Runtime health, port conflict, memory, CPU, WSL, docker, and liveness monitoring.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/memory/[^/]+$" },
+    { "pathPattern": "(^|/)src/scanner/[^/]+$" },
+    { "pathPattern": "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$" },
+    { "pathPattern": "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$" }
+  ],
+  "cardTemplate": "Summarise the performance-monitoring domain: samplers, health scanners, port reports, leak detection, and alert generation."
+}

@@ -134,6 +134,7 @@ const ServiceSchema = z.object({
   start_script: z.string().optional(),
   compose_file: z.string().optional(),
   services: z.array(z.string()).optional(),
+  depends_on: z.array(z.string()).default([]),
   /**
    * docker scanner ぁEcontainer と紐付けるため�E名前パターン、E
    * - runtime=docker-compose の場合、Ecompose の container_name もしく�E
@@ -143,6 +144,8 @@ const ServiceSchema = z.object({
    */
   container_names: z.array(z.string()).optional(),
   autostart: z.boolean().default(false),
+  // Hot-reload/watch/dev-server commands are blocked by default. Opt in per service only when needed.
+  allow_hot_reload: z.boolean().default(false),
   restart_policy: z.enum(['no', 'on-failure', 'always']).default('no'),
   max_restart: z.number().default(5),
   health: HealthSchema.optional(),

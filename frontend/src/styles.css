@@ -162,6 +162,7 @@ code {
 .dot.crashed   { background: var(--err); }
 .dot.degraded  { background: var(--warn); }
 .dot.pending   { background: var(--warn); }
+.dot.stale     { background: var(--warn); }
 .dot.unknown   { background: var(--unknown); }
 
 .comp-name { font-weight: 500; }
@@ -230,6 +231,7 @@ code {
 .state-badge.running { background: rgba(46,160,67,0.18); color: var(--ok); }
 .state-badge.stopped, .state-badge.crashed { background: rgba(218,54,51,0.18); color: var(--err); }
 .state-badge.pending { background: rgba(210,153,34,0.18); color: var(--warn); }
+.state-badge.stale { background: rgba(210,153,34,0.18); color: var(--warn); }
 .tag {
   font-size: 10px; padding: 1px 6px; border-radius: 4px;
   background: var(--border); color: var(--fg-muted); font-family: var(--mono);
@@ -695,6 +697,8 @@ button.danger { color: var(--err); border-color: rgba(248,113,113,0.4); }
 .svc-row-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
 .svc-row-tags .tag.pcode { background: rgba(148,163,184,0.15); }
 .svc-row-tags .tag.upd { color: var(--warn); border-color: rgba(250,204,21,0.5); }
+.tag.health-failed { background: rgba(218,54,51,0.18); color: var(--err); }
+.tag.health-stale { background: rgba(210,153,34,0.18); color: var(--warn); }
 .tag.disabled { background: rgba(248,113,113,0.18); color: var(--err); border-color: rgba(248,113,113,0.45); }
 .svc-url { font-size: 11px; font-family: var(--mono); white-space: nowrap; }
 .svc-row-branch { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }

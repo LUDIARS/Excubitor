@@ -94,7 +94,14 @@ async function controlProcess(
       if (!build.ok) {
         return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
       }
-      const p = await spawnService(svc, { env });
+      let spawnError: string | null = null;
+      const p = await spawnService(svc, { env }).catch((err: unknown) => {
+        spawnError = err instanceof Error ? err.message : String(err);
+        return null;
+      });
+      if (!p) {
+        return { ok: false, stdout: '', stderr: spawnError ?? 'start failed', exit_code: -1, command: `spawn ${svc.runtime}:${svc.code}` };
+      }
       const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
@@ -128,7 +135,14 @@ async function controlProcess(
       if (!build.ok) {
         return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
       }
-      const p = await spawnService(svc, { env });
+      let spawnError: string | null = null;
+      const p = await spawnService(svc, { env }).catch((err: unknown) => {
+        spawnError = err instanceof Error ? err.message : String(err);
+        return null;
+      });
+      if (!p) {
+        return { ok: false, stdout: '', stderr: spawnError ?? 'restart failed', exit_code: -1, command: `restart ${svc.code}` };
+      }
       const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
