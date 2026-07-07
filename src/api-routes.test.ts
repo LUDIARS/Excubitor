@@ -520,6 +520,20 @@ describe('Excubitor HTTP APIs', () => {
     });
   }
 
+  it('serves downtime summaries for liveness and project cards', async () => {
+    const live = await requestJson<{
+      downtime: { downtime_ms: number; incidents: number; uptime_ratio: number | null } | null;
+    }>(router, 'GET', '/api/v1/services/svc-a/liveness?window_min=60');
+    expect(live.res.status).toBe(200);
+    expect(live.data.downtime).toMatchObject({ downtime_ms: 0, incidents: 0, uptime_ratio: 1 });
+
+    const projects = await requestJson<{
+      projects: Array<{ components: Array<{ code: string; downtime_24h?: { downtime_ms: number } | null }> }>;
+    }>(router, 'GET', '/api/v1/projects');
+    const svc = projects.data.projects.flatMap((p) => p.components).find((c) => c.code === 'svc-a');
+    expect(svc?.downtime_24h).toMatchObject({ downtime_ms: 0 });
+  });
+
   it('caches expensive discovery reads briefly', async () => {
     const first = await requestJson(router, 'GET', '/api/v1/discovery');
     const second = await requestJson(router, 'GET', '/api/v1/discovery');
