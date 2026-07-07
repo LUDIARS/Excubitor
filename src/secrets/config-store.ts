@@ -16,7 +16,7 @@
  * 設定が無ければ identity は未設定のまま → UI が入力を促す。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createNamedLogger } from '../shared/logger.js';
@@ -52,6 +52,7 @@ interface ExcubitorConfig {
 }
 
 export const DEFAULT_DOMAIN_ROOT = '';
+let configCache: { path: string; mtimeMs: number | null; value: ExcubitorConfig } | null = null;
 
 export type DomainRootSource = 'env' | 'config' | 'unset';
 
@@ -94,17 +95,30 @@ function configPath(): string {
 /** 暗号化ファイルを復号して読む。 未存在 / 復号失敗は空 config 扱い。 */
 function readConfig(): ExcubitorConfig {
   const path = configPath();
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) {
+    if (configCache?.path === path && configCache.mtimeMs === null) return configCache.value;
+    const value: ExcubitorConfig = {};
+    configCache = { path, mtimeMs: null, value };
+    return value;
+  }
+  const mtimeMs = statSync(path).mtimeMs;
+  if (configCache?.path === path && configCache.mtimeMs === mtimeMs) return configCache.value;
   try {
     const blob = JSON.parse(readFileSync(path, 'utf8')) as EncryptedBlob;
     if (!isEncryptedBlob(blob)) {
       logger.warn('config file is not an encrypted blob — ignoring');
-      return {};
+      const value: ExcubitorConfig = {};
+      configCache = { path, mtimeMs, value };
+      return value;
     }
-    return decryptJson<ExcubitorConfig>(blob, masterSecret());
+    const value = decryptJson<ExcubitorConfig>(blob, masterSecret());
+    configCache = { path, mtimeMs, value };
+    return value;
   } catch (err) {
     logger.warn({ err: (err as Error).message }, 'config decrypt failed (master key changed?) — treating as empty');
-    return {};
+    const value: ExcubitorConfig = {};
+    configCache = { path, mtimeMs, value };
+    return value;
   }
 }
 
@@ -114,6 +128,7 @@ function writeConfig(cfg: ExcubitorConfig): void {
   mkdirSync(dirname(path), { recursive: true });
   const blob = encryptJson(cfg, masterSecret());
   writeFileSync(path, JSON.stringify(blob), 'utf8');
+  configCache = { path, mtimeMs: statSync(path).mtimeMs, value: cfg };
 }
 
 export function getDomainRootOverride(): string | null {

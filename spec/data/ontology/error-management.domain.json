@@ -1,0 +1,14 @@
+{
+  "name": "error-management",
+  "description": "Error detection, triage APIs, emergency actions, auto-fix run records, and operational error persistence.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/log/error-detector\\.ts$" },
+    { "pathPattern": "(^|/)src/db/[^/]+$" },
+    { "pathPattern": "(^|/)src/ops/[^/]+$" },
+    { "pathPattern": "(^|/)frontend/src/pages/Errors\\.tsx$" },
+    { "pathPattern": "(^|/)src/index\\.ts$", "namePattern": "resolveTaskAndService" }
+  ],
+  "cardTemplate": "Summarise the error-management domain: error rules, task state, emergency actions, audit trail, and triage risks."
+}

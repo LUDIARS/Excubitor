@@ -15,6 +15,7 @@ import LogsDrawer from '../components/LogsDrawer';
 import MetricGraph from '../components/MetricGraph';
 
 const RUNNING_STATES = new Set(['running', 'pending']);
+const HEALTH_STALE_MS = 90_000;
 
 export default function Monitor() {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -270,7 +271,9 @@ function ComponentStatusLine({
 }) {
   const [busy, setBusy] = useState(false);
   const [opsBusy, setOpsBusy] = useState(false);
-  const running = c.state === 'running';
+  const displayState = componentDisplayState(c);
+  const running = RUNNING_STATES.has(displayState);
+  const healthTitle = componentHealthTitle(c, displayState);
   const isControllable = !c.disabled && ['node', 'dev-process-md', 'app', 'docker-compose', 'docker'].includes(c.runtime ?? '');
   const url = frontendUrl(c);
   const port = primaryPortStatus(c, portStatuses);
@@ -299,11 +302,11 @@ function ComponentStatusLine({
 
   const memPct = memoryPct(mem);
   return (
-    <div className={`component-status-line ${c.state} ${c.disabled ? 'disabled' : ''}`}>
+    <div className={`component-status-line ${displayState} ${c.disabled ? 'disabled' : ''}`}>
       <button className="component-status-main" onClick={onShowDetail}>
-        <span className={`dot ${c.state}`} title={c.state} />
+        <span className={`dot ${displayState}`} title={healthTitle} />
         <span className="component-status-role">{componentLabel(c)}</span>
-        <span className={`state-badge ${c.state}`}>{c.state}</span>
+        <span className={`state-badge ${displayState}`} title={healthTitle}>{displayState}</span>
         <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>{primaryPortLabel(c, port)}</span>
       </button>
       <div className="component-port-list">
@@ -316,6 +319,8 @@ function ComponentStatusLine({
       </div>
       <div className="svc-row-tags component-status-tags">
           {c.disabled && <span className="tag disabled">disabled</span>}
+          {displayState === 'stale' && <span className="tag health-stale" title={healthTitle}>health stale</span>}
+          {c.health_ok === false && <span className="tag health-failed" title={healthTitle}>health fail</span>}
           {c.runtime && <span className="tag">{c.runtime}</span>}
           {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
           {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>update</span>}
@@ -355,7 +360,9 @@ function ServiceDetailOverlay({
   const [live, setLive] = useState<LivenessSeries | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [logs, setLogs] = useState<RecentLogLine[]>([]);
-  const running = c.state === 'running';
+  const displayState = componentDisplayState(c);
+  const running = RUNNING_STATES.has(displayState);
+  const healthTitle = componentHealthTitle(c, displayState);
   const isControllable = !c.disabled && ['node', 'dev-process-md', 'app', 'docker-compose', 'docker'].includes(c.runtime ?? '');
   const url = frontendUrl(c);
   const usesCorpus = c.uses_corpus ?? false;
@@ -404,7 +411,9 @@ function ServiceDetailOverlay({
             <h3>Overview</h3>
             <p>{c.description || 'No description in catalog.'}</p>
             <div className="detail-tags">
-              <span className={`state-badge ${c.state}`}>{c.state}</span>
+              <span className={`state-badge ${displayState}`} title={healthTitle}>{displayState}</span>
+              {displayState === 'stale' && <span className="tag health-stale" title={healthTitle}>health stale</span>}
+              {c.health_ok === false && <span className="tag health-failed" title={healthTitle}>health fail</span>}
               {c.disabled && <span className="tag disabled">disabled</span>}
               {c.runtime && <span className="tag">{c.runtime}</span>}
               {c.port && <span className={`cc-port ${port?.conflict ? 'conflict' : ''}`}>:{c.port}</span>}
@@ -755,7 +764,32 @@ function memoryPct(mem: MemoryCard | undefined): number | null {
 }
 
 function projectRunning(project: Project): boolean {
-  return project.components.some((c) => RUNNING_STATES.has(c.state));
+  return project.components.some((c) => RUNNING_STATES.has(componentDisplayState(c)));
+}
+
+function componentDisplayState(c: Component): string {
+  const hasHealth = c.health_ok === true || c.health_ok === false;
+  const age = healthAgeMs(c);
+  if (hasHealth && age != null && age > HEALTH_STALE_MS) return 'stale';
+  if (c.health_ok === true) return 'running';
+  if (c.health_ok === false) return 'stopped';
+  return c.state || 'unknown';
+}
+
+function componentHealthTitle(c: Component, displayState = componentDisplayState(c)): string {
+  const parts = [`status: ${displayState}`];
+  if (c.health_ok === true) parts.push('health: ok');
+  if (c.health_ok === false) parts.push('health: failed');
+  if (c.health_reason) parts.push(`reason: ${c.health_reason}`);
+  if (c.health_detail) parts.push(c.health_detail);
+  if (typeof c.health_checked_at === 'number') {
+    parts.push(`checked: ${new Date(c.health_checked_at).toLocaleString()}`);
+  }
+  return parts.join(' / ');
+}
+
+function healthAgeMs(c: Component): number | null {
+  return typeof c.health_checked_at === 'number' ? Date.now() - c.health_checked_at : null;
 }
 
 function compareProjects(a: Project, b: Project): number {

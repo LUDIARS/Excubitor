@@ -20,6 +20,7 @@ import { arsRoot } from '../shared/roots.js';
 
 const logger = createNamedLogger('excubitor.discovery');
 const SELF_REPO_NAMES = new Set(['excubitor']);
+const GIT_CONFIG_TIMEOUT_MS = 1_000;
 
 // ワークスペースルートは shared/roots.ts に集約 (env EXCUBITOR_ARS_ROOT / LUDIARS_ROOT
 // → cwd の親)。 後方互換のため discovery からも re-export する。
@@ -94,7 +95,7 @@ export async function discoverServices(catalog: Catalog): Promise<DiscoveryResul
         hasDevScript = Boolean(pkg.scripts?.['dev'] ?? pkg.scripts?.['dev:server']);
       } catch { /* ignore */ }
     }
-    const remote = (await safeExec('git', ['config', '--get', 'remote.origin.url'], path))?.trim() || null;
+    const remote = (await safeExec('git', ['config', '--get', 'remote.origin.url'], path, GIT_CONFIG_TIMEOUT_MS))?.trim() || null;
     const suggestedRuntime: DiscoveredRepo['suggestedRuntime'] = hasComposeFile
       ? 'docker-compose'
       : hasDevScript

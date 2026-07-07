@@ -11,6 +11,10 @@ export function db(): BetterSQLite3Database<typeof schema> {
   return _db;
 }
 
+export function resetDbClientForTests(): void {
+  _db = null;
+}
+
 export { schema };
 
 

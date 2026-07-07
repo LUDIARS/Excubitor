@@ -16,9 +16,16 @@ export interface StartupNpmResult {
   auditOk: boolean;
   audit: NpmAuditSummary | null;
   issues: StartupNpmIssue[];
+  skipped?: boolean;
 }
 
 export async function runStartupNpmInstallAndAudit(cwd = process.cwd()): Promise<StartupNpmResult> {
+  if (!startupNpmChecksEnabled()) {
+    logInfo('startup npm install/audit skipped', { cwd });
+    writeDiagnostic('startup.npm.skipped', { cwd });
+    return { installOk: true, auditOk: true, audit: null, issues: [], skipped: true };
+  }
+
   const issues: StartupNpmIssue[] = [];
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   logInfo('running startup npm install', { cwd });
@@ -58,6 +65,13 @@ export async function runStartupNpmInstallAndAudit(cwd = process.cwd()): Promise
     audit,
     issues,
   };
+}
+
+export function startupNpmChecksEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const explicit = env.EXCUBITOR_STARTUP_NPM_CHECK;
+  if (explicit && /^(1|true|yes)$/i.test(explicit)) return true;
+  if (explicit && /^(0|false|no)$/i.test(explicit)) return false;
+  return /^(1|true|yes)$/i.test(env.CI ?? '');
 }
 
 export function parseNpmAuditSummary(raw: string): NpmAuditSummary | null {

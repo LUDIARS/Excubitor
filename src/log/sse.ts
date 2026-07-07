@@ -17,6 +17,15 @@ import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
 import { sharedLogsRoot } from './logs-root.js';
 import { listVestigiumServices, recent } from './vestigium-reader.js';
+import { acquireRedisLock, readRedisJson, redisCacheKey, writeRedisJson } from '../shared/redis-cache.js';
+
+const RECENT_LOG_CACHE_MS = readPositiveIntEnv('EXCUBITOR_RECENT_LOG_CACHE_MS', 5_000);
+const RECENT_LOG_REDIS_TTL_MS = cacheStorageTtl(RECENT_LOG_CACHE_MS);
+
+interface LlmLogCache {
+  logs: ReturnType<typeof recent>;
+  capturedAt: number;
+}
 
 /** `?codes=a,b,c` を Set に。 空/未指定なら undefined (= 全サービス)。 */
 function parseCodes(raw: string | undefined): Set<string> | undefined {
@@ -79,6 +88,63 @@ function streamFiltered(
 
 export function buildLogStreamRouter(): Hono {
   const app = new Hono();
+  const llmCache = new Map<string, {
+    logs: ReturnType<typeof recent>;
+    capturedAt: number;
+    pending: boolean;
+  }>();
+
+  async function cachedLlmLogs(logsRoot: string, codes: Set<string> | undefined, limit: number): Promise<ReturnType<typeof recent>> {
+    const key = `${codes ? [...codes].sort().join(',') : '*'}:${limit}`;
+    const redisKey = redisCacheKey(`logs:llm:v1:${key}`);
+    let entry = llmCache.get(key);
+    if (entry && Date.now() - entry.capturedAt < RECENT_LOG_CACHE_MS) {
+      return entry.logs.slice(0, limit);
+    }
+    const now = Date.now();
+    const cached = await readRedisJson<LlmLogCache>(redisKey);
+    if (cached) {
+      const sourceStale = now - cached.capturedAt >= RECENT_LOG_CACHE_MS;
+      entry = { logs: cached.logs, capturedAt: now, pending: entry?.pending ?? false };
+      llmCache.set(key, entry);
+      if (sourceStale) refreshLlmLogs(key, redisKey, logsRoot, codes, limit);
+      return cached.logs.slice(0, limit);
+    }
+    if (!entry) {
+      entry = { logs: [], capturedAt: 0, pending: false };
+      llmCache.set(key, entry);
+    }
+    refreshLlmLogs(key, redisKey, logsRoot, codes, limit);
+    return entry.logs.slice(0, limit);
+  }
+
+  function refreshLlmLogs(
+    key: string,
+    redisKey: string,
+    logsRoot: string,
+    codes: Set<string> | undefined,
+    limit: number,
+  ): void {
+    const entry = llmCache.get(key);
+    if (!entry || entry.pending) return;
+    entry.pending = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const lock = await acquireRedisLock(`${redisKey}:refresh`, Math.max(RECENT_LOG_CACHE_MS, 1_000));
+          if (lock === false) return;
+          const logs = readLlmLogs(logsRoot, codes, limit);
+          const next = { logs, capturedAt: Date.now() };
+          entry.logs = next.logs;
+          entry.capturedAt = next.capturedAt;
+          if (lock === true) await writeRedisJson(redisKey, next, RECENT_LOG_REDIS_TTL_MS);
+        } finally {
+          entry.pending = false;
+        }
+      })();
+    }, 0);
+    timer.unref?.();
+  }
 
   // 単一サービスのライブストリーム。
   app.get('/api/v1/services/:code/logs', (c) => {
@@ -117,27 +183,42 @@ export function buildLogStreamRouter(): Hono {
   // LLM 使用ログ専用 — Vestigium 'llm' channel を全サービス横断で読む。
   // 通常ログ (bus/SSE) とは別経路 (Vestigium JSONL 直読み)。
   // ?codes=a,b で絞り込み、?limit= で最大件数 (既定 500)。
-  app.get('/api/v1/logs/llm', (c) => {
+  app.get('/api/v1/logs/llm', async (c) => {
     const logsRoot = sharedLogsRoot();
     const codes = parseCodes(c.req.query('codes'));
     const limitRaw = Number(c.req.query('limit') ?? 500);
     const limit = Math.max(1, Math.min(5000, isFinite(limitRaw) ? limitRaw : 500));
 
-    const services = listVestigiumServices(logsRoot);
-    const targets = codes ? services.filter((s) => codes.has(s)) : services;
-
-    const all: ReturnType<typeof recent> = [];
-    for (const svc of targets) {
-      const records = recent({
-        logPath: path.join(logsRoot, svc),
-        channel: ['llm'],
-        limit,
-      });
-      for (const r of records) all.push(r);
-    }
-    all.sort((a, b) => b.ts - a.ts);
-    return c.json({ logs: all.slice(0, limit) });
+    return c.json({ logs: await cachedLlmLogs(logsRoot, codes, limit) });
   });
 
+  void cachedLlmLogs(sharedLogsRoot(), undefined, 500);
   return app;
+}
+
+function readLlmLogs(logsRoot: string, codes: Set<string> | undefined, limit: number): ReturnType<typeof recent> {
+  const services = listVestigiumServices(logsRoot);
+  const targets = codes ? services.filter((s) => codes.has(s)) : services;
+  const all: ReturnType<typeof recent> = [];
+  for (const svc of targets) {
+    const records = recent({
+      logPath: path.join(logsRoot, svc),
+      channel: ['llm'],
+      limit,
+    });
+    for (const r of records) all.push(r);
+  }
+  all.sort((a, b) => b.ts - a.ts);
+  return all.slice(0, limit);
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function cacheStorageTtl(freshMs: number): number {
+  return Math.max(freshMs * 12, 60_000);
 }

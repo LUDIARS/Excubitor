@@ -1,0 +1,26 @@
+{
+  "name": "service-startup",
+  "description": "Service lifecycle control: backend bootstrap, safe mode, process launch, adoption, stop/restart, and startup preflight.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/server\\.ts$" },
+    { "pathPattern": "(^|/)src/index\\.ts$" },
+    { "pathPattern": "(^|/)src/service-runner\\.ts$" },
+    { "pathPattern": "(^|/)src/startup/[^/]+$" },
+    { "pathPattern": "(^|/)src/safe-mode(\\.test)?\\.ts$" },
+    { "pathPattern": "(^|/)src/shared/(build-version|exec)\\.ts$" },
+    { "pathPattern": "^package\\.json$" },
+    { "pathPattern": "(^|/)start-excubitor\\.bat$" },
+    { "pathPattern": "(^|/)frontend/src/(App|main)\\.tsx$" },
+    { "pathPattern": "(^|/)frontend/src/lib/api\\.ts$" },
+    { "pathPattern": "(^|/)frontend/(config|vite-hosts|vite\\.config)\\.ts$" },
+    { "pathPattern": "(^|/)frontend/package(-lock)?\\.json$" },
+    { "pathPattern": "(^|/)frontend/tsconfig\\.json$" },
+    { "pathPattern": "(^|/)src/control/[^/]+$" },
+    { "pathPattern": "(^|/)src/process/(autostart|build|dev-process-md|manager|reconcile)\\.ts$" },
+    { "pathPattern": "(^|/)src/launch/(order|orchestrator|preflight|profile|router|grouping|corpus-prefs)\\.ts$" },
+    { "pathPattern": "(^|/)frontend/src/pages/Monitor\\.tsx$" }
+  ],
+  "cardTemplate": "Summarise the service-startup domain: startup entrypoints, safe-mode behavior, launch orchestration, and restart risks."
+}

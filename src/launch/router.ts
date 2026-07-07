@@ -19,6 +19,7 @@ import { getLaunchProfile, saveLaunchProfile } from './profile.js';
 import { buildPlanProjects } from './grouping.js';
 import { runPreflight } from './preflight.js';
 import { startSelection, stopSelection } from './orchestrator.js';
+import { expandWithDependencies } from './order.js';
 import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
 import {
   getServiceMap,
@@ -67,9 +68,22 @@ function parseTierFilter(raw: string | undefined): Set<Tier> | undefined {
 
 function stateByCode(): Map<string, string> {
   const rows = db().all(sql`
-    SELECT s.code AS code, si.state AS state
+    SELECT
+      s.code AS code,
+      CASE
+        WHEN lh.ok = 1 THEN 'running'
+        WHEN lh.ok = 0 THEN 'stopped'
+        ELSE si.state
+      END AS state
     FROM services s
     LEFT JOIN service_instances si ON si.service_id = s.id
+    LEFT JOIN liveness_history lh ON lh.id = (
+      SELECT lh2.id
+      FROM liveness_history lh2
+      WHERE lh2.service_instance_id = si.id
+      ORDER BY lh2.probed_at DESC, lh2.id DESC
+      LIMIT 1
+    )
     WHERE s.is_active = 1
   `) as Array<{ code: string; state: string | null }>;
   const map = new Map<string, string>();
@@ -120,7 +134,8 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
     const parsed = CodesSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
     const codes = parsed.data.codes ?? getLaunchProfile().selection;
-    const report = await runPreflight(getCatalog().services, codes);
+    const catalog = getCatalog();
+    const report = await runPreflight(catalog.services, expandWithDependencies(catalog.services, codes));
     return c.json(report);
   });
 
@@ -249,11 +264,16 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
             has_vestigium: s.has_vestigium,
             log_path: s.log_path,
             autostart: s.autostart,
+            allow_hot_reload: s.allow_hot_reload,
             start_script: s.start_script,
             uses_corpus: s.uses_corpus,
             host: null,
             last_seen_at: d?.last_seen_at ?? null,
             docker_id: d?.docker_id ?? null,
+            health_ok: d?.health_ok ?? null,
+            health_reason: d?.health_reason ?? null,
+            health_detail: d?.health_detail ?? null,
+            health_checked_at: d?.health_checked_at ?? null,
           };
         }),
       }));
@@ -401,6 +421,10 @@ interface InstanceDetail {
   package_version: string | null;
   last_seen_at: number | null;
   docker_id: string | null;
+  health_ok: boolean | null;
+  health_reason: string | null;
+  health_detail: string | null;
+  health_checked_at: number | null;
 }
 
 interface ProjectView {
@@ -446,13 +470,22 @@ function projectDisplayName(project: ProjectView): string {
 function instanceDetailByCode(): Map<string, InstanceDetail> {
   const rows = db().all(sql`
     SELECT s.code AS code, si.git_branch, si.git_hash, si.git_dirty,
-           si.package_version, si.last_seen_at, si.docker_id
+           si.package_version, si.last_seen_at, si.docker_id,
+           lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw
     FROM services s
     LEFT JOIN service_instances si ON si.service_id = s.id
+    LEFT JOIN liveness_history lh ON lh.id = (
+      SELECT lh2.id
+      FROM liveness_history lh2
+      WHERE lh2.service_instance_id = si.id
+      ORDER BY lh2.probed_at DESC, lh2.id DESC
+      LIMIT 1
+    )
     WHERE s.is_active = 1
   `) as Array<Record<string, unknown>>;
   const map = new Map<string, InstanceDetail>();
   for (const r of rows) {
+    const health = parseHealthDetail(r.health_detail_raw);
     map.set(r.code as string, {
       git_branch: (r.git_branch as string | null) ?? null,
       git_hash: (r.git_hash as string | null) ?? null,
@@ -460,7 +493,28 @@ function instanceDetailByCode(): Map<string, InstanceDetail> {
       package_version: (r.package_version as string | null) ?? null,
       last_seen_at: (r.last_seen_at as number | null) ?? null,
       docker_id: (r.docker_id as string | null) ?? null,
+      health_ok: r.health_ok === null || r.health_ok === undefined ? null : Boolean(r.health_ok),
+      health_reason: health.reason,
+      health_detail: health.detail,
+      health_checked_at: (r.health_checked_at as number | null) ?? null,
     });
   }
   return map;
+}
+
+function parseHealthDetail(raw: unknown): { reason: string | null; detail: string | null } {
+  if (raw === null || raw === undefined) return { reason: null, detail: null };
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return {
+        reason: typeof record.reason === 'string' ? record.reason : null,
+        detail: typeof record.detail === 'string' ? record.detail : null,
+      };
+    }
+  } catch {
+    return { reason: null, detail: String(raw) };
+  }
+  return { reason: null, detail: String(raw) };
 }

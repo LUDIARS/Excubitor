@@ -11,7 +11,9 @@ coverage/
 *.tsbuildinfo
 
 # runtime artifacts
-data/
+/data/
+!spec/data/
+!spec/data/**
 logs/
 frontend/logs/
 # スキャンが自動生成するカタログ (マシン毎、 手書き services.yaml とは別管理)

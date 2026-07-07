@@ -12,6 +12,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
 import type { Service } from '../catalog/loader.js';
+import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 // 自勁Etrigger は v0.2 で廁E��、Eerror_task は記録するだけ、E「調査、E「修正、Eは
 // ユーザぁEUI 上�Eボタンから手動で叩く、EmaybeTriggerAutoFix は封E��戻す可能性
 // がある�Eで関数自体�E残してある (現在は呼ばれなぁE、E
@@ -141,6 +142,19 @@ async function recordHit(rule: Rule, line: LogLine): Promise<void> {
       INSERT INTO error_tasks (id, rule_id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
       VALUES (${newId}, ${rule.id}, ${siRow.id}, ${rule.severity}, ${summary}, ${line.line}, unixepoch() * 1000, unixepoch() * 1000)
     `);
+    const service = catalogProvider?.().services.find((s) => s.code === line.service_code);
+    if (service) {
+      void maybeDispatchCrashFixToConcordia({
+        errorTaskId: newId,
+        service,
+        severity: rule.severity,
+        summary,
+        logExcerpt: line.line,
+        source: 'log',
+      }).catch((err: unknown) =>
+        logger.warn({ err: (err as Error).message, errorTaskId: newId }, 'Concordia dispatch failed'),
+      );
+    }
   }
   // error_task は記録するだけ、E「調査、E「修正、EはユーザぁEUI から手動で
   // 起動すめE(= POST /api/v1/error-tasks/:id/investigate or /auto-fix)、E

@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "project": "excubitor",
+  "iterations": 1,
+  "domains": [
+    {
+      "name": "service-startup",
+      "description": "Service lifecycle control: backend bootstrap, safe mode, process launch, adoption, stop/restart, and startup preflight.",
+      "modules": [
+        {
+          "name": "backend-bootstrap",
+          "description": "Excubitor process entrypoints, startup npm checks, database open/close, and observability boot.",
+          "paths": [
+            "(^|/)src/server\\.ts$",
+            "(^|/)src/index\\.ts$",
+            "(^|/)src/service-runner\\.ts$",
+            "(^|/)src/startup/[^/]+$",
+            "(^|/)src/safe-mode(\\.test)?\\.ts$",
+            "(^|/)src/shared/(build-version|exec)\\.ts$",
+            "^package\\.json$",
+            "(^|/)start-excubitor\\.bat$"
+          ]
+        },
+        {
+          "name": "operator-ui-shell",
+          "description": "Frontend boot shell, shared API client, and dashboard routing that expose Excubitor operations.",
+          "paths": [
+            "(^|/)frontend/src/(App|main)\\.tsx$",
+            "(^|/)frontend/src/lib/api\\.ts$",
+            "(^|/)frontend/(config|vite-hosts|vite\\.config)\\.ts$",
+            "(^|/)frontend/package(-lock)?\\.json$",
+            "(^|/)frontend/tsconfig\\.json$"
+          ]
+        },
+        {
+          "name": "service-control",
+          "description": "Managed process and docker start/stop/restart orchestration.",
+          "paths": [
+            "(^|/)src/control/[^/]+$",
+            "(^|/)src/process/(autostart|build|dev-process-md|manager|reconcile)\\.ts$",
+            "(^|/)src/launch/(order|orchestrator|preflight|profile|router|grouping|corpus-prefs)\\.ts$",
+            "(^|/)frontend/src/pages/Monitor\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cross-service-logging",
+      "description": "Cross-service log ingestion, recent-log queries, live SSE streams, Vestigium reads, and diagnostic logging.",
+      "modules": [
+        {
+          "name": "log-ingestion",
+          "description": "Log bus, process/docker/file tailing, and Vestigium JSONL readers.",
+          "paths": [
+            "(^|/)src/log/[^/]+$"
+          ]
+        },
+        {
+          "name": "diagnostic-logging",
+          "description": "Shared structured logger and diagnostic event output.",
+          "paths": [
+            "(^|/)src/shared/(logger|diagnostic-log)\\.ts$"
+          ]
+        },
+        {
+          "name": "logging-ui",
+          "description": "Operator log drawer and log page views for recent, LLM, and streamed log inspection.",
+          "paths": [
+            "(^|/)frontend/src/pages/Logs\\.tsx$",
+            "(^|/)frontend/src/components/LogsDrawer\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "federation",
+      "description": "Node-to-node federation, remote peer management, remote service proxying, and Corpus hub publication.",
+      "modules": [
+        {
+          "name": "peer-federation",
+          "description": "Remote peer store, remote client, token-protected federation router, and secret-at-rest helpers.",
+          "paths": [
+            "(^|/)src/federation/[^/]+$"
+          ]
+        },
+        {
+          "name": "corpus-hub",
+          "description": "Corpus service manifest and hub data endpoints for service/app/error aggregation.",
+          "paths": [
+            "(^|/)src/hub/[^/]+$"
+          ]
+        },
+        {
+          "name": "agent-and-peer-ui",
+          "description": "MCP agent bridge and frontend peer-management surfaces for delegated control.",
+          "paths": [
+            "(^|/)src/mcp/server\\.ts$",
+            "(^|/)frontend/src/pages/Federation\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "performance-monitoring",
+      "description": "Runtime health, port conflict, memory, CPU, WSL, docker, and liveness monitoring.",
+      "modules": [
+        {
+          "name": "memory-performance",
+          "description": "Memory and CPU sampling, leak detection, budget checks, and memory API routes.",
+          "paths": [
+            "(^|/)src/memory/[^/]+$"
+          ]
+        },
+        {
+          "name": "health-scanning",
+          "description": "Port, docker, git, package, host process, and health-state scanners.",
+          "paths": [
+            "(^|/)src/scanner/[^/]+$"
+          ]
+        },
+        {
+          "name": "monitoring-ui",
+          "description": "Dashboard, memory charts, metric graphs, and sparklines for operator monitoring.",
+          "paths": [
+            "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$",
+            "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "env-management-and-injection",
+      "description": "Environment variable resolution, topology env generation, Infisical mapping, secret agent resolution, and domain-root settings.",
+      "modules": [
+        {
+          "name": "secret-config",
+          "description": "Infisical identity/config store, secret fetch, encryption, secret-agent APIs, and config routes.",
+          "paths": [
+            "(^|/)src/secrets/[^/]+$"
+          ]
+        },
+        {
+          "name": "env-injection",
+          "description": "Topology env, startup env validation, injected env construction, and root/domain path resolution.",
+          "paths": [
+            "(^|/)src/process/(inject|startup-env|topology)\\.ts$",
+            "(^|/)src/shared/roots(\\.test)?\\.ts$",
+            "(^|/)src/catalog/(loader|sync|watcher|editor|auto-catalog|auto-catalog-file|ports|tier)\\.ts$",
+            "(^|/)src/mcp/mcp-json\\.ts$",
+            "(^|/)catalog/services\\.ya?ml$"
+          ]
+        },
+        {
+          "name": "config-ui",
+          "description": "Frontend catalog, Infisical, service-env, and domain-root configuration surfaces.",
+          "paths": [
+            "(^|/)frontend/src/pages/(Catalog|Config)\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "error-management",
+      "description": "Error detection, triage APIs, emergency actions, auto-fix run records, and operational error persistence.",
+      "modules": [
+        {
+          "name": "error-detection",
+          "description": "Pattern-based log error detection and error rule/task persistence paths.",
+          "paths": [
+            "(^|/)src/log/error-detector\\.ts$",
+            "(^|/)src/db/[^/]+$"
+          ]
+        },
+        {
+          "name": "emergency-ops",
+          "description": "Emergency remediation paths and audit logging for operator actions.",
+          "paths": [
+            "(^|/)src/ops/[^/]+$"
+          ]
+        },
+        {
+          "name": "triage-ui",
+          "description": "Frontend error task and triage queue surfaces.",
+          "paths": [
+            "(^|/)frontend/src/pages/Errors\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "task-generation",
+      "description": "Generated operational work: auto-fix, investigation, review surfaces, update application, release build orchestration, and service discovery.",
+      "modules": [
+        {
+          "name": "auto-fix-investigation",
+          "description": "Auto-fix task creation, investigation runs, prompt construction, and generated PR workflow.",
+          "paths": [
+            "(^|/)src/auto_fix/[^/]+$",
+            "(^|/)src/reviews/[^/]+$"
+          ]
+        },
+        {
+          "name": "delivery-tasks",
+          "description": "Update checking/apply, release planning/building, and discovery scan task surfaces.",
+          "paths": [
+            "(^|/)src/update/[^/]+$",
+            "(^|/)src/release/[^/]+$",
+            "(^|/)src/discovery/[^/]+$"
+          ]
+        },
+        {
+          "name": "review-ui",
+          "description": "Frontend review and generated work surfaces.",
+          "paths": [
+            "(^|/)frontend/src/pages/Reviews\\.tsx$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "test-environment",
+      "description": "Automated tests, test fixtures, and local specs used to verify Excubitor behavior.",
+      "modules": [
+        {
+          "name": "unit-and-api-tests",
+          "description": "Vitest unit/API tests across backend modules.",
+          "paths": [
+            "(^|/)src/.+\\.test\\.ts$",
+            "(^|/)src/[^/]+\\.test\\.ts$"
+          ]
+        },
+        {
+          "name": "spec-and-review-artifacts",
+          "description": "Project specs, setup notes, problem logs, and review artifacts used as verification context.",
+          "paths": [
+            "(^|/)spec/[^/]+/[^/]+$",
+            "(^|/)review/[^/]+$",
+            "(^|/)review/[^/]+/[^/]+$"
+          ]
+        }
+      ]
+    }
+  ],
+  "unassigned": {
+    "count": 0,
+    "sample": []
+  }
+}

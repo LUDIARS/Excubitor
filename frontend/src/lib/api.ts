@@ -32,10 +32,15 @@ export interface Component {
   host: Host | null;
   last_seen_at: number | null;
   docker_id: string | null;
+  health_ok?: boolean | null;
+  health_reason?: string | null;
+  health_detail?: string | null;
+  health_checked_at?: number | null;
   /** Vestigium JSONL ログを持つか (バッジ表示用)。 */
   has_vestigium?: boolean;
   log_path?: string | null;
   autostart?: boolean;
+  allow_hot_reload?: boolean;
   /** 起動スクリプト (start-*.bat) のパス (あれば)。 */
   start_script?: string | null;
   /** Corpus を利用するか (実効値)。 */
@@ -194,6 +199,8 @@ export interface PlanService {
   start_tier: number;
   state: string;
   selected: boolean;
+  depends_on: string[];
+  allow_hot_reload: boolean;
 }
 
 export interface PlanProject {
