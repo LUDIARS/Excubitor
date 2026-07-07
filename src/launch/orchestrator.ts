@@ -11,7 +11,7 @@
 import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
 import { controlService } from '../control/manager.js';
-import { orderForStart, orderForStop } from './order.js';
+import { expandWithDependencies, orderForStart, orderForStop } from './order.js';
 import { runPreflight, type PreflightReport } from './preflight.js';
 import { withCorpusIfNeeded } from './corpus-prefs.js';
 
@@ -50,7 +50,7 @@ export async function startSelection(
   const actor = opts.actor ?? 'launcher';
 
   // Corpus を使うサービスが含まれていれば Corpus も起動セットに加える (tier 順で先に上がる)。
-  codes = withCorpusIfNeeded(catalog, codes);
+  codes = withCorpusIfNeeded(catalog, expandWithDependencies(catalog.services, codes));
 
   const preflight = await runPreflight(catalog.services, codes);
   const notReady = new Set(

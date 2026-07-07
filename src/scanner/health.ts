@@ -71,16 +71,24 @@ export async function probeServiceHealth(
   if (alivePort) {
     return { ok: true, reason: 'port', detail: `${alivePort.role}:${alivePort.port}` };
   }
+  if (ports.length > 0) {
+    return { ok: false, reason: 'failed', detail: `no configured port listening (${ports.map((p) => p.port).join(',')})` };
+  }
   return { ok: false, reason: 'not_configured' };
 }
 
-export async function healthyServiceCodes(catalog: Catalog): Promise<Map<string, ServiceHealthResult>> {
+export async function serviceHealthResults(catalog: Catalog): Promise<Map<string, ServiceHealthResult>> {
   const snapshot = await readHealthSnapshot();
   const entries = await Promise.all(catalog.services.map(async (svc) => {
     const result = await probeServiceHealth(svc, snapshot);
     return [svc.code, result] as const;
   }));
-  return new Map(entries.filter(([, result]) => result.ok));
+  return new Map(entries);
+}
+
+export async function healthyServiceCodes(catalog: Catalog): Promise<Map<string, ServiceHealthResult>> {
+  const results = await serviceHealthResults(catalog);
+  return new Map([...results].filter(([, result]) => result.ok));
 }
 
 function primaryHealthPort(svc: Service): number | null {

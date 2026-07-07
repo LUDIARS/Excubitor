@@ -33,8 +33,29 @@ export interface OrderedTier {
  * codes に含まれる service を tier 昇順にまとめる。
  * 同 tier 内は catalog 順を維持する。
  */
+export function expandWithDependencies(services: Service[], codes: string[]): string[] {
+  const byCode = new Map(services.map((svc) => [svc.code, svc]));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const visiting = new Set<string>();
+
+  const visit = (code: string): void => {
+    if (seen.has(code) || visiting.has(code)) return;
+    visiting.add(code);
+    const svc = byCode.get(code);
+    for (const dep of svc?.depends_on ?? []) visit(dep);
+    visiting.delete(code);
+    seen.add(code);
+    out.push(code);
+  };
+
+  for (const code of codes) visit(code);
+  return out;
+}
+
 export function orderForStart(services: Service[], codes: string[]): OrderedTier[] {
   const want = new Set(codes);
+  const codeOrder = new Map(codes.map((code, index) => [code, index]));
   const buckets = new Map<number, Service[]>();
   for (const svc of services) {
     if (!want.has(svc.code)) continue;
@@ -45,7 +66,10 @@ export function orderForStart(services: Service[], codes: string[]): OrderedTier
   }
   return Array.from(buckets.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([tier, svcs]) => ({ tier, services: svcs }));
+    .map(([tier, svcs]) => ({
+      tier,
+      services: svcs.sort((a, b) => (codeOrder.get(a.code) ?? 0) - (codeOrder.get(b.code) ?? 0)),
+    }));
 }
 
 /** 停止は起動の逆順 (leaf を先に落とし、 依存基盤を後に落とす)。 */
