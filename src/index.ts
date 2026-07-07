@@ -59,10 +59,18 @@ import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
 import { runEmergencyAction } from './ops/emergency.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
-import { resolveBuildVersion } from './shared/build-version.js';
+import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
+import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
 import type { StartupNpmIssue } from './startup/npm-install.js';
 
 const logger = createNamedLogger('concordia.observability');
+const httpLogger = createNamedLogger('excubitor.http');
+const observabilityStartedAt = new Date().toISOString();
+
+const SLOW_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_SLOW_REQUEST_MS', 5_000);
+const HUNG_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_HUNG_REQUEST_MS', 60_000);
+const BUILD_VERSION_CACHE_MS = readPositiveIntEnv('EXCUBITOR_BUILD_VERSION_CACHE_MS', 60_000);
+const BUILD_VERSION_REDIS_TTL_MS = cacheStorageTtl(BUILD_VERSION_CACHE_MS);
 
 const ControlBodySchema = z.object({
   action: z.enum(['start', 'stop', 'restart']),
@@ -80,9 +88,184 @@ interface ObservabilityHandle {
 }
 
 let currentCatalog: Catalog | null = null;
+let buildVersionCache: { key: string; value: BuildVersionInfo | null; capturedAt: number } | null = null;
+let buildVersionPending: Promise<void> | null = null;
 
 function findService(code: string): Service | undefined {
   return currentCatalog?.services.find((s) => s.code === code);
+}
+
+async function cachedBuildVersion(): Promise<BuildVersionInfo | null> {
+  if (!currentCatalog) return null;
+  const now = Date.now();
+  const key = buildVersionCacheKey(currentCatalog);
+  if (buildVersionCache?.key === key) {
+    if (now - buildVersionCache.capturedAt >= BUILD_VERSION_CACHE_MS) refreshBuildVersion(currentCatalog);
+    return buildVersionCache.value;
+  }
+  buildVersionCache = { key, value: null, capturedAt: now };
+  refreshBuildVersion(currentCatalog);
+  return buildVersionCache.value;
+}
+
+function refreshBuildVersion(catalog: Catalog): void {
+  if (buildVersionPending) return;
+  buildVersionPending = (async () => {
+      const key = buildVersionCacheKey(catalog);
+      const lock = await acquireRedisLock(`${key}:refresh`, Math.max(BUILD_VERSION_CACHE_MS, 1_000));
+      if (lock === false) return;
+      const value = await resolveBuildVersion(catalog, 'excubitor', process.cwd());
+      if (currentCatalog === catalog) {
+        const entry = { value, capturedAt: Date.now() };
+        buildVersionCache = { key, ...entry };
+        if (lock === true) await writeRedisJson(key, entry, BUILD_VERSION_REDIS_TTL_MS);
+      }
+    })()
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ err: message }, 'build version refresh failed');
+      writeDiagnostic('buildVersion.refresh.failed', { err: message });
+    })
+    .finally(() => {
+      buildVersionPending = null;
+    });
+}
+
+function buildVersionCacheKey(catalog: Catalog): string {
+  const base = catalog.project_versions.excubitor;
+  return redisCacheKey(`build-version:v1:${base?.major ?? 'none'}:${base?.minor ?? 'none'}`);
+}
+
+function serviceRowView(r: Record<string, unknown>): Record<string, unknown> {
+  const health = parseHealthDetail(r.health_detail_raw);
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    catalog_snapshot: typeof r.catalog_snapshot === 'string'
+      ? JSON.parse(r.catalog_snapshot)
+      : r.catalog_snapshot,
+    state: r.state ?? 'unknown',
+    docker_id: r.docker_id ?? null,
+    last_seen_at: r.last_seen_at ?? null,
+    git_branch: r.git_branch ?? null,
+    git_hash: r.git_hash ?? null,
+    git_dirty: r.git_dirty ?? null,
+    package_version: r.package_version ?? null,
+    port: r.port ?? null,
+    host: r.host_hostname ? { hostname: r.host_hostname, name: r.host_name } : null,
+    health_ok: r.health_ok === null || r.health_ok === undefined ? null : Boolean(r.health_ok),
+    health_reason: health.reason,
+    health_detail: health.detail,
+    health_checked_at: r.health_checked_at ?? null,
+    updated_at: r.updated_at,
+  };
+}
+
+function installRequestLogging(app: Hono): void {
+  app.use('*', async (c, next) => {
+    const startedAt = Date.now();
+    const requestId = c.req.header('x-request-id')
+      ?? c.req.header('x-correlation-id')
+      ?? randomUUID();
+    const url = new URL(c.req.url);
+    const streaming = (c.req.header('accept') ?? '').toLowerCase().includes('text/event-stream');
+    const base = {
+      request_id: requestId,
+      method: c.req.method,
+      path: url.pathname,
+      query: redactedQuery(url.searchParams),
+      user_agent: c.req.header('user-agent') ?? null,
+      cf_ray: c.req.header('cf-ray') ?? null,
+      forwarded_for: c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? null,
+      streaming,
+    };
+    c.header('x-excubitor-request-id', requestId);
+    httpLogger.info(base, 'request start');
+
+    let error: unknown = null;
+    const slowTimer = streaming ? null : setTimeout(() => {
+      const payload = { ...base, duration_ms: Date.now() - startedAt };
+      httpLogger.warn(payload, 'request still running');
+      writeDiagnostic('http.request.slow', payload);
+    }, SLOW_REQUEST_MS);
+    const hungTimer = streaming ? null : setTimeout(() => {
+      const payload = { ...base, duration_ms: Date.now() - startedAt };
+      httpLogger.error(payload, 'request hung');
+      writeDiagnostic('http.request.hung', payload);
+    }, HUNG_REQUEST_MS);
+    slowTimer?.unref?.();
+    hungTimer?.unref?.();
+
+    try {
+      await next();
+    } catch (err) {
+      error = err;
+      throw err;
+    } finally {
+      if (slowTimer) clearTimeout(slowTimer);
+      if (hungTimer) clearTimeout(hungTimer);
+      const duration = Date.now() - startedAt;
+      const status = c.res.status;
+      const payload = {
+        ...base,
+        status,
+        duration_ms: duration,
+        error: error instanceof Error ? error.stack ?? error.message : error ? String(error) : null,
+      };
+      if (error) {
+        httpLogger.error(payload, 'request failed');
+        writeDiagnostic('http.request.failed', payload);
+      } else if (!streaming && duration >= SLOW_REQUEST_MS) {
+        httpLogger.warn(payload, 'request complete slow');
+        writeDiagnostic('http.request.complete.slow', payload);
+      } else if (status >= 500) {
+        httpLogger.warn(payload, 'request complete error status');
+        writeDiagnostic('http.request.complete.error', payload);
+      } else {
+        httpLogger.info(payload, 'request complete');
+      }
+    }
+  });
+}
+
+function redactedQuery(params: URLSearchParams): Record<string, string> | null {
+  if ([...params.keys()].length === 0) return null;
+  const out: Record<string, string> = {};
+  for (const [key, value] of params.entries()) {
+    out[key] = /token|secret|password|key|auth/i.test(key) ? '[redacted]' : truncate(value, 200);
+  }
+  return out;
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function cacheStorageTtl(freshMs: number): number {
+  return Math.max(freshMs * 12, 60_000);
+}
+
+function parseHealthDetail(raw: unknown): { reason: string | null; detail: string | null } {
+  if (raw === null || raw === undefined) return { reason: null, detail: null };
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return {
+        reason: typeof record.reason === 'string' ? record.reason : null,
+        detail: typeof record.detail === 'string' ? record.detail : null,
+      };
+    }
+  } catch {
+    return { reason: null, detail: String(raw) };
+  }
+  return { reason: null, detail: String(raw) };
 }
 
 export function recordStartupNpmIssues(issues: StartupNpmIssue[]): void {
@@ -138,6 +321,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
+  refreshBuildVersion(currentCatalog);
   const sync = await syncCatalog(currentCatalog);
   logger.info(
     { upserted: sync.upserted, deactivated: sync.deactivated, total: currentCatalog.services.length },
@@ -167,6 +351,8 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
+    buildVersionCache = null;
+    refreshBuildVersion(fresh);
     setTopologyFromCatalog(fresh);
     setGlobalEnv(fresh.global?.env ?? {});
     fileTailHandle.refresh(fresh);
@@ -204,6 +390,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
+  installRequestLogging(app);
 
   app.onError((err, c) => {
     logger.error(
@@ -219,6 +406,15 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   });
 
   // reviews router (path 冁E�Eで /api/v1/reviews を持つ ので root mount)
+  app.get('/health', (c) =>
+    c.json({
+      ok: true,
+      service: 'excubitor',
+      safe_mode: isSafeMode(),
+      started_at: observabilityStartedAt,
+    }),
+  );
+
   app.route('/', buildReviewsRouter());
 
   // Corpus multi-hub backend (/api/hub/*)
@@ -256,14 +452,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get('/api/v1/system', async (c) => {
-    const buildVersion = currentCatalog
-      ? await resolveBuildVersion(currentCatalog, 'excubitor', process.cwd())
-      : null;
     return c.json({
       service: 'excubitor',
       safe_mode: isSafeMode(),
       service_mode: serviceMode,
-      build_version: buildVersion,
+      build_version: await cachedBuildVersion(),
     });
   });
 
@@ -276,32 +469,23 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
         si.state, si.docker_id, si.last_seen_at,
         si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
+        lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
       FROM services s
       LEFT JOIN service_instances si ON si.service_id = s.id
+      LEFT JOIN liveness_history lh ON lh.id = (
+        SELECT lh2.id
+        FROM liveness_history lh2
+        WHERE lh2.service_instance_id = si.id
+        ORDER BY lh2.probed_at DESC, lh2.id DESC
+        LIMIT 1
+      )
       LEFT JOIN hosts h ON h.id = si.host_id
       WHERE s.is_active = 1
       ORDER BY s.code ASC
     `);
     return c.json({
-      services: (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
-        id: r.id,
-        code: r.code,
-        name: r.name,
-        catalog_snapshot: typeof r.catalog_snapshot === 'string'
-          ? JSON.parse(r.catalog_snapshot)
-          : r.catalog_snapshot,
-        state: r.state ?? 'unknown',
-        docker_id: r.docker_id ?? null,
-        last_seen_at: r.last_seen_at ?? null,
-        git_branch: r.git_branch ?? null,
-        git_hash: r.git_hash ?? null,
-        git_dirty: r.git_dirty ?? null,
-        package_version: r.package_version ?? null,
-        port: r.port ?? null,
-        host: r.host_hostname ? { hostname: r.host_hostname, name: r.host_name } : null,
-        updated_at: r.updated_at,
-      })),
+      services: (rows as unknown as Array<Record<string, unknown>>).map(serviceRowView),
     });
   });
 
@@ -312,9 +496,17 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
         si.id AS instance_id, si.state, si.docker_id, si.last_seen_at,
         si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
+        lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
       FROM services s
       LEFT JOIN service_instances si ON si.service_id = s.id
+      LEFT JOIN liveness_history lh ON lh.id = (
+        SELECT lh2.id
+        FROM liveness_history lh2
+        WHERE lh2.service_instance_id = si.id
+        ORDER BY lh2.probed_at DESC, lh2.id DESC
+        LIMIT 1
+      )
       LEFT JOIN hosts h ON h.id = si.host_id
       WHERE s.code = ${code}
       LIMIT 1
@@ -322,23 +514,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     if (rows.length === 0) return c.json({ error: 'not_found' }, 404);
     const r = rows[0]!;
     return c.json({
+      ...serviceRowView(r),
       id: r.id,
-      code: r.code,
-      name: r.name,
-      catalog_snapshot: typeof r.catalog_snapshot === 'string'
-        ? JSON.parse(r.catalog_snapshot)
-        : r.catalog_snapshot,
       instance_id: r.instance_id ?? null,
-      state: r.state ?? 'unknown',
-      docker_id: r.docker_id ?? null,
-      last_seen_at: r.last_seen_at ?? null,
-      git_branch: r.git_branch ?? null,
-      git_hash: r.git_hash ?? null,
-      git_dirty: r.git_dirty ?? null,
-      package_version: r.package_version ?? null,
-      port: r.port ?? null,
-      host: r.host_hostname ? { hostname: r.host_hostname, name: r.host_name } : null,
-      updated_at: r.updated_at,
     });
   });
 

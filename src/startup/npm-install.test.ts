@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseNpmAuditSummary } from './npm-install.js';
+import { parseNpmAuditSummary, startupNpmChecksEnabled } from './npm-install.js';
 
 describe('parseNpmAuditSummary', () => {
   it('reads vulnerability totals from npm audit json', () => {
@@ -29,5 +29,12 @@ describe('parseNpmAuditSummary', () => {
 
   it('returns null for non-json output', () => {
     expect(parseNpmAuditSummary('npm error')).toBeNull();
+  });
+
+  it('skips startup npm checks locally unless explicitly enabled', () => {
+    expect(startupNpmChecksEnabled({})).toBe(false);
+    expect(startupNpmChecksEnabled({ CI: 'true' })).toBe(true);
+    expect(startupNpmChecksEnabled({ EXCUBITOR_STARTUP_NPM_CHECK: '1' })).toBe(true);
+    expect(startupNpmChecksEnabled({ CI: 'true', EXCUBITOR_STARTUP_NPM_CHECK: '0' })).toBe(false);
   });
 });

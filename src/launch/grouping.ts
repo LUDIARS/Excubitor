@@ -37,8 +37,11 @@ export interface PlanService {
   log_path: string | null;
   /** boot 時に自動起動するか。 */
   autostart: boolean;
+  allow_hot_reload: boolean;
   /** 既存 start-<service>.bat 等の起動スクリプトで起動するか (あればパス)。 */
   start_script: string | null;
+  /** Launcher start 時に先に含めるサービスコード。 */
+  depends_on: string[];
   /** 実効 uses_corpus (catalog デフォルト ← service_prefs override)。 */
   uses_corpus: boolean;
 }
@@ -83,7 +86,9 @@ export function buildPlanProjects(
       has_vestigium: Boolean(svc.log_path),
       log_path: svc.log_path ?? null,
       autostart: svc.autostart,
+      allow_hot_reload: svc.allow_hot_reload,
       start_script: svc.start_script ?? null,
+      depends_on: svc.depends_on ?? [],
       uses_corpus: usesCorpusByCode?.get(svc.code) ?? svc.uses_corpus ?? false,
     };
     const arr = byProject.get(project) ?? [];

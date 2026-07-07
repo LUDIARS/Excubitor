@@ -23,6 +23,8 @@ import { execCapture } from '../shared/exec.js';
 import { startProcessLog, stopProcessLog } from '../log/process-file.js';
 import { runServiceBuild } from './build.js';
 import { assertStartupEnv } from './startup-env.js';
+import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
+import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -92,6 +94,8 @@ export interface SpawnOptions {
   maxRestart?: number;
   /** 以前�E restartCount を引き継いで spawn する (restart のため)、E*/
   initialRestartCount?: number;
+  /** Test/explicit override. Normal service starts use catalog allow_hot_reload. */
+  allowHotReload?: boolean;
 }
 
 export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promise<SpawnedProcess> {
@@ -104,16 +108,19 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
 
   let cmd: string;
   let args: string[];
+  let hotReloadSource: HotReloadSource;
   // 起動方式の解決。 runtime=node/dev-process-md で start_script があれば最優先で使う
   // (= 既存 start-<service>.bat の pull/build/dev 一式をそのまま起動)。
   if (svc.runtime !== 'app' && svc.start_script) {
     cmd = svc.start_script;
     args = [];
+    hotReloadSource = { kind: 'start_script', path: svc.start_script };
   } else if (svc.runtime === 'app') {
     // ローカルアプリ: exec (実行ファイル) を直接起動。 cwd は任意 (exec の dir 既定)。
     if (!svc.exec) throw new Error(`service ${svc.code} has no exec`);
     cmd = svc.exec;
     args = svc.exec_args ?? [];
+    hotReloadSource = { kind: 'command', command: [cmd, ...args].join(' ') };
   } else if (svc.runtime === 'node') {
     if (!svc.cwd) throw new Error(`service ${svc.code} has no cwd`);
     if (!svc.command) throw new Error(`service ${svc.code} has no command`);
@@ -122,6 +129,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     if (!first) throw new Error(`service ${svc.code} command is empty`);
     cmd = first;
     args = parts;
+    hotReloadSource = { kind: 'command', command: svc.command };
   } else {
     // dev-process-md
     if (!svc.cwd) throw new Error(`service ${svc.code} has no cwd`);
@@ -131,11 +139,14 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     if (!first) throw new Error(`service ${svc.code} command is empty`);
     cmd = first;
     args = parts;
+    hotReloadSource = { kind: 'dev-process-md', command: parsed };
   }
 
   // #84: detached 子の stdout/stderr は親所有の「ファイル fd」に向ける (pipe ではなく)。
   // 親 (Excubitor) が落ちても write 先が生存するため EPIPE で子が即死しない。
   // ライブログ/エラー検知は process-file がこのファイルを tail して log bus に publish する。
+  await assertHotReloadAllowed(svc, hotReloadSource, { allowHotReload: opts.allowHotReload });
+
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
   // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
   const resolvedCwd =
@@ -342,17 +353,26 @@ async function raiseRestartLimitError(
   max: number,
 ): Promise<void> {
   const newId = randomUUID();
+  const summary = 'restart limit reached (max=' + max + ', exit_code=' + exitCode + ', signal=' + (signal ?? 'none') + ')';
   // first_seen_at / last_seen_at は NOT NULL かつ SQL default 無し → 明示指定が必要。
   db().run(sql`
     INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
     SELECT ${newId}, si.id, 'fatal',
-           ${'restart limit reached (max=' + max + ', exit_code=' + exitCode + ', signal=' + (signal ?? 'none') + ')'},
+           ${summary},
            NULL, unixepoch() * 1000, unixepoch() * 1000
     FROM service_instances si
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${svc.code}
     LIMIT 1
   `);
+  await maybeDispatchCrashFixToConcordia({
+    errorTaskId: newId,
+    service: svc,
+    severity: 'fatal',
+    summary,
+    logExcerpt: `exit_code=${exitCode} signal=${signal ?? 'none'} max=${max}`,
+    source: 'process',
+  });
 }
 
 async function raiseRestartBuildError(
@@ -361,16 +381,26 @@ async function raiseRestartBuildError(
   output: string,
 ): Promise<void> {
   const newId = randomUUID();
+  const summary = 'auto-restart build failed: ' + command;
+  const excerpt = output.slice(-2000);
   db().run(sql`
     INSERT INTO error_tasks (id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
     SELECT ${newId}, si.id, 'fatal',
-           ${'auto-restart build failed: ' + command},
-           ${output.slice(-2000)}, unixepoch() * 1000, unixepoch() * 1000
+           ${summary},
+           ${excerpt}, unixepoch() * 1000, unixepoch() * 1000
     FROM service_instances si
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${svc.code}
     LIMIT 1
   `);
+  await maybeDispatchCrashFixToConcordia({
+    errorTaskId: newId,
+    service: svc,
+    severity: 'fatal',
+    summary,
+    logExcerpt: excerpt,
+    source: 'process',
+  });
 }
 
 
