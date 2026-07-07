@@ -29,6 +29,7 @@ import {
 } from '../secrets/config-store.js';
 import { resolveInjectEnv } from '../process/inject.js';
 import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
+import { downtimeSummariesForServices } from '../scanner/downtime.js';
 
 const SaveProfileSchema = z.object({
   selection: z.array(z.string()),
@@ -232,6 +233,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
       catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
     );
     const detail = instanceDetailByCode();
+    const downtimeByCode = downtimeSummariesForServices(projects.flatMap((p) => p.services.map((s) => s.code)), 24 * 60);
     const view = projects.map((p) => ({
         project_code: p.project_code,
         project_name: p.project_code,
@@ -274,6 +276,7 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
             health_reason: d?.health_reason ?? null,
             health_detail: d?.health_detail ?? null,
             health_checked_at: d?.health_checked_at ?? null,
+            downtime_24h: downtimeByCode.get(s.code) ?? null,
           };
         }),
       }));

@@ -36,6 +36,7 @@ export interface Component {
   health_reason?: string | null;
   health_detail?: string | null;
   health_checked_at?: number | null;
+  downtime_24h?: DowntimeSummary | null;
   /** Vestigium JSONL ログを持つか (バッジ表示用)。 */
   has_vestigium?: boolean;
   log_path?: string | null;
@@ -551,10 +552,24 @@ export function scanCatalog(): Promise<ScanResult> {
 }
 
 // ─── liveness (稼働率) ───
+export interface DowntimeSummary {
+  window_ms: number;
+  downtime_ms: number;
+  uptime_ratio: number | null;
+  incidents: number;
+  current_down_since: number | null;
+  current_down_ms: number;
+  last_probe_at: number | null;
+  last_ok_at: number | null;
+  last_down_at: number | null;
+}
+
 export interface LivenessSeries {
   code: string;
   window_min: number;
   uptime_ratio: number | null;
+  sample_uptime_ratio?: number | null;
+  downtime?: DowntimeSummary | null;
   series: Array<{ t: number; ok: number }>;
 }
 

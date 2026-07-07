@@ -51,6 +51,7 @@ import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
+import { downtimeSummariesForServices, downtimeSummaryForService, type DowntimeSummary } from './scanner/downtime.js';
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
@@ -136,7 +137,7 @@ function buildVersionCacheKey(catalog: Catalog): string {
   return redisCacheKey(`build-version:v1:${base?.major ?? 'none'}:${base?.minor ?? 'none'}`);
 }
 
-function serviceRowView(r: Record<string, unknown>): Record<string, unknown> {
+function serviceRowView(r: Record<string, unknown>, downtime: DowntimeSummary | null = null): Record<string, unknown> {
   const health = parseHealthDetail(r.health_detail_raw);
   return {
     id: r.id,
@@ -158,6 +159,7 @@ function serviceRowView(r: Record<string, unknown>): Record<string, unknown> {
     health_reason: health.reason,
     health_detail: health.detail,
     health_checked_at: r.health_checked_at ?? null,
+    downtime_24h: downtime,
     updated_at: r.updated_at,
   };
 }
@@ -484,8 +486,10 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       WHERE s.is_active = 1
       ORDER BY s.code ASC
     `);
+    const records = rows as unknown as Array<Record<string, unknown>>;
+    const downtimeByCode = downtimeSummariesForServices(records.map((r) => String(r.code ?? '')), 24 * 60);
     return c.json({
-      services: (rows as unknown as Array<Record<string, unknown>>).map(serviceRowView),
+      services: records.map((r) => serviceRowView(r, downtimeByCode.get(String(r.code ?? '')) ?? null)),
     });
   });
 
@@ -514,7 +518,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     if (rows.length === 0) return c.json({ error: 'not_found' }, 404);
     const r = rows[0]!;
     return c.json({
-      ...serviceRowView(r),
+      ...serviceRowView(r, downtimeSummaryForService(code, 24 * 60)),
       id: r.id,
       instance_id: r.instance_id ?? null,
     });
@@ -551,8 +555,16 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       LIMIT 2000
     `) as Array<{ t: number; ok: number }>;
     const series = rows.map((r) => ({ t: Number(r.t), ok: Number(r.ok) }));
-    const ratio = series.length > 0 ? series.reduce((a, s) => a + s.ok, 0) / series.length : null;
-    return c.json({ code, window_min: windowMin, uptime_ratio: ratio, series });
+    const sampleRatio = series.length > 0 ? series.reduce((a, s) => a + s.ok, 0) / series.length : null;
+    const downtime = downtimeSummaryForService(code, windowMin);
+    return c.json({
+      code,
+      window_min: windowMin,
+      uptime_ratio: downtime?.uptime_ratio ?? sampleRatio,
+      sample_uptime_ratio: sampleRatio,
+      downtime,
+      series,
+    });
   });
 
   app.get('/api/v1/error-tasks', (c) => {

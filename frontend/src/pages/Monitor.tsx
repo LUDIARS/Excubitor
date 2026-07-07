@@ -321,6 +321,15 @@ function ComponentStatusLine({
           {c.disabled && <span className="tag disabled">disabled</span>}
           {displayState === 'stale' && <span className="tag health-stale" title={healthTitle}>health stale</span>}
           {c.health_ok === false && <span className="tag health-failed" title={healthTitle}>health fail</span>}
+          {c.downtime_24h?.current_down_ms ? (
+            <span className="tag health-failed" title={`down since ${new Date(c.downtime_24h.current_down_since ?? Date.now()).toLocaleString()}`}>
+              down {fmtDuration(c.downtime_24h.current_down_ms)}
+            </span>
+          ) : c.downtime_24h && c.downtime_24h.downtime_ms > 0 ? (
+            <span className="tag health-stale" title={`${c.downtime_24h.incidents} incident(s) in 24h`}>
+              24h down {fmtDuration(c.downtime_24h.downtime_ms)}
+            </span>
+          ) : null}
           {c.runtime && <span className="tag">{c.runtime}</span>}
           {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
           {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>update</span>}
@@ -438,6 +447,7 @@ function ServiceDetailOverlay({
             <div className="detail-section">
               <h3>Metrics</h3>
               <MetricGraph label="Liveness" color="#34d399" points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok * 100 }))} value={live?.uptime_ratio != null ? `${Math.round(live.uptime_ratio * 100)}%` : '-'} />
+              <MetricGraph label="Downtime" color="#ef4444" points={(live?.series ?? []).map((s) => ({ t: s.t, v: s.ok ? 0 : 100 }))} value={live?.downtime ? fmtDuration(live.downtime.downtime_ms) : '-'} />
               <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
               <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) : '-'} />
             </div>
@@ -450,6 +460,9 @@ function ServiceDetailOverlay({
                 <dt>Heap total</dt><dd>{mem?.heap_total_bytes != null ? fmtMiB(mem.heap_total_bytes) : '-'}</dd>
                 <dt>CPU</dt><dd>{mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'}</dd>
                 <dt>Leak</dt><dd>{mem?.leak.verdict ?? '-'}</dd>
+                <dt>Downtime</dt><dd>{live?.downtime ? fmtDuration(live.downtime.downtime_ms) : '-'}</dd>
+                <dt>Incidents</dt><dd>{live?.downtime?.incidents ?? '-'}</dd>
+                <dt>Current down</dt><dd>{live?.downtime?.current_down_ms ? fmtDuration(live.downtime.current_down_ms) : '-'}</dd>
               </dl>
             </div>
           </section>
@@ -756,6 +769,17 @@ function shortUrl(url: string): string {
 
 function fmtMiB(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(0)}MiB`;
+}
+
+function fmtDuration(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ${sec % 60}s`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ${min % 60}m`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ${hr % 24}h`;
 }
 
 function memoryPct(mem: MemoryCard | undefined): number | null {
