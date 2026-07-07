@@ -4,11 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { updateServiceCatalogInfo } from './editor.js';
 
-const originalCwd = process.cwd();
 const tempDirs: string[] = [];
 
 afterEach(() => {
-  process.chdir(originalCwd);
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -30,14 +28,13 @@ describe('updateServiceCatalogInfo', () => {
       '    runtime: node',
       '',
     ].join('\n'), 'utf8');
-    process.chdir(dir);
 
     updateServiceCatalogInfo('alpha', {
       project_code: 'new',
       subdomain: 'alpha-web',
       frontend_url: null,
       domain: 'alpha-web${DOMAIN_ROOT}',
-    });
+    }, path);
 
     const updated = readFileSync(path, 'utf8');
     expect(updated).toContain('# keep this comment');

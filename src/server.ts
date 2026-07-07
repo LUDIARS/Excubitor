@@ -1,14 +1,30 @@
-import { serve } from '@hono/node-server';
-import { bootObservability } from './index.js';
-import { openDb, closeDb } from './db/index.js';
-import { createNamedLogger } from './shared/logger.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
+import { runStartupNpmInstallAndAudit } from './startup/npm-install.js';
 
 const port = Number(process.env.EXCUBITOR_PORT ?? 17332);
-const logger = createNamedLogger('excubitor.server');
+
+type Logger = {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+};
+
+type CloseableServer = {
+  close: () => void;
+  on: (event: string, listener: (...args: unknown[]) => void) => void;
+};
+
+const fallbackLogger: Logger = {
+  info: (...args) => console.info('[excubitor.server]', ...args),
+  warn: (...args) => console.warn('[excubitor.server]', ...args),
+  error: (...args) => console.error('[excubitor.server]', ...args),
+};
+
+let logger: Logger = fallbackLogger;
 let shutdown: (() => Promise<void>) | null = null;
+let closeDbFn: (() => void) | null = null;
 let stopping = false;
-let activeServer: ReturnType<typeof serve> | null = null;
+let activeServer: CloseableServer | null = null;
 
 process.on('uncaughtException', (err) => {
   logger.error({ err: err.stack ?? err.message }, 'uncaught exception');
@@ -34,10 +50,30 @@ process.on('exit', (code) => {
 });
 
 try {
+  const startupNpm = await runStartupNpmInstallAndAudit(process.cwd());
+  const [
+    serverModule,
+    observabilityModule,
+    dbModule,
+    loggerModule,
+  ] = await Promise.all([
+    import('@hono/node-server'),
+    import('./index.js'),
+    import('./db/index.js'),
+    import('./shared/logger.js'),
+  ]);
+  const { serve } = serverModule;
+  const { bootObservability, recordStartupNpmIssues } = observabilityModule;
+  const { openDb, closeDb } = dbModule;
+  const { createNamedLogger } = loggerModule;
+  closeDbFn = closeDb;
+  logger = createNamedLogger('excubitor.server');
+
   logger.info({ port, argv: process.argv.slice(2), cwd: process.cwd() }, 'starting Excubitor server');
   writeDiagnostic('server.starting', { port, argv: process.argv.slice(2), cwd: process.cwd() });
   openDb('data/excubitor.sqlite');
   writeDiagnostic('server.db.opened');
+  recordStartupNpmIssues(startupNpm.issues);
 
   const booted = await bootObservability();
   shutdown = booted.shutdown;
@@ -55,24 +91,26 @@ try {
     return c.json({ error: 'internal_server_error', message: err.message }, 500);
   });
 
-  const server = serve({ fetch: booted.router.fetch, port, hostname: '127.0.0.1' });
+  const server = serve({ fetch: booted.router.fetch, port, hostname: '127.0.0.1' }) as CloseableServer;
   activeServer = server;
   server.on('listening', () => {
     logger.info({ port }, 'Excubitor server listening');
     writeDiagnostic('server.listening', { port });
   });
   server.on('error', (err) => {
-    logger.error({ err: err.stack ?? err.message, port }, 'Excubitor server listen error');
-    writeDiagnostic('server.listen.error', { err: err.stack ?? err.message, port });
+    const error = err instanceof Error ? err.stack ?? err.message : String(err);
+    logger.error({ err: error, port }, 'Excubitor server listen error');
+    writeDiagnostic('server.listen.error', { err: error, port });
   });
   server.on('close', () => {
     logger.warn({ port }, 'Excubitor server closed');
     writeDiagnostic('server.closed', { port });
   });
 } catch (err) {
-  logger.error({ err: err instanceof Error ? err.stack ?? err.message : String(err) }, 'Excubitor boot failed');
-  writeDiagnostic('server.boot.failed', { err: err instanceof Error ? err.stack ?? err.message : String(err) });
-  try { closeDb(); } catch { /* noop */ }
+  const error = err instanceof Error ? err.stack ?? err.message : String(err);
+  logger.error({ err: error }, 'Excubitor boot failed');
+  writeDiagnostic('server.boot.failed', { err: error });
+  try { closeDbFn?.(); } catch { /* noop */ }
   process.exitCode = 1;
 }
 
@@ -83,7 +121,7 @@ const stop = async () => {
   writeDiagnostic('server.stopping');
   await shutdown?.();
   activeServer?.close();
-  try { closeDb(); } catch (err) {
+  try { closeDbFn?.(); } catch (err) {
     logger.warn({ err: (err as Error).message }, 'closeDb failed');
   }
   process.exit(0);
@@ -91,5 +129,3 @@ const stop = async () => {
 
 process.on('SIGINT', () => { void stop(); });
 process.on('SIGTERM', () => { void stop(); });
-
-

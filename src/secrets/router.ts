@@ -33,6 +33,7 @@ const ServiceInfisicalSchema = z.object({
   prefix: z.string().default(''),
   include: z.array(z.string()).optional(),
   exclude: z.array(z.string()).optional(),
+  required_env: z.array(z.string()).optional(),
 });
 
 const ServicesSchema = z.object({
