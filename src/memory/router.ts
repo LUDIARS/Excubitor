@@ -90,7 +90,18 @@ export function buildMemoryRouter(getCatalog: () => Catalog): Hono {
       const metricsRow = rows.find((r) => r.source === 'metrics');
 
       const { windowMs, thresholdBytes } = leakWindowFor(svc, catalog, kind);
-      const series = querySeries(kind, key, now - windowMs, primary);
+      const sinceMs = kind === 'service' && rssRow.service_started_at
+        ? Math.max(now - windowMs, Number(rssRow.service_started_at))
+        : now - windowMs;
+      const series = querySeries(
+        kind,
+        key,
+        sinceMs,
+        primary,
+        kind === 'service' && rssRow.service_instance_id
+          ? { serviceInstanceId: rssRow.service_instance_id }
+          : undefined,
+      );
       // host はマシン全体メモリのため leak 判定は無意味 → insufficient 扱い。
       const leak = kind === 'host'
         ? detectLeak([], { windowMs, thresholdBytesPerHour: thresholdBytes, minSamples: 8 })
@@ -144,7 +155,14 @@ export function buildMemoryRouter(getCatalog: () => Catalog): Hono {
     if (!key) return c.json({ error: 'key_required' }, 400);
     const windowMin = Math.max(1, Math.min(1440, Number(c.req.query('window_min') ?? 120)));
     const source = c.req.query('source') || undefined;
-    const rows = querySeries(kind, key, Date.now() - windowMin * 60_000, source);
+    const instanceId = c.req.query('instance_id') || undefined;
+    const rows = querySeries(
+      kind,
+      key,
+      Date.now() - windowMin * 60_000,
+      source,
+      instanceId ? { serviceInstanceId: instanceId } : undefined,
+    );
     return c.json({ kind, key, window_min: windowMin, source: source ?? null, series: rows });
   });
 
