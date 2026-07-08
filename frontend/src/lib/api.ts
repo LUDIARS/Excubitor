@@ -327,8 +327,25 @@ export interface IdentityInput {
 // ─────────────── API helpers ───────────────
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(path, res));
   return (await res.json()) as T;
+}
+
+async function responseErrorMessage(path: string, res: Response): Promise<string> {
+  let message = `${path} ${res.status}`;
+  try {
+    const body = await res.clone().json() as { error?: unknown; message?: unknown };
+    const detail = typeof body.message === 'string'
+      ? body.message
+      : typeof body.error === 'string'
+        ? body.error
+        : null;
+    if (detail) message += `: ${detail}`;
+  } catch {
+    const text = await res.text().catch(() => '');
+    if (text) message += `: ${text.slice(0, 200)}`;
+  }
+  return message;
 }
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import Dashboard from './pages/Dashboard';
 import Monitor from './pages/Monitor';
+import FunctionMetrics from './pages/FunctionMetrics';
 import Memory from './pages/Memory';
 import Logs from './pages/Logs';
 import Catalog from './pages/Catalog';
@@ -10,12 +12,14 @@ import { fetchSystem } from './lib/api';
 import type { SystemInfo } from './lib/api';
 import { config } from '../config';
 
-type Tab = 'monitor' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
+type Tab = 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
 
-const TAB_IDS: Tab[] = ['monitor', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'monitor', label: 'Monitor' },
+  { id: 'function-metrics', label: 'Function Metrics' },
   { id: 'memory', label: 'Memory' },
   { id: 'logs', label: 'Logs' },
   { id: 'federation', label: 'Federation' },
@@ -31,7 +35,7 @@ const frontendUrls = (config.allowedHosts as readonly string[])
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return TAB_IDS.includes(h) ? h : 'monitor';
+    return TAB_IDS.includes(h) ? h : 'dashboard';
   });
 
   const [safeMode, setSafeMode] = useState(false);
@@ -84,7 +88,9 @@ export default function App() {
         </nav>
       </header>
       <main className="container">
+        {tab === 'dashboard' && <Dashboard />}
         {tab === 'monitor' && <Monitor />}
+        {tab === 'function-metrics' && <FunctionMetrics />}
         {tab === 'memory' && <Memory />}
         {tab === 'logs' && <Logs />}
         {tab === 'federation' && <Federation />}

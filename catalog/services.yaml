@@ -18,7 +18,7 @@ global:
   env:
     # *.melpot.dev を全サービスの Vite dev server allowedHosts に一括許可。
     # LUDIARS_ALLOWED_HOSTS を読む全サービス (Actio/Cernere/Nuntius/Schedula/Excubitor/
-    # Pagus/Signum/Praeforma/Peregrinatio) に自動注入される。
+    # Pagus/Signum/Praeforma/Peregrinatio/Quaestor) に自動注入される。
     LUDIARS_ALLOWED_HOSTS: "${DOMAIN_ROOT}"
 
 project_versions:
