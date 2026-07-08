@@ -400,8 +400,10 @@ services:
 
   - code: quaestor
     name: Quaestor (個人会計)
+    domain: qs${DOMAIN_ROOT}
     tier: personal
     project_code: quaestor
+    subdomain: qs
     component: backend
     port: 17400
     repo: LUDIARS/Quaestor
@@ -679,7 +681,7 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run start
+    command: node dist/server.js
     allow_hot_reload: false
     env:
       # Cost サンプリング (全ログ JSONL 走査) が event loop を重くするため cost だけを
@@ -688,6 +690,7 @@ services:
       # autocomplete が 3s ACK 窓を超え不安定だったため撤去した。
       NODE_ENV: production
       CONCORDIA_COST_MODE: worker
+      CONCORDIA_DISCORD_COST_REFRESH_MIN: "10"
       CONCORDIA_LOG_FILE: "1"
       CONCORDIA_LOG_FILE_PATH: ${ARS_ROOT}/logs/concordia/cc-live.jsonl
       CONCORDIA_LOG_LEVEL: info
@@ -739,8 +742,8 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: npm run cost:worker
-    autostart: false
+    command: node --import tsx --env-file-if-exists=.env src/cost-worker.ts
+    autostart: true
     restart_policy: on-failure
     max_restart: 5
     log_path: ${ARS_ROOT}/logs/concordia-cost

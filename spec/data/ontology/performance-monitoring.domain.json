@@ -4,10 +4,9 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
-    { "pathPattern": "(^|/)src/memory/[^/]+$" },
-    { "pathPattern": "(^|/)src/scanner/[^/]+$" },
-    { "pathPattern": "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$" },
-    { "pathPattern": "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$" }
+    { "pathPattern": "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|docker-sampler|host-sampler|wsl-sampler|units|router)\\.ts$" },
+    { "pathPattern": "(^|/)src/scanner/(docker|git|health|health-state|host|host-process|loop|ports|ports-router|sync)\\.ts$" },
+    { "pathPattern": "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$" }
   ],
-  "cardTemplate": "Summarise the performance-monitoring domain: samplers, health scanners, port reports, leak detection, and alert generation."
+  "cardTemplate": "Summarise the performance-monitoring domain: collection loops, health scanners, port reports, leak detection, and alert generation."
 }

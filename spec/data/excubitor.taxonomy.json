@@ -57,9 +57,9 @@
         },
         {
           "name": "diagnostic-logging",
-          "description": "Shared structured logger and diagnostic event output.",
+          "description": "Shared structured logger used by Excubitor log-producing paths.",
           "paths": [
-            "(^|/)src/shared/(logger|diagnostic-log)\\.ts$"
+            "(^|/)src/shared/logger\\.ts$"
           ]
         },
         {
@@ -106,24 +106,23 @@
       "modules": [
         {
           "name": "memory-performance",
-          "description": "Memory and CPU sampling, leak detection, budget checks, and memory API routes.",
+          "description": "Memory and CPU collection loops, leak detection, budget checks, and memory API routes.",
           "paths": [
-            "(^|/)src/memory/[^/]+$"
+            "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|docker-sampler|host-sampler|wsl-sampler|units|router)\\.ts$"
           ]
         },
         {
           "name": "health-scanning",
           "description": "Port, docker, git, package, host process, and health-state scanners.",
           "paths": [
-            "(^|/)src/scanner/[^/]+$"
+            "(^|/)src/scanner/(docker|git|health|health-state|host|host-process|loop|ports|ports-router|sync)\\.ts$"
           ]
         },
         {
           "name": "monitoring-ui",
-          "description": "Dashboard, memory charts, metric graphs, and sparklines for operator monitoring.",
+          "description": "Dashboard and memory pages for operator monitoring.",
           "paths": [
-            "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$",
-            "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$"
+            "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$"
           ]
         }
       ]
@@ -236,6 +235,46 @@
             "(^|/)spec/[^/]+/[^/]+$",
             "(^|/)review/[^/]+$",
             "(^|/)review/[^/]+/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "measurement",
+      "description": "Instrumentation and derived metrics: HTTP/startup timing, diagnostic event measurement, liveness/downtime calculations, memory sample storage, and metric visualizations.",
+      "modules": [
+        {
+          "name": "request-and-diagnostic-measurement",
+          "description": "HTTP request timing, startup/runtime diagnostic events, function-metric proxy helpers, and tunable timing thresholds.",
+          "paths": [
+            "(^|/)src/shared/diagnostic-log\\.ts$"
+          ],
+          "names": [
+            "installRequestLogging|readPositiveIntEnv|cacheStorageTtl|serviceFunctionMetricBaseUrl|serviceFunctionMetricPort|copyFunctionMetricQuery|readUpstreamJsonOrText|upstreamErrorMessage"
+          ]
+        },
+        {
+          "name": "liveness-measurement",
+          "description": "Availability samples, uptime ratios, downtime windows, and liveness-derived measurements.",
+          "paths": [
+            "(^|/)src/scanner/downtime\\.ts$"
+          ]
+        },
+        {
+          "name": "memory-metric-measurement",
+          "description": "Metric endpoint ingestion, normalized memory metric shape, and persisted sample series.",
+          "paths": [
+            "(^|/)src/memory/(metrics-sampler|store|types)\\.ts$"
+          ]
+        },
+        {
+          "name": "metric-visualization",
+          "description": "Metric graph, sparkline, and function-metric UI helpers used to render measured series.",
+          "paths": [
+            "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$"
+          ],
+          "names": [
+            "fetchFunctionMetrics|FunctionMetricsPanel|FunctionMetricRow|fmtMetricMs|fmtMetricTime"
           ]
         }
       ]

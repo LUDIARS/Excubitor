@@ -414,6 +414,61 @@ export function fetchRecentLogs(code: string, limit = 80): Promise<RecentLogLine
   ).then((d) => d.logs);
 }
 
+export type FunctionMetricSort = 'calls' | 'totalMs' | 'avgMs' | 'maxMs' | 'lastAt';
+
+export interface FunctionMetricAggregate {
+  key: string;
+  service: string;
+  domain: string;
+  kind: string;
+  target: string;
+  tags?: Record<string, string>;
+  calls: number;
+  ok: number;
+  errors: number;
+  totalMs: number;
+  avgMs: number;
+  minMs: number | null;
+  maxMs: number | null;
+  lastMs: number | null;
+  lastStatus: string | null;
+  lastAt: number | null;
+  errorNames: Record<string, number>;
+}
+
+export interface FunctionMetricTotals {
+  calls: number;
+  ok: number;
+  errors: number;
+  totalMs: number;
+  avgMs: number;
+}
+
+export interface FunctionMetricSnapshot {
+  generatedAt: number;
+  totals: FunctionMetricTotals;
+  rows: FunctionMetricAggregate[];
+}
+
+export interface ServiceFunctionMetrics {
+  code: string;
+  source_url: string;
+  snapshot: FunctionMetricSnapshot;
+}
+
+export function fetchFunctionMetrics(
+  code: string,
+  opts: { limit?: number; kind?: string; domain?: string; sort?: FunctionMetricSort } = {},
+): Promise<ServiceFunctionMetrics> {
+  const q = new URLSearchParams();
+  if (opts.limit) q.set('limit', String(opts.limit));
+  if (opts.kind) q.set('kind', opts.kind);
+  if (opts.domain) q.set('domain', opts.domain);
+  if (opts.sort) q.set('sort', opts.sort);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return getJSON<ServiceFunctionMetrics>(`/api/v1/services/${encodeURIComponent(code)}/function-metrics${suffix}`);
+}
+
 export function fetchAllRecentLogs(codes: string[] = [], limit = 500): Promise<RecentLogLine[]> {
   const q = new URLSearchParams({ limit: String(limit) });
   if (codes.length > 0) q.set('codes', codes.join(','));

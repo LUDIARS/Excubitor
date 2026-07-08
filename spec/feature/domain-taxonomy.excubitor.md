@@ -23,10 +23,10 @@ stop/restart, and startup preflight.
 ## cross-service-logging
 
 Cross-service log ingestion, recent-log queries, live SSE streams, Vestigium reads,
-and diagnostic logging.
+and shared log output.
 
 - **log-ingestion**: `src/log/*`.
-- **diagnostic-logging**: shared logger and diagnostic event writers.
+- **diagnostic-logging**: shared structured logger.
 - **logging-ui**: Logs page and reusable log drawer.
 
 ## federation
@@ -42,9 +42,11 @@ Corpus hub publication.
 
 Runtime health, port conflict, memory, CPU, WSL, docker, and liveness monitoring.
 
-- **memory-performance**: `src/memory/*`.
-- **health-scanning**: `src/scanner/*`.
-- **monitoring-ui**: Monitor/Memory pages, metric graph, and sparkline widgets.
+- **memory-performance**: memory/CPU collection loops, leak detection, budget
+  checks, and memory API routes.
+- **health-scanning**: port, docker, git, package, host process, and health-state
+  scanners.
+- **monitoring-ui**: Monitor/Memory pages.
 
 ## env-management-and-injection
 
@@ -87,3 +89,18 @@ Automated tests, test fixtures, and local specs used to verify Excubitor behavio
 
 - **unit-and-api-tests**: Vitest files under `src`.
 - **spec-and-review-artifacts**: `spec/*` and `review/*` context artifacts.
+
+## measurement
+
+Instrumentation and derived metrics: HTTP/startup timing, diagnostic event
+measurement, liveness/downtime calculations, memory sample storage, and metric
+visualizations.
+
+- **request-and-diagnostic-measurement**: request timing, startup/runtime
+  diagnostics, function-metric proxy helpers, and tunable timing thresholds.
+- **liveness-measurement**: availability samples, uptime ratios, downtime windows,
+  and liveness-derived measurements.
+- **memory-metric-measurement**: metric endpoint ingestion, normalized memory
+  metric shape, and persisted sample series.
+- **metric-visualization**: metric graph, sparkline, and function-metric UI
+  helpers for measured series.
