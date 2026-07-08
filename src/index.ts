@@ -72,6 +72,7 @@ const SLOW_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_SLOW_REQUEST_MS', 5_000);
 const HUNG_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_HUNG_REQUEST_MS', 60_000);
 const BUILD_VERSION_CACHE_MS = readPositiveIntEnv('EXCUBITOR_BUILD_VERSION_CACHE_MS', 60_000);
 const BUILD_VERSION_REDIS_TTL_MS = cacheStorageTtl(BUILD_VERSION_CACHE_MS);
+const FUNCTION_METRICS_TIMEOUT_MS = readPositiveIntEnv('EXCUBITOR_FUNCTION_METRICS_TIMEOUT_MS', 10_000);
 
 const ControlBodySchema = z.object({
   action: z.enum(['start', 'stop', 'restart']),
@@ -94,6 +95,45 @@ let buildVersionPending: Promise<void> | null = null;
 
 function findService(code: string): Service | undefined {
   return currentCatalog?.services.find((s) => s.code === code);
+}
+
+function serviceFunctionMetricBaseUrl(svc: Service): string | null {
+  const port = serviceFunctionMetricPort(svc);
+  return port == null ? null : `http://127.0.0.1:${port}`;
+}
+
+function serviceFunctionMetricPort(svc: Service): number | null {
+  if (typeof svc.backend_port === 'number') return svc.backend_port;
+  const rolePort = svc.ports?.find((p) => ['backend', 'api', 'service'].includes(p.role))?.port;
+  if (typeof rolePort === 'number') return rolePort;
+  if (typeof svc.port === 'number') return svc.port;
+  if (typeof svc.frontend_port === 'number') return svc.frontend_port;
+  const firstPort = svc.ports?.[0]?.port;
+  return typeof firstPort === 'number' ? firstPort : null;
+}
+
+function copyFunctionMetricQuery(target: URL, source: URLSearchParams): void {
+  for (const key of ['limit', 'kind', 'domain', 'sort', 'service']) {
+    const value = source.get(key);
+    if (value) target.searchParams.set(key, value);
+  }
+}
+
+async function readUpstreamJsonOrText(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return truncate(text, 4000);
+  }
+}
+
+function upstreamErrorMessage(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return typeof body === 'string' ? body : null;
+  const record = body as Record<string, unknown>;
+  const message = record.message ?? record.error;
+  return typeof message === 'string' ? message : null;
 }
 
 async function cachedBuildVersion(): Promise<BuildVersionInfo | null> {
@@ -521,6 +561,58 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       ...serviceRowView(r, downtimeSummaryForService(code, 24 * 60)),
       id: r.id,
       instance_id: r.instance_id ?? null,
+    });
+  });
+
+  app.get('/api/v1/services/:code/function-metrics', async (c) => {
+    const code = c.req.param('code');
+    const svc = findService(code);
+    if (!svc) return c.json({ error: 'service_not_found', code }, 404);
+
+    const baseUrl = serviceFunctionMetricBaseUrl(svc);
+    if (!baseUrl) {
+      return c.json({
+        error: 'function_metrics_unavailable',
+        code,
+        message: 'service has no local port configured',
+      }, 400);
+    }
+
+    const upstreamUrl = new URL('/v1/instrumentation/functions', baseUrl);
+    copyFunctionMetricQuery(upstreamUrl, new URL(c.req.url).searchParams);
+
+    let res: Response;
+    try {
+      res = await fetch(upstreamUrl, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(FUNCTION_METRICS_TIMEOUT_MS),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({
+        error: 'function_metrics_request_failed',
+        code,
+        source_url: upstreamUrl.toString(),
+        message,
+      }, 502);
+    }
+
+    const body = await readUpstreamJsonOrText(res);
+    if (!res.ok) {
+      return c.json({
+        error: 'function_metrics_upstream_failed',
+        code,
+        source_url: upstreamUrl.toString(),
+        status: res.status,
+        message: upstreamErrorMessage(body) ?? res.statusText,
+        upstream: body,
+      }, 502);
+    }
+
+    return c.json({
+      code,
+      source_url: upstreamUrl.toString(),
+      snapshot: body,
     });
   });
 

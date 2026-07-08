@@ -468,6 +468,7 @@ describe('Excubitor HTTP APIs', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     closeDb();
     resetDbClientForTests();
   });
@@ -567,6 +568,59 @@ describe('Excubitor HTTP APIs', () => {
 
     const envConfig = await requestJson(router, 'GET', '/api/v1/services/missing/env-config');
     expect(envConfig.res.status).toBe(404);
+  });
+
+  it('proxies function metrics from a service local port', async () => {
+    const snapshot = {
+      generatedAt: 123,
+      totals: { calls: 1, ok: 1, errors: 0, totalMs: 12, avgMs: 12 },
+      rows: [{
+        key: 'svc-a',
+        service: 'svc-a',
+        domain: 'svc-a',
+        kind: 'api',
+        target: 'api.GET /health',
+        calls: 1,
+        ok: 1,
+        errors: 0,
+        totalMs: 12,
+        avgMs: 12,
+        minMs: 12,
+        maxMs: 12,
+        lastMs: 12,
+        lastStatus: 'ok',
+        lastAt: 123,
+        errorNames: {},
+      }],
+    };
+    const fetchMock = vi.fn(async (url: unknown) => {
+      expect(String(url)).toBe('http://127.0.0.1:1234/v1/instrumentation/functions?limit=5&kind=api&sort=calls');
+      return new Response(JSON.stringify(snapshot), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await requestJson<{
+      code: string;
+      source_url: string;
+      snapshot: typeof snapshot;
+    }>(router, 'GET', '/api/v1/services/svc-a/function-metrics?limit=5&kind=api&sort=calls');
+
+    expect(metrics.res.status).toBe(200);
+    expect(metrics.data.code).toBe('svc-a');
+    expect(metrics.data.source_url).toBe('http://127.0.0.1:1234/v1/instrumentation/functions?limit=5&kind=api&sort=calls');
+    expect(metrics.data.snapshot.totals.calls).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not proxy function metrics for missing services', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const metrics = await requestJson(router, 'GET', '/api/v1/services/missing/function-metrics');
+
+    expect(metrics.res.status).toBe(404);
+    expect(metrics.data).toMatchObject({ error: 'service_not_found', code: 'missing' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('streams live log SSE endpoints', async () => {

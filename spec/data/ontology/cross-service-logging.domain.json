@@ -1,13 +1,13 @@
 {
   "name": "cross-service-logging",
-  "description": "Cross-service log ingestion, recent-log queries, live SSE streams, Vestigium reads, and diagnostic logging.",
+  "description": "Cross-service log ingestion, recent-log queries, live SSE streams, Vestigium reads, and shared log output.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
     { "pathPattern": "(^|/)src/log/[^/]+$" },
-    { "pathPattern": "(^|/)src/shared/(logger|diagnostic-log)\\.ts$" },
+    { "pathPattern": "(^|/)src/shared/logger\\.ts$" },
     { "pathPattern": "(^|/)frontend/src/pages/Logs\\.tsx$" },
     { "pathPattern": "(^|/)frontend/src/components/LogsDrawer\\.tsx$" }
   ],
-  "cardTemplate": "Summarise the cross-service-logging domain: log sources, aggregation paths, streaming paths, and diagnostic output."
+  "cardTemplate": "Summarise the cross-service-logging domain: log sources, aggregation paths, streaming paths, and shared log output."
 }
