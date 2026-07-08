@@ -51,6 +51,10 @@ export interface SeriesRow {
   cpu: number | null;
 }
 
+export interface QuerySeriesOptions {
+  serviceInstanceId?: string;
+}
+
 /**
  * 指定ターゲット (+任意で source) の RSS 時系列を since 以降で昇順取得する。
  * source 省略時は全 source 混在になるため、 leak 判定では primary source を指定すること。
@@ -60,8 +64,20 @@ export function querySeries(
   targetKey: string,
   sinceMs: number,
   source?: string,
+  options: QuerySeriesOptions = {},
 ): SeriesRow[] {
-  const rows = source
+  const instanceId = options.serviceInstanceId;
+  const rows = source && instanceId
+    ? db().all(sql`
+        SELECT sampled_at AS t, rss_bytes AS rss, heap_used_bytes AS heap_used,
+               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers,
+               cpu_pct AS cpu
+        FROM memory_samples
+        WHERE target_kind = ${targetKind} AND target_key = ${targetKey}
+          AND source = ${source} AND service_instance_id = ${instanceId} AND sampled_at >= ${sinceMs}
+        ORDER BY sampled_at ASC
+      `)
+    : source
     ? db().all(sql`
         SELECT sampled_at AS t, rss_bytes AS rss, heap_used_bytes AS heap_used,
                heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers,
@@ -69,6 +85,16 @@ export function querySeries(
         FROM memory_samples
         WHERE target_kind = ${targetKind} AND target_key = ${targetKey}
           AND source = ${source} AND sampled_at >= ${sinceMs}
+        ORDER BY sampled_at ASC
+      `)
+    : instanceId
+    ? db().all(sql`
+        SELECT sampled_at AS t, rss_bytes AS rss, heap_used_bytes AS heap_used,
+               heap_total_bytes AS heap_total, external_bytes AS external, array_buffers_bytes AS array_buffers,
+               cpu_pct AS cpu
+        FROM memory_samples
+        WHERE target_kind = ${targetKind} AND target_key = ${targetKey}
+          AND service_instance_id = ${instanceId} AND sampled_at >= ${sinceMs}
         ORDER BY sampled_at ASC
       `)
     : db().all(sql`
@@ -105,6 +131,7 @@ export interface LatestTarget {
   target_kind: string;
   target_key: string;
   service_instance_id: string | null;
+  service_started_at: number | null;
   source: string;
   sampled_at: number;
   rss_bytes: number | null;
@@ -123,10 +150,12 @@ export interface LatestTarget {
  */
 export function latestPerTarget(): LatestTarget[] {
   const rows = db().all(sql`
-    SELECT ms.target_kind, ms.target_key, ms.service_instance_id, ms.source, ms.sampled_at,
+    SELECT ms.target_kind, ms.target_key, ms.service_instance_id, si.started_at AS service_started_at,
+           ms.source, ms.sampled_at,
            ms.rss_bytes, ms.heap_used_bytes, ms.heap_total_bytes, ms.external_bytes,
            ms.array_buffers_bytes, ms.cpu_pct, ms.pid, ms.detail
     FROM memory_samples ms
+    LEFT JOIN service_instances si ON si.id = ms.service_instance_id
     JOIN (
       SELECT target_kind, target_key, source, MAX(sampled_at) AS max_at
       FROM memory_samples

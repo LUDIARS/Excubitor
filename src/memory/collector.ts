@@ -34,6 +34,7 @@ interface RunningInstance {
   code: string;
   instanceId: string;
   pid: number | null;
+  startedAt: number | null;
 }
 
 function isDockerRuntime(svc: Service): boolean {
@@ -49,13 +50,15 @@ function primarySource(svc: Service): 'process' | 'docker' {
 /** running な instance を code → {instanceId, pid} で引けるよう取得。 */
 function loadRunningInstances(): Map<string, RunningInstance> {
   const rows = db().all(sql`
-    SELECT s.code AS code, si.id AS instance_id, si.pid AS pid
+    SELECT s.code AS code, si.id AS instance_id, si.pid AS pid, si.started_at AS started_at
     FROM services s
     JOIN service_instances si ON si.service_id = s.id
     WHERE s.is_active = 1 AND si.state = 'running'
-  `) as Array<{ code: string; instance_id: string; pid: number | null }>;
+  `) as Array<{ code: string; instance_id: string; pid: number | null; started_at: number | null }>;
   const map = new Map<string, RunningInstance>();
-  for (const r of rows) map.set(r.code, { code: r.code, instanceId: r.instance_id, pid: r.pid });
+  for (const r of rows) {
+    map.set(r.code, { code: r.code, instanceId: r.instance_id, pid: r.pid, startedAt: r.started_at });
+  }
   return map;
 }
 
@@ -194,7 +197,10 @@ function detectAndRaise(catalog: Catalog, running: Map<string, RunningInstance>)
     const windowMin = svc.memory?.leak_window_min ?? 60;
     const thresholdMbPerHr = svc.memory?.leak_threshold_mb_per_hr ?? 50;
     const windowMs = windowMin * 60_000;
-    const series = querySeries('service', svc.code, now - windowMs, primarySource(svc));
+    const sinceMs = Math.max(now - windowMs, inst.startedAt ?? 0);
+    const series = querySeries('service', svc.code, sinceMs, primarySource(svc), {
+      serviceInstanceId: inst.instanceId,
+    });
     const result = detectLeak(toLeakSamples(series), {
       windowMs,
       thresholdBytesPerHour: thresholdMbPerHr * 1024 * 1024,
@@ -250,7 +256,15 @@ function detectAndRaiseCpu(catalog: Catalog, running: Map<string, RunningInstanc
   const run = (label: string, kind: string, key: string, source: string, instanceId: string | null,
                thresholdPct: number, windowMin: number): void => {
     const windowMs = windowMin * 60_000;
-    const series = querySeries(kind, key, now - windowMs, source);
+    const inst = instanceId != null ? running.get(key) : undefined;
+    const sinceMs = inst ? Math.max(now - windowMs, inst.startedAt ?? 0) : now - windowMs;
+    const series = querySeries(
+      kind,
+      key,
+      sinceMs,
+      source,
+      instanceId != null ? { serviceInstanceId: instanceId } : undefined,
+    );
     const result = detectSustainedCpu(toCpuSamples(series), {
       windowMs,
       thresholdPct,

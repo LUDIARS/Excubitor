@@ -16,6 +16,7 @@ import {
 } from './store.js';
 
 const INSTANCE_ID = 'inst-1';
+const INSTANCE_ID_2 = 'inst-2';
 const SERVICE_ID = 'svc-1';
 
 beforeAll(() => {
@@ -28,6 +29,10 @@ beforeAll(() => {
   db().run(sql`
     INSERT INTO service_instances (id, service_id, state, pid)
     VALUES (${INSTANCE_ID}, ${SERVICE_ID}, 'running', 4242)
+  `);
+  db().run(sql`
+    INSERT INTO service_instances (id, service_id, state, pid)
+    VALUES (${INSTANCE_ID_2}, ${SERVICE_ID}, 'stopped', 4243)
   `);
 });
 
@@ -76,6 +81,23 @@ describe('insertSamples / querySeries / latestPerTarget', () => {
     expect(latest.length).toBe(3);
     const wsl = latest.find((r) => r.target_kind === 'wsl');
     expect(wsl?.rss_bytes).toBe(4 * 1024 * 1024 * 1024);
+
+    insertSamples([
+      {
+        targetKind: 'service',
+        targetKey: 'memoria-server',
+        serviceInstanceId: INSTANCE_ID_2,
+        source: 'process',
+        rssBytes: 512 * 1024 * 1024,
+        pid: 4243,
+        detail: { procCount: 1 },
+      },
+    ]);
+
+    expect(querySeries('service', 'memoria-server', 0, 'process')).toHaveLength(2);
+    const filtered = querySeries('service', 'memoria-server', 0, 'process', { serviceInstanceId: INSTANCE_ID });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]!.rss).toBe(256 * 1024 * 1024);
   });
 
   it('toLeakSamples は rss null を除外', () => {
