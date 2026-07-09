@@ -139,6 +139,16 @@ code {
   align-items: flex-start;
   gap: 12px;
 }
+.dashboard-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dashboard-head-actions select {
+  min-width: 220px;
+}
 .dashboard-head h2 {
   margin: 0;
   font-size: 18px;
@@ -201,7 +211,7 @@ code {
 .dashboard-service-button {
   width: 100%;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 36px 12px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   text-align: left;
@@ -210,12 +220,26 @@ code {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
+  cursor: pointer;
 }
 .dashboard-service-button:hover:not(:disabled),
 .dashboard-service-button.selected {
   background: var(--bg-elev);
   border-color: var(--border);
   color: var(--fg);
+}
+.dashboard-favorite-toggle {
+  min-width: 34px;
+  height: 24px;
+  padding: 2px 6px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1;
+}
+.dashboard-favorite-toggle.active {
+  border-color: rgba(250,204,21,0.55);
+  background: rgba(250,204,21,0.14);
+  color: var(--warn);
 }
 .dashboard-service-main {
   display: flex;
@@ -246,6 +270,7 @@ code {
   max-width: 190px;
 }
 .dashboard-metric-badge,
+.dashboard-resource-badge,
 .dashboard-error-count {
   font-size: 10px;
   padding: 1px 6px;
@@ -289,6 +314,13 @@ code {
 .dashboard-detail-title h2 {
   margin: 0;
   font-size: 18px;
+}
+.dashboard-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .dashboard-detail-grid {
   display: grid;

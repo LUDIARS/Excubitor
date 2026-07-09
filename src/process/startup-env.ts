@@ -25,6 +25,7 @@ export function requiredEnvKeysForService(svc: Service): string[] {
     ...(svc.required_env ?? []),
     ...(cfg?.required_env ?? []),
     ...(cfg?.include ?? []),
+    ...(svc.requires_secret ?? []).flatMap((req) => req.keys),
   ]);
 }
 
