@@ -11,9 +11,14 @@ import { resolve, dirname } from 'node:path';
 import { load, dump } from 'js-yaml';
 
 const HEADER =
-  '# 自動生成カタログ (Excubitor のスキャンが書き出す)。\n' +
-  '# 手書きの services.yaml とは別管理。 手で編集してもよいが、 再スキャンで上書きされる。\n' +
-  '# このファイルは gitignore 対象 (マシン毎)。\n';
+  '# Auto-generated catalog written by Excubitor scan.\n' +
+  '# Manual edits are allowed, but scan may update services.\n' +
+  '# Add codes to ignored_codes to keep them out of future scans.\n';
+
+export interface AutoCatalogRaw {
+  services: unknown[];
+  ignored_codes: string[];
+}
 
 /** 自動カタログのパス (env override 可、 既定 catalog/services.auto.yaml)。 */
 export function autoCatalogPath(): string {
@@ -22,22 +27,31 @@ export function autoCatalogPath(): string {
   return resolve(process.cwd(), 'catalog/services.auto.yaml');
 }
 
-/** 自動カタログの services 配列を生で読む。 未存在 / 壊れていれば空配列。 */
-export function readAutoServicesRaw(): unknown[] {
+export function readAutoCatalogRaw(): AutoCatalogRaw {
   const path = autoCatalogPath();
-  if (!existsSync(path)) return [];
+  if (!existsSync(path)) return { services: [], ignored_codes: [] };
   try {
-    const parsed = load(readFileSync(path, 'utf8')) as { services?: unknown } | null;
-    return Array.isArray(parsed?.services) ? parsed!.services : [];
+    const parsed = load(readFileSync(path, 'utf8')) as { services?: unknown; ignored_codes?: unknown } | null;
+    const services = Array.isArray(parsed?.services) ? parsed!.services : [];
+    const ignored_codes = Array.isArray(parsed?.ignored_codes)
+      ? parsed!.ignored_codes.filter((code): code is string => typeof code === 'string' && code.length > 0)
+      : [];
+    return { services, ignored_codes };
   } catch {
-    return [];
+    return { services: [], ignored_codes: [] };
   }
 }
 
+/** 自動カタログの services 配列を生で読む。 未存在 / 壊れていれば空配列。 */
+export function readAutoServicesRaw(): unknown[] {
+  return readAutoCatalogRaw().services;
+}
+
 /** 自動カタログを書き出す (services 配列を `{ services: [...] }` として dump)。 */
-export function writeAutoServices(services: unknown[]): void {
+export function writeAutoServices(services: unknown[], ignored_codes = readAutoCatalogRaw().ignored_codes): void {
   const path = autoCatalogPath();
   mkdirSync(dirname(path), { recursive: true });
-  const body = dump({ services }, { lineWidth: 120, noRefs: true });
+  const document = ignored_codes.length > 0 ? { ignored_codes, services } : { services };
+  const body = dump(document, { lineWidth: 120, noRefs: true });
   writeFileSync(path, `${HEADER}\n${body}`, 'utf8');
 }
