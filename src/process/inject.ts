@@ -16,6 +16,7 @@ import { resolveServiceInfisical } from '../secrets/config-store.js';
 import { sharedLogsRoot } from '../log/logs-root.js';
 import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
+import { getServiceByCode } from './service-registry.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -57,10 +58,55 @@ export function arsRootEnvFor(): Record<string, string> {
 }
 
 /**
+ * `svc.requires_secret` (他サービスの Infisical project から NAMED secret を借りる設定) を解決する。
+ * - source service は catalog 上に存在しなければならない (service-registry 未登録 → throw)。
+ * - source は自身の infisical 設定を持たなければならない (無ければ throw、 借りる先が無い)。
+ * - `keys` で列挙したキーのみを toEnvMap の include で絞る (source の secret 全量を渡さない)。
+ * - 失敗は全て throw (fail-fast、 preflight で事前検知させる)。
+ */
+export async function resolveRequiresSecretEnv(svc: Service): Promise<Record<string, string>> {
+  const requests = svc.requires_secret ?? [];
+  if (requests.length === 0) return {};
+
+  const id = readIdentity();
+  if (!id) {
+    throw new Error(
+      `service ${svc.code} has requires_secret but Excubitor has no machine identity ` +
+        `(set INFISICAL_SITE_URL / INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET)`,
+    );
+  }
+
+  let merged: Record<string, string> = {};
+  for (const req of requests) {
+    const source = getServiceByCode(req.service);
+    if (!source) {
+      throw new Error(
+        `service ${svc.code} requires_secret from unknown service "${req.service}" (not in catalog)`,
+      );
+    }
+    const cfg = resolveServiceInfisical(req.service, source.infisical);
+    if (!cfg) {
+      throw new Error(
+        `service ${svc.code} requires_secret from "${req.service}" but that service has no infisical config`,
+      );
+    }
+    const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
+    const env = toEnvMap(secrets, { include: req.keys });
+    logger.info(
+      { consumer: svc.code, sourceService: req.service, project: cfg.project_id, keys: Object.keys(env) },
+      'cross-service secret injected via requires_secret',
+    );
+    merged = { ...merged, ...env };
+  }
+  return merged;
+}
+
+/**
  * spawn する子プロセスに渡す env を解決する。
  * - 常に topology env (URL/port、 Excubitor が catalog から特定可能な情報) を含む
  * - infisical inject 設定があれば secret を fetch して topology に上書きマージ
- * - identity 不足 (infisical inject 要求時) → throw (preflight で事前検知させる)
+ * - requires_secret があれば他サービスの named secret を fetch し最優先でマージ
+ * - identity 不足 (infisical inject / requires_secret 要求時) → throw (preflight で事前検知させる)
  * - fetch 失敗 → throw
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
@@ -72,8 +118,11 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const vestigiumEnv = vestigiumEnvFor(svc);
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret。
-  if (!cfg || !cfg.inject) return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv };
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
+  if (!cfg || !cfg.inject) {
+    const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
+    return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...requiresSecretEnv };
+  }
 
   const id = readIdentity();
   if (!id) {
@@ -93,6 +142,7 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret。
-  return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env };
+  const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
+  return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env, ...requiresSecretEnv };
 }

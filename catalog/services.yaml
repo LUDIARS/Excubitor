@@ -343,6 +343,11 @@ services:
       interval_sec: 30
     provides:
       AEDILIS_URL: http://${host}:${port}
+    # Cernere (認証/ID) 発行のクライアント資格情報を Excubitor 経由で借りる (cross-service delegation)。
+    # AEDILIS_CERNERE_CLIENT_ID/SECRET が Cernere の Infisical project に無ければ preflight が fail closed する。
+    requires_secret:
+      - service: cernere
+        keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
 
   - code: bibliotheca
     name: Bibliotheca (貸出台帳)
@@ -673,6 +678,7 @@ services:
       CONCORDIA_REDIS_TIMEOUT_MS: "8"
       CONCORDIA_REDIS_READ_TIMEOUT_MS: "8"
       CONCORDIA_REDIS_WRITE_TIMEOUT_MS: "500"
+      CONCORDIA_DISCORD_BOOT_SYNC_DELAY_MS: "60000"
       CONCORDIA_POST_LISTEN_STARTUP_DELAY_MS: "1000"
       CONCORDIA_METRICS_START_DELAY_MS: "30000"
       CONCORDIA_REPO_SCAN_CONCURRENCY: "4"

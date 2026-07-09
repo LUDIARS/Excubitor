@@ -46,6 +46,7 @@ import { reconcileProcesses } from './process/reconcile.js';
 import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
+import { setCatalogServices } from './process/service-registry.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
@@ -372,6 +373,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // catalog から topology env (URL/port) を構築。 spawn 時に全サービスへ注入する。
   setTopologyFromCatalog(currentCatalog);
+  setCatalogServices(currentCatalog.services);
   setGlobalEnv(currentCatalog.global?.env ?? {});
 
   // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
@@ -396,6 +398,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     buildVersionCache = null;
     refreshBuildVersion(fresh);
     setTopologyFromCatalog(fresh);
+    setCatalogServices(fresh.services);
     setGlobalEnv(fresh.global?.env ?? {});
     fileTailHandle.refresh(fresh);
     logger.info(
