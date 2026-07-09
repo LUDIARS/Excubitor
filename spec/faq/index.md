@@ -43,6 +43,25 @@ kind: problem | investigation | qa | design
 <!-- tag: allowedHosts -->
 - [Vite dev server で `*.melpot.dev` がブロックされる](allowedhosts-global-env.md) `vite` `allowedHosts` `env` `global-env` `melpot`
 
+<!-- tag: crash -->
+- [Excubitor クラッシュ多発問題 — コード解析](crash-2026-07-analysis.md) `crash` `stability` `ops`
+- [WP1: service-runner 道連れ shutdown 廃止 / ハンドラ内 throw 対策 / docker ps timeout](crash-fix-wp1-supervisor.md) `crash` `service-runner` `server` `scanner`
+- [WP2: 子プロセス管理の共通化](crash-fix-wp2-child-process.md) `crash` `exec` `child-process` `auto_fix` `process-manager`
+- [WP3: ログ系の無制限バッファ対策](crash-fix-wp3-log-buffers.md) `crash` `log` `sse` `oom`
+- [WP4: DB 衛生](crash-fix-wp4-db-hygiene.md) `crash` `sqlite` `retention` `db`
+
+<!-- tag: stability -->
+- [Excubitor クラッシュ多発問題 — コード解析](crash-2026-07-analysis.md) `crash` `stability` `ops`
+
+<!-- tag: child-process -->
+- [WP2: 子プロセス管理の共通化](crash-fix-wp2-child-process.md) `crash` `exec` `child-process` `auto_fix` `process-manager`
+
+<!-- tag: log -->
+- [WP3: ログ系の無制限バッファ対策](crash-fix-wp3-log-buffers.md) `crash` `log` `sse` `oom`
+
+<!-- tag: sqlite -->
+- [WP4: DB 衛生](crash-fix-wp4-db-hygiene.md) `crash` `sqlite` `retention` `db`
+
 <!-- tag: env -->
 - [Vite dev server で `*.melpot.dev` がブロックされる](allowedhosts-global-env.md) `vite` `allowedHosts` `env` `global-env` `melpot`
 
@@ -56,4 +75,9 @@ kind: problem | investigation | qa | design
 
 | 日付 | タイトル | タグ |
 |---|---|---|
+| 2026-07-09 | [Excubitor クラッシュ多発問題 — コード解析](crash-2026-07-analysis.md) | `crash` `stability` `ops` |
+| 2026-07-09 | [WP1: service-runner 道連れ shutdown 廃止ほか (最優先)](crash-fix-wp1-supervisor.md) | `crash` `service-runner` |
+| 2026-07-09 | [WP2: 子プロセス管理の共通化](crash-fix-wp2-child-process.md) | `crash` `exec` `child-process` |
+| 2026-07-09 | [WP3: ログ系の無制限バッファ対策](crash-fix-wp3-log-buffers.md) | `crash` `log` `sse` `oom` |
+| 2026-07-09 | [WP4: DB 衛生](crash-fix-wp4-db-hygiene.md) | `crash` `sqlite` `retention` |
 | 2026-06-30 | [Vite dev server で `*.melpot.dev` がブロックされる](allowedhosts-global-env.md) | `vite` `allowedHosts` `env` `global-env` |
