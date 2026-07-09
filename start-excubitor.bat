@@ -1,17 +1,15 @@
 @echo off
 REM ============================================================
-REM  Launch Excubitor in PLAIN MODE (safe mode).
-REM  PLAIN MODE = Excubitor itself starts, but NO service is
-REM  auto-launched (autostart and saved launch set are skipped).
-REM  Monitoring / scan / Web GUI / control API all run normally;
-REM  start services manually from the Launch / Monitor tab.
+REM  Launch Excubitor in normal mode.
+REM  Normal mode runs Excubitor and auto-starts catalog autostart
+REM  services plus the saved launch set when auto launch is enabled.
 REM  backend  : http://localhost:17332  (EXCUBITOR_PORT default)
 REM  frontend : http://localhost:17333  (/api/* proxies to 17332)
 REM  NOTE: 17331 is taken by Concordia's Vite WebUI; do not use it.
 REM ============================================================
 
-echo Starting Excubitor backend (:17332) in PLAIN MODE...
-start "Excubitor backend :17332 [PLAIN]" /d "%~dp0" cmd /k "npm run dev:safe"
+echo Starting Excubitor backend (:17332)...
+start "Excubitor backend :17332" /d "%~dp0" cmd /k "npm run dev"
 
 echo Starting Excubitor frontend (:17333)...
 start "Excubitor frontend :17333" /d "%~dp0frontend" cmd /k "npm run dev"
@@ -21,5 +19,5 @@ timeout /t 12 /nobreak >nul
 start "" "http://localhost:17333"
 
 echo.
-echo Started in PLAIN MODE. Nothing is auto-launched.
-echo Open the Launch tab to start services manually.
+echo Started Excubitor in normal mode.
+echo Autostart services and the saved launch set will start automatically when configured.
