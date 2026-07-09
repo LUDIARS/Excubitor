@@ -16,11 +16,12 @@ import { listListeners, type PortListener } from '../scanner/ports.js';
 import { managedPortsForService } from '../catalog/ports.js';
 import { resolveInjectEnv } from '../process/inject.js';
 import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
+import { getServiceByCode } from '../process/service-registry.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical' | 'env' | 'start_script' | 'port' | 'disabled';
+  kind: 'cwd' | 'compose_file' | 'infisical' | 'requires_secret' | 'env' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
 }
@@ -93,6 +94,83 @@ async function checkInfisical(svc: Service): Promise<{ check: PreflightCheck; in
   }
 }
 
+/**
+ * `requires_secret` (他サービスの Infisical project から NAMED secret を借りる設定) の preflight。
+ * Aedilis のように自分自身は infisical.inject が無くても requires_secret だけ持ちうるため、
+ * checkInfisical (自身の secret) とは別チェックとして分離し、 fail 理由を混同させない。
+ */
+async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightCheck; injected: number }> {
+  const requests = svc.requires_secret ?? [];
+  if (requests.length === 0) {
+    return { check: { kind: 'requires_secret', status: 'ok', detail: 'cross-service secret 不要' }, injected: 0 };
+  }
+  const id = readIdentity();
+  if (!id) {
+    return {
+      check: {
+        kind: 'requires_secret',
+        status: 'fail',
+        detail: 'Excubitor の machine identity (INFISICAL_*) が無い',
+      },
+      injected: 0,
+    };
+  }
+  let injected = 0;
+  for (const req of requests) {
+    const source = getServiceByCode(req.service);
+    if (!source) {
+      return {
+        check: {
+          kind: 'requires_secret',
+          status: 'fail',
+          detail: `source service "${req.service}" が catalog に無い`,
+        },
+        injected: 0,
+      };
+    }
+    const cfg = resolveServiceInfisical(req.service, source.infisical);
+    if (!cfg) {
+      return {
+        check: {
+          kind: 'requires_secret',
+          status: 'fail',
+          detail: `source service "${req.service}" に infisical 設定が無い`,
+        },
+        injected: 0,
+      };
+    }
+    try {
+      const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
+      const env = toEnvMap(secrets, { include: req.keys });
+      const missing = req.keys.filter((k) => !(k in env));
+      if (missing.length > 0) {
+        return {
+          check: {
+            kind: 'requires_secret',
+            status: 'fail',
+            detail: `"${req.service}" (${cfg.project_id}/${cfg.environment}) に無いキー: ${missing.join(', ')}`,
+          },
+          injected: Object.keys(env).length,
+        };
+      }
+      injected += Object.keys(env).length;
+    } catch (err) {
+      return {
+        check: {
+          kind: 'requires_secret',
+          status: 'fail',
+          detail: `"${req.service}" fetch 失敗: ${(err as Error).message}`,
+        },
+        injected: 0,
+      };
+    }
+  }
+  return {
+    check: { kind: 'requires_secret', status: 'ok', detail: `${requests.length} 件の cross-service secret を解決` },
+    injected,
+  };
+}
+
 function checkPaths(svc: Service): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
   if (svc.runtime === 'node' || svc.runtime === 'dev-process-md') {
@@ -151,7 +229,9 @@ function checkPorts(svc: Service, listeners: PortListener[]): PreflightCheck[] {
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
   const targets = services.filter((s) => want.has(s.code));
-  const needsIdentity = targets.some((s) => resolveServiceInfisical(s.code, s.infisical)?.inject);
+  const needsIdentity = targets.some(
+    (s) => resolveServiceInfisical(s.code, s.infisical)?.inject || (s.requires_secret?.length ?? 0) > 0,
+  );
   const identityPresent = readIdentity() !== null;
 
   // port 占有は OS 呼び出し 1 回で全 listener を取得して使い回す。
@@ -163,13 +243,15 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
     if (svc.disabled) checks.push({ kind: 'disabled', status: 'fail', detail: 'disabled in catalog' });
     const { check: infCheck, injected } = await checkInfisical(svc);
     checks.push(infCheck);
+    const { check: reqSecretCheck, injected: reqSecretInjected } = await checkRequiresSecret(svc);
+    checks.push(reqSecretCheck);
     checks.push(await checkRequiredEnv(svc));
     checks.push(...checkPorts(svc, listeners));
     result.push({
       code: svc.code,
       name: svc.name,
       ready: !checks.some((c) => c.status === 'fail'),
-      injectedKeys: injected,
+      injectedKeys: injected + reqSecretInjected,
       checks,
     });
   }

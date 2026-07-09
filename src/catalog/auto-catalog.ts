@@ -12,7 +12,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { safeExec } from '../shared/exec.js';
 import type { Catalog } from './loader.js';
 import { discoverServices, type DiscoveredRepo } from '../discovery/scan.js';
-import { readAutoServicesRaw, writeAutoServices } from './auto-catalog-file.js';
+import { readAutoCatalogRaw, writeAutoServices } from './auto-catalog-file.js';
 
 const logger = createNamedLogger('excubitor.auto-catalog');
 
@@ -158,11 +158,14 @@ export interface ScanResult {
 export async function runScan(catalog: Catalog): Promise<ScanResult> {
   const discovery = await discoverServices(catalog);
   const existingCodes = new Set(catalog.services.map((s) => s.code));
+  const autoCatalog = readAutoCatalogRaw();
+  const ignoredCodes = new Set(autoCatalog.ignored_codes);
 
   // 既存 auto を code→entry で持ち、 新規/更新をマージする。
   const merged = new Map<string, GeneratedService>();
-  for (const e of readAutoServicesRaw()) {
+  for (const e of autoCatalog.services) {
     const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && ignoredCodes.has(code)) continue;
     if (typeof code === 'string') merged.set(code, e as GeneratedService);
   }
 
@@ -176,6 +179,10 @@ export async function runScan(catalog: Catalog): Promise<ScanResult> {
       skipped.push({ name: cand.name, reason: '実行可能アプリ未検出 (dev/start/compose なし)' });
       continue;
     }
+    if (ignoredCodes.has(entry.code)) {
+      skipped.push({ name: cand.name, reason: `ignored code (${entry.code})` });
+      continue;
+    }
     // 手書きカタログに既にある code は侵さない (auto に無い新規 code のみ採用)。
     if (existingCodes.has(entry.code) && !merged.has(entry.code)) {
       skipped.push({ name: cand.name, reason: `code 衝突 (${entry.code} は既登録)` });
@@ -187,7 +194,7 @@ export async function runScan(catalog: Catalog): Promise<ScanResult> {
     if (entry.port) ports[entry.code] = entry.port;
   }
 
-  writeAutoServices(Array.from(merged.values()));
+  writeAutoServices(Array.from(merged.values()), autoCatalog.ignored_codes);
   logger.info({ created: created.length, ports: Object.keys(ports).length, skipped: skipped.length }, 'scan auto-catalog complete');
   return { created, ports, skipped, scannedRoot: discovery.scannedRoot };
 }

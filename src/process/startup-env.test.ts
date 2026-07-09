@@ -34,6 +34,19 @@ describe('startup env validation', () => {
     expect(requiredEnvKeysForService(svc)).toEqual(['STATIC_KEY', 'SECRET_KEY', 'FILTERED_KEY']);
   });
 
+  it('includes flattened requires_secret keys (cross-service secrets)', () => {
+    const svc = service({
+      requires_secret: [
+        { service: 'cernere', keys: ['AEDILIS_CERNERE_CLIENT_ID', 'AEDILIS_CERNERE_CLIENT_SECRET'] },
+      ],
+    });
+
+    expect(requiredEnvKeysForService(svc)).toEqual([
+      'AEDILIS_CERNERE_CLIENT_ID',
+      'AEDILIS_CERNERE_CLIENT_SECRET',
+    ]);
+  });
+
   it('marks missing or blank values as not ready', () => {
     const svc = service({ required_env: ['PRESENT', 'BLANK', 'MISSING'] });
 

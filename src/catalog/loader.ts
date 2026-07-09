@@ -30,6 +30,16 @@ const InfisicalSchema = z.object({
 });
 
 /**
+ * 他サービスの Infisical project から NAMED secret を借りる設定 (cross-service delegation)。
+ * 例: aedilis が cernere 発行のクライアント資格情報を必要とするケース。
+ * `keys` で列挙したキーのみを取得する (source の secret 全量へは絶対にアクセスさせない)。
+ */
+const RequiresSecretSchema = z.object({
+  service: z.string(),
+  keys: z.array(z.string()).min(1),
+});
+
+/**
  * 自動修正設定、E
  * - enabled: true で error_task 作�E時に Claude Code CLI を�E動起勁E
  * - max_auto_attempts: 1 error_task に対する自勁Etrigger の回数上限 (default 1 で人間判断へ)
@@ -163,6 +173,15 @@ const ServiceSchema = z.object({
    */
   infisical: InfisicalSchema.optional(),
   /**
+   * 他サービスの Infisical project から NAMED secret を借りる (cross-service delegation)。
+   * 各エントリの `service` (catalog code) が持つ `infisical` 設定から `keys` のみを取得し、
+   * このサービスの spawn env に最優先でマージする。 例:
+   *   requires_secret:
+   *     - service: cernere
+   *       keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
+   */
+  requires_secret: z.array(RequiresSecretSchema).optional(),
+  /**
    * このサービスが他サービスへ公開する topology env (URL/port 等)。
    * Excubitor が catalog から導出して全サービスの spawn env に注入する。
    * value テンプレートで `${port}` / `${host}` を展開する。
@@ -269,6 +288,7 @@ const CatalogSchema = z.object({
 
 export type Service = z.infer<typeof ServiceSchema>;
 export type Catalog = z.infer<typeof CatalogSchema>;
+export type RequiresSecret = z.infer<typeof RequiresSecretSchema>;
 
 export type Tier = 'saas' | 'infra' | 'personal' | 'local-app';
 

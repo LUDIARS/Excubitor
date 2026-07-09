@@ -235,41 +235,6 @@ services:
     container_names: [nuntius-worker-1]
     autostart: false
 
-  # ─────────────── Memoria Hub (シェアサーバ / SaaS) ───────────────
-  # server/multi/docker-compose.yml で Postgres + Hub を起動。 host port 5280。
-  # ローカル開発 server (個人ログ専用) は tier: personal (下段)。
-  - code: memoria-hub
-    name: Memoria Hub
-    tier: saas
-    project_code: memoria
-    component: hub
-    port: 5280
-    repo: LUDIARS/Memoria
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Memoria/server/multi/docker-compose.yml
-    services: [hub]
-    container_names: [multi-hub-1]
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:5280/healthz
-      interval_sec: 30
-    provides:
-      MEMORIA_HUB_URL: http://${host}:${port}
-
-  - code: memoria-hub-pg
-    name: Memoria Hub Postgres
-    tier: saas
-    project_code: memoria
-    component: hub-pg
-    monitor_only: true
-    repo: LUDIARS/Memoria
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Memoria/server/multi/docker-compose.yml
-    services: [postgres]
-    container_names: [multi-postgres-1]
-    autostart: false
-
   # ─────────────── dev.ps1 ローカル開発サービス群 (設計書 §6.1) ───────────────
   # dev.bat / dev.ps1 が `cd <repo> && npm run dev` で別ウィンドウ起動している
   # 開発サーバを catalog に全登録する。Excubitor が dev.bat を置き換える布石。
@@ -378,6 +343,11 @@ services:
       interval_sec: 30
     provides:
       AEDILIS_URL: http://${host}:${port}
+    # Cernere (認証/ID) 発行のクライアント資格情報を Excubitor 経由で借りる (cross-service delegation)。
+    # AEDILIS_CERNERE_CLIENT_ID/SECRET が Cernere の Infisical project に無ければ preflight が fail closed する。
+    requires_secret:
+      - service: cernere
+        keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
 
   - code: bibliotheca
     name: Bibliotheca (貸出台帳)
@@ -708,6 +678,7 @@ services:
       CONCORDIA_REDIS_TIMEOUT_MS: "8"
       CONCORDIA_REDIS_READ_TIMEOUT_MS: "8"
       CONCORDIA_REDIS_WRITE_TIMEOUT_MS: "500"
+      CONCORDIA_DISCORD_BOOT_SYNC_DELAY_MS: "60000"
       CONCORDIA_POST_LISTEN_STARTUP_DELAY_MS: "1000"
       CONCORDIA_METRICS_START_DELAY_MS: "30000"
       CONCORDIA_REPO_SCAN_CONCURRENCY: "4"
