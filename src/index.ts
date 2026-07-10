@@ -51,6 +51,9 @@ import { setCatalogServices } from './process/service-registry.js';
 import { buildUpdateRouter } from './update/router.js';
 import { buildDiscoveryRouter } from './discovery/router.js';
 import { buildLogStreamRouter } from './log/sse.js';
+import { buildLogQueryRouter } from './log/query-router.js';
+import { configureLogRingBuffer, recentServiceLogLines } from './log/ring-buffer.js';
+import { startParquetCompactionLoop } from './log/parquet-compactor.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
 import { downtimeSummariesForServices, downtimeSummaryForService, type DowntimeSummary } from './scanner/downtime.js';
@@ -373,6 +376,10 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
+  configureLogRingBuffer({
+    perService: currentCatalog.log_store.ring_lines_per_service,
+    global: currentCatalog.log_store.ring_lines_global,
+  });
   refreshBuildVersion(currentCatalog);
   const sync = await syncCatalog(currentCatalog);
   logger.info(
@@ -399,13 +406,18 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
-  // append-only テーブル (service_instance_logs / liveness_history) の retention 剪定。
+  // 構造化された死活履歴の retention 剪定。
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
+  const parquetHandle = startParquetCompactionLoop(() => currentCatalog!);
   // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
+    configureLogRingBuffer({
+      perService: fresh.log_store.ring_lines_per_service,
+      global: fresh.log_store.ring_lines_global,
+    });
     buildVersionCache = null;
     refreshBuildVersion(fresh);
     setTopologyFromCatalog(fresh);
@@ -499,6 +511,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
 
   // ライブログ SSE (/api/v1/services/:code/logs, /api/v1/logs[/recent])
   app.route('/', buildLogStreamRouter());
+  app.route('/', buildLogQueryRouter());
 
   // ポート衝突検知 (/api/v1/ports)
   app.route('/', buildPortsRouter(() => currentCatalog!));
@@ -637,16 +650,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     const code = c.req.param('code');
     const limitRaw = Number(c.req.query('limit') ?? 200);
     const limit = Math.max(1, Math.min(2000, isFinite(limitRaw) ? limitRaw : 200));
-    const rows = db().all(drizzleSql`
-      SELECT sil.id, sil.ts, sil.level, sil.line
-      FROM service_instance_logs sil
-      JOIN service_instances si ON si.id = sil.service_instance_id
-      JOIN services s ON s.id = si.service_id
-      WHERE s.code = ${code}
-      ORDER BY sil.ts DESC
-      LIMIT ${limit}
-    `);
-    return c.json({ logs: rows });
+    return c.json({ logs: recentServiceLogLines(code, limit) });
   });
 
   // 稼働率の時系列 (liveness_history の ok 1/0)。 起動中サービスのメトリクスグラフ用。
@@ -895,6 +899,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
+      try { parquetHandle.stop(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
     },
   };

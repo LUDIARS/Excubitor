@@ -82,7 +82,7 @@ export function buildMcpServer(baseUrl: string): McpServer {
 
   server.tool(
     'excubitor_recent_logs',
-    '永続化された直近ログを取得する。 code 指定で 1 サービス、 省略で全サービス横断。 codes で複数指定可。',
+    'インメモリリングの直近ログを取得する。 code 指定で 1 サービス、 省略で全サービス横断。 codes で複数指定可。',
     {
       code: z.string().optional().describe('単一サービスに絞る場合のコード'),
       codes: z.array(z.string()).optional().describe('複数サービスに絞る場合のコード配列 (横断)'),
@@ -99,6 +99,31 @@ export function buildMcpServer(baseUrl: string): McpServer {
         if (limit) params.set('limit', String(limit));
         const qs = params.toString();
         return jsonContent(await apiGet(`/api/v1/logs/recent${qs ? `?${qs}` : ''}`));
+      } catch (err) {
+        return errorContent(err);
+      }
+    },
+  );
+
+  server.tool(
+    'excubitor_query_logs',
+    'Vestigium JSONL / Parquet の履歴ログを期間指定で検索する。',
+    {
+      codes: z.array(z.string()).optional().describe('絞り込むサービスコード配列 (省略で全サービス)'),
+      from: z.string().describe('開始時刻 (UTC ISO 8601 または epoch milliseconds)'),
+      to: z.string().describe('終了時刻 (UTC ISO 8601 または epoch milliseconds)'),
+      level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
+      contains: z.string().max(1000).optional().describe('メッセージの部分一致'),
+      limit: z.number().int().positive().max(5000).optional().describe('最大件数 (既定 300)'),
+    },
+    async ({ codes, from, to, level, contains, limit }) => {
+      try {
+        const params = new URLSearchParams({ from, to });
+        if (codes && codes.length > 0) params.set('codes', codes.join(','));
+        if (level) params.set('level', level);
+        if (contains) params.set('contains', contains);
+        if (limit) params.set('limit', String(limit));
+        return jsonContent(await apiGet(`/api/v1/logs/query?${params.toString()}`));
       } catch (err) {
         return errorContent(err);
       }
