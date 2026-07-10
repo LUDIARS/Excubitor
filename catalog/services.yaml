@@ -666,7 +666,13 @@ services:
       CONCORDIA_LOG_LEVEL: info
       CONCORDIA_HTTP_CACHE_ENABLED: "1"
       CONCORDIA_HTTP_CACHE_REDIS_READ: "0"
-      CONCORDIA_HTTP_LOG_ALL: "1"
+      # transcript-frame 等の高頻度 POST が 1 リクエスト 1 info 行で stdout 86MB/3日 に
+      # 肥大し、 それを Excubitor が tail → DB 取り込みする増幅ループになっていたため停止。
+      # 低速リクエストは CONCORDIA_HTTP_PERF_LOG_MS / CONCORDIA_HTTP_SLOW_MS で引き続き出る。
+      CONCORDIA_HTTP_LOG_ALL: "0"
+      # discord イベントキューの per-task ログ (enqueued/start/done) を止める
+      # (verbose-logging-bootstrap の撤収)。 失敗 / 溢れ / depth 節目は引き続き出る。
+      CONCORDIA_QUEUE_VERBOSE: "0"
       CONCORDIA_HTTP_LOG_QUERY: "1"
       CONCORDIA_HTTP_PERF_LOG_MS: "20"
       CONCORDIA_HTTP_SLOW_MS: "60"
@@ -713,7 +719,9 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia
-    command: node --import tsx --env-file-if-exists=.env src/cost-worker.ts
+    # tsx ランタイム常駐 (≈100MB) を避け、 build 済み dist を素の node で動かす。
+    # dist は concordia backend と同じ build (`npm run build`) が生成する。
+    command: node --env-file-if-exists=.env dist/cost-worker.js
     autostart: true
     restart_policy: on-failure
     max_restart: 5
@@ -733,8 +741,11 @@ services:
     repo: LUDIARS/Concordia
     runtime: node
     cwd: ${ARS_ROOT}/Concordia/web
-    command: npm run dev
-    allow_hot_reload: true
+    # vite dev サーバ常駐 (HMR watcher, 実測 +27MB/h の leak suspect) をやめ、
+    # build 済み web/dist を vite preview (静的配信のみ) で出す。
+    # dist は concordia backend の build (`npm run build`) が生成・更新する。
+    command: npm run preview -- --host --port 10101 --strictPort
+    allow_hot_reload: false
     autostart: false
     health:
       type: tcp
@@ -860,3 +871,12 @@ memory_monitor:
     distros: []           # 空 = `wsl -l -q` で自動検出 (docker-desktop 系は除外)
     leak_window_min: 120
     leak_threshold_mb_per_hr: 200
+
+# append-only テーブルの保持期間 (db/retention.ts が周期剪定)。
+# 無制限に成長して DB 肥大 → backend RSS 増の主因だったため導入 (2026-07-10 実測 477MB)。
+retention:
+  enabled: true
+  logs_hours: 72          # service_instance_logs (プロセスログ)
+  liveness_hours: 168     # liveness_history (死活履歴)
+  interval_min: 60        # 剪定周期
+  batch_rows: 50000       # 1 バッチの削除行数上限 (長時間ロック回避)

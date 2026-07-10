@@ -1,13 +1,14 @@
 /**
  * `<arsRoot>/.mcp.json` の excubitor エントリ整合。
  *
- * .mcp.json は Claude Code がワークスペース直下で読む MCP サーバ定義。 その中の
- * `excubitor` サーバは **Excubitor 自身の MCP** (`<root>/Excubitor/src/mcp/server.ts`)
- * を指すため、 パスが E:/Document/Ars 固定だと別ドライブのマシンで MCP が起動できない。
+ * .mcp.json は Claude Code がワークスペース直下で読む MCP サーバ定義。 excubitor は
+ * backend 直載せの Streamable HTTP (`http://127.0.0.1:<port>/mcp`) を指す。
+ * 旧形式 (stdio: セッション毎に tsx + node プロセスが立ち ≈100MB × セッション数) からの
+ * 移行も boot 時のこの整合で自動的に行われる。
  *
- * Excubitor が自分の MCP サーバを指すエントリの整合に責任を持ち、 boot 時に
- * arsRoot() からパスを導出して .mcp.json に反映する (他の MCP サーバ定義は保持)。
- * Concordia 等の他サービスに自分のパスを書かせない (= 結合を作らない)。
+ * Excubitor が自分の MCP エントリの整合に責任を持ち、 boot 時に自分の port から
+ * URL を導出して .mcp.json に反映する (他の MCP サーバ定義は保持)。
+ * Concordia 等の他サービスに自分の接続先を書かせない (= 結合を作らない)。
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,11 +17,12 @@ import { createNamedLogger } from "../shared/logger.js";
 
 const logger = createNamedLogger("excubitor.mcp-json");
 
-const DEFAULT_PORT_ENV = "${EXCUBITOR_PORT:-17332}";
-
+/** stdio (command/args) と http (type/url) の両形式を受ける。 */
 interface McpServerEntry {
-  command: string;
-  args: string[];
+  type?: string;
+  url?: string;
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
 }
 
@@ -29,17 +31,11 @@ interface McpJson {
   [k: string]: unknown;
 }
 
-/** arsRoot から excubitor MCP サーバの起動定義を組み立てる (forward-slash 絶対パス)。 */
-export function excubitorMcpEntry(root: string, existingEnv?: Record<string, string>): McpServerEntry {
-  // root が OS ネイティブ表記 (backslash) でも混在しないよう forward-slash に正規化する。
-  const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
+/** backend port から excubitor MCP サーバの接続定義 (Streamable HTTP) を組み立てる。 */
+export function excubitorMcpEntry(port: number): McpServerEntry {
   return {
-    command: "node",
-    args: [
-      `${base}/Excubitor/node_modules/tsx/dist/cli.mjs`,
-      `${base}/Excubitor/src/mcp/server.ts`,
-    ],
-    env: existingEnv ?? { EXCUBITOR_PORT: DEFAULT_PORT_ENV },
+    type: "http",
+    url: `http://127.0.0.1:${port}/mcp`,
   };
 }
 
@@ -50,11 +46,11 @@ export interface ReconcileResult {
 }
 
 /**
- * `<root>/.mcp.json` の `mcpServers.excubitor` を arsRoot 由来のパスに整合させる。
- * 他サーバ定義は保持。 既存内容と一致していれば書き込まない (冪等)。
+ * `<root>/.mcp.json` の `mcpServers.excubitor` を自分の port 由来の HTTP エントリに
+ * 整合させる。 他サーバ定義は保持。 既存内容と一致していれば書き込まない (冪等)。
  * ファイルが壊れている場合は握りつぶさず warn し、 破壊を避けてスキップする。
  */
-export function reconcileMcpJson(root: string): ReconcileResult {
+export function reconcileMcpJson(root: string, port: number): ReconcileResult {
   const path = join(root, ".mcp.json");
 
   let current: McpJson = {};
@@ -68,7 +64,7 @@ export function reconcileMcpJson(root: string): ReconcileResult {
   }
 
   const servers = current.mcpServers ?? {};
-  const desired = excubitorMcpEntry(root, servers.excubitor?.env);
+  const desired = excubitorMcpEntry(port);
 
   if (JSON.stringify(servers.excubitor) === JSON.stringify(desired)) {
     return { path, changed: false, reason: "up_to_date" };
@@ -76,6 +72,6 @@ export function reconcileMcpJson(root: string): ReconcileResult {
 
   const next: McpJson = { ...current, mcpServers: { ...servers, excubitor: desired } };
   writeFileSync(path, JSON.stringify(next, null, 2) + "\n", "utf8");
-  logger.info({ path, args: desired.args }, ".mcp.json excubitor エントリを arsRoot に整合");
+  logger.info({ path, url: desired.url }, ".mcp.json excubitor エントリを Streamable HTTP に整合");
   return { path, changed: true, reason: existsSync(path) ? "updated" : "created" };
 }

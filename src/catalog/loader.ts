@@ -277,6 +277,22 @@ const GlobalSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 });
 
+/**
+ * append-only テーブル (service_instance_logs / liveness_history) の保持設定
+ * (catalog top-level、 省略時は既定値)。 剪定本体は db/retention.ts。
+ */
+const RetentionSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** service_instance_logs (プロセスログ) の保持時間。 */
+  logs_hours: z.number().positive().default(72),
+  /** liveness_history (死活履歴) の保持時間。 */
+  liveness_hours: z.number().positive().default(168),
+  /** 剪定周期 (分)。 */
+  interval_min: z.number().positive().default(60),
+  /** 1 バッチの削除行数上限 (書き込みロックの長期保持回避)。 */
+  batch_rows: z.number().int().positive().default(50_000),
+});
+
 const CatalogSchema = z.object({
   project_versions: z.record(ProjectVersionSchema).default({}),
   services: z.array(ServiceSchema),
@@ -284,6 +300,8 @@ const CatalogSchema = z.object({
   global: GlobalSchema.optional(),
   /** メモリ監視のグローバル設定 (interval / 保持期間 / WSL)。 */
   memory_monitor: MemoryGlobalSchema.default({}),
+  /** append-only テーブルの保持期間 (ログ / 死活履歴)。 */
+  retention: RetentionSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;
