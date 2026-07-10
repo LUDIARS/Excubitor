@@ -13,6 +13,16 @@ export function openDb(path: string): Database.Database {
   return db;
 }
 
+/**
+ * Open the existing database without taking migration/write ownership.
+ * Worker threads use this so expensive read models cannot block the HTTP event loop.
+ */
+export function openReadOnlyDb(path: string): Database.Database {
+  if (db) return db;
+  db = new Database(path, { readonly: true, fileMustExist: true });
+  return db;
+}
+
 export function currentDb(): Database.Database {
   if (!db) throw new Error('Excubitor DB is not open. Call openDb() first.');
   return db;
