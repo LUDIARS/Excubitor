@@ -14,6 +14,7 @@
  */
 
 import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { createNamedLogger } from './shared/logger.js';
@@ -57,8 +58,10 @@ import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
 import { buildFederationRouter } from './federation/router.js';
+import { startRetentionLoop } from './db/retention.js';
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
+import { buildMcpHttpRouter } from './mcp/http.js';
 import { runEmergencyAction } from './ops/emergency.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
@@ -68,6 +71,12 @@ import type { StartupNpmIssue } from './startup/npm-install.js';
 const logger = createNamedLogger('concordia.observability');
 const httpLogger = createNamedLogger('excubitor.http');
 const observabilityStartedAt = new Date().toISOString();
+
+/** backend 自身の listen port (server.ts と同じ導出)。 MCP の self-URL 等に使う。 */
+function backendPort(): number {
+  const n = Number(process.env.EXCUBITOR_PORT);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 17332;
+}
 
 const SLOW_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_SLOW_REQUEST_MS', 5_000);
 const HUNG_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_HUNG_REQUEST_MS', 60_000);
@@ -352,11 +361,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   getOrCreateAgentToken();
   logger.info({ tokenPath: agentTokenPath() }, 'secret-agent token ready');
 
-  // .mcp.json (ワークスペース直下) の excubitor エントリを arsRoot 由来パスに整合する。
-  // 自分の MCP サーバ (Excubitor/src/mcp/server.ts) を指すので Excubitor が own。
-  // E:/Document/Ars 固定だと別ドライブのマシンで MCP が起動できないのを解消。
+  // .mcp.json (ワークスペース直下) の excubitor エントリを backend 直載せの
+  // Streamable HTTP (`/mcp`) に整合する。 旧 stdio 形式 (セッション毎プロセス) からの
+  // 移行もここで自動的に行われる。 自分の MCP なので Excubitor が own。
   try {
-    const r = reconcileMcpJson(arsRoot());
+    const r = reconcileMcpJson(arsRoot(), backendPort());
     if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
   } catch (err) {
     logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
@@ -390,6 +399,8 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
+  // append-only テーブル (service_instance_logs / liveness_history) の retention 剪定。
+  const retentionHandle = startRetentionLoop(() => currentCatalog!);
   // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
@@ -459,6 +470,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       started_at: observabilityStartedAt,
     }),
   );
+
+  // MCP (Streamable HTTP, stateless)。 セッション毎 stdio プロセス (≈100MB×N) の置き換え。
+  app.route('/', buildMcpHttpRouter(`http://127.0.0.1:${backendPort()}`));
 
   app.route('/', buildReviewsRouter());
 
@@ -866,6 +880,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     return c.json(result);
   });
 
+  // ─── built Web UI (frontend/dist) 配信 ─────────────────────
+  // vite dev サーバ常駐 (~130MB) を不要にする。 API ルートに一致しなかった GET だけが
+  // ここに落ちる。 dist 未ビルドなら従来どおり 404 (API には影響しない)。
+  app.use('*', serveStatic({ root: './frontend/dist' }));
+
   return {
     router: app,
     shutdown: async () => {
@@ -875,6 +894,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
+      try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
     },
   };
