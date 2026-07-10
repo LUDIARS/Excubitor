@@ -6,15 +6,14 @@
  * Vestigium file-tail のいずれの経路で来た行もここに乗る。
  *
  * 注意: これはライブストリーム。 Excubitor 再起動中など接続が無い間の行は流れない
- * (= ストリーム欠落は許容)。 永続化された過去ログは /logs/recent で取得する。
+ * (= ストリーム欠落は許容)。 接続直前の行は /logs/recent のリングから取得する。
  */
 
 import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { sql } from 'drizzle-orm';
-import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
+import { recentLogLines } from './ring-buffer.js';
 import { sharedLogsRoot } from './logs-root.js';
 import { listVestigiumServices, recent } from './vestigium-reader.js';
 import { acquireRedisLock, readRedisJson, redisCacheKey, writeRedisJson } from '../shared/redis-cache.js';
@@ -153,7 +152,6 @@ export function buildLogStreamRouter(): Hono {
   });
 
   // 全サービス横断ストリーム (req4)。 `?codes=a,b` で複数サービスに絞れる。
-  // オンメモリには貯めず、 来た行をそのまま流す (永続化された過去は /logs/recent)。
   app.get('/api/v1/logs', (c) => {
     const codes = parseCodes(c.req.query('codes'));
     return streamFiltered(c, codes ? (line) => codes.has(line.service_code) : undefined, {
@@ -161,23 +159,12 @@ export function buildLogStreamRouter(): Hono {
     });
   });
 
-  // 全サービス横断の直近ログ (永続化済み)。 `?codes=` で絞り、 `?level=` で最低レベル絞り込み。
+  // 全サービス横断の直近ログ。 DB を介さず共有リングから返す。
   app.get('/api/v1/logs/recent', (c) => {
     const codes = parseCodes(c.req.query('codes'));
     const limitRaw = Number(c.req.query('limit') ?? 300);
     const limit = Math.max(1, Math.min(5000, isFinite(limitRaw) ? limitRaw : 300));
-    const base = sql`
-      SELECT s.code AS code, sil.id, sil.ts, sil.level, sil.line
-      FROM service_instance_logs sil
-      JOIN service_instances si ON si.id = sil.service_instance_id
-      JOIN services s ON s.id = si.service_id
-    `;
-    const rows = codes
-      ? db().all(sql`${base}
-          WHERE s.code IN (${sql.join([...codes].map((x) => sql`${x}`), sql`, `)})
-          ORDER BY sil.ts DESC LIMIT ${limit}`)
-      : db().all(sql`${base} ORDER BY sil.ts DESC LIMIT ${limit}`);
-    return c.json({ logs: rows });
+    return c.json({ logs: recentLogLines({ codes, limit }) });
   });
 
   // LLM 使用ログ専用 — Vestigium 'llm' channel を全サービス横断で読む。

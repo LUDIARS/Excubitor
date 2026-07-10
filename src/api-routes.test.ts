@@ -30,6 +30,19 @@ type AnyCatalog = {
       min_samples: number;
     };
   };
+  retention: {
+    enabled: boolean;
+    logs_hours: number;
+    liveness_hours: number;
+    parquet_days: number;
+    interval_min: number;
+    batch_rows: number;
+  };
+  log_store: {
+    ring_lines_per_service: number;
+    ring_lines_global: number;
+    compact_hour_utc: number;
+  };
 };
 
 const mocks = vi.hoisted(() => ({
@@ -309,6 +322,8 @@ function makeCatalog(): AnyCatalog {
       wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
       cpu_alert: { enabled: true, threshold_pct: 85, window_min: 15, sustained_ratio: 0.8, min_samples: 8 },
     },
+    retention: { enabled: true, logs_hours: 72, liveness_hours: 168, parquet_days: 90, interval_min: 60, batch_rows: 50_000 },
+    log_store: { ring_lines_per_service: 2_000, ring_lines_global: 20_000, compact_hour_utc: 18 },
     services: [
       {
         code: 'svc-a',
@@ -391,10 +406,6 @@ function seedDb(): void {
     VALUES
       ('inst-a', 'svc-a-id', 'running', 4242, ${now}, 'main', 'abcdef', 0, '1.2.3', 1234),
       ('inst-app', 'app-a-id', 'stopped', NULL, ${now - 1000}, NULL, NULL, NULL, NULL, NULL)
-  `);
-  db().run(sql`
-    INSERT INTO service_instance_logs (service_instance_id, ts, level, line)
-    VALUES ('inst-a', ${now}, 'info', 'service ready')
   `);
   db().run(sql`
     INSERT INTO liveness_history (service_instance_id, probed_at, ok, latency_ms)
@@ -504,6 +515,11 @@ describe('Excubitor HTTP APIs', () => {
     { name: 'serves memory summary', path: '/api/v1/memory/summary', key: 'services' },
     { name: 'serves memory series', path: '/api/v1/memory/series?kind=service&key=svc-a', key: 'series' },
     { name: 'serves cross-service recent logs', path: '/api/v1/logs/recent?codes=svc-a', key: 'logs' },
+    {
+      name: 'queries historical logs',
+      path: '/api/v1/logs/query?codes=svc-a&from=2026-01-01T00%3A00%3A00Z&to=2026-01-02T00%3A00%3A00Z',
+      key: 'logs',
+    },
     { name: 'serves LLM logs', path: '/api/v1/logs/llm?codes=svc-a', key: 'logs' },
     { name: 'serves releases list', path: '/api/v1/releases', key: 'releases' },
     { name: 'serves release detail', path: '/api/v1/releases/demo', key: 'manifest' },
