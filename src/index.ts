@@ -21,6 +21,7 @@ import { createNamedLogger } from './shared/logger.js';
 import { z } from 'zod';
 
 import { db } from './db/client.js';
+import { currentDb } from './db/index.js';
 import { loadCatalog, type Catalog, type Service } from './catalog/loader.js';
 import { syncCatalog } from './catalog/sync.js';
 import { watchCatalog } from './catalog/watcher.js';
@@ -56,7 +57,12 @@ import { configureLogRingBuffer, recentServiceLogLines } from './log/ring-buffer
 import { startParquetCompactionLoop } from './log/parquet-compactor.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
-import { downtimeSummariesForServices, downtimeSummaryForService, type DowntimeSummary } from './scanner/downtime.js';
+import type { DowntimeSummary } from './scanner/downtime.js';
+import { DowntimeWorkerClient } from './scanner/downtime-worker-client.js';
+import {
+  readDowntimeSummariesInProcess,
+  type DowntimeSummaryReader,
+} from './scanner/downtime-reader.js';
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
@@ -100,6 +106,11 @@ const EmergencyBodySchema = z.object({
 interface ObservabilityHandle {
   router: Hono;
   shutdown: () => Promise<void>;
+}
+
+export interface BootObservabilityOptions {
+  /** Test/embedded override. File-backed production DBs use a worker by default. */
+  readDowntimeSummaries?: DowntimeSummaryReader;
 }
 
 let currentCatalog: Catalog | null = null;
@@ -350,7 +361,7 @@ export function recordStartupNpmIssues(issues: StartupNpmIssue[]): void {
   }
 }
 
-export async function bootObservability(): Promise<ObservabilityHandle> {
+export async function bootObservability(options: BootObservabilityOptions = {}): Promise<ObservabilityHandle> {
   // 設定ファイルに Infisical identity があれば process.env に注入 (relay の前提)。
   // 無ければ未設定のまま → UI が入力を促す。
   if (applyInfisicalToEnv()) {
@@ -409,6 +420,13 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // 構造化された死活履歴の retention 剪定。
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
   const parquetHandle = startParquetCompactionLoop(() => currentCatalog!);
+  const databasePath = currentDb().name;
+  const downtimeWorker = options.readDowntimeSummaries || databasePath === ':memory:'
+    ? null
+    : new DowntimeWorkerClient(databasePath);
+  const readDowntimeSummaries = options.readDowntimeSummaries
+    ?? downtimeWorker?.read
+    ?? readDowntimeSummariesInProcess;
   // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
@@ -492,7 +510,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   app.route('/', buildHubRouter());
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)
-  app.route('/', buildLaunchRouter(() => currentCatalog!, (reason) => reloadCatalog(reason)));
+  app.route('/', buildLaunchRouter(
+    () => currentCatalog!,
+    readDowntimeSummaries,
+    (reason) => reloadCatalog(reason),
+  ));
 
   // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
   app.route('/', buildConfigRouter({ onDomainRootChanged: () => reloadCatalog('domain root change') }));
@@ -535,7 +557,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
   app.get('/api/v1/topology', (c) => c.json({ env: getTopologyEnv() }));
 
-  app.get('/api/v1/services', (c) => {
+  app.get('/api/v1/services', async (c) => {
     const rows = db().all(drizzleSql`
       SELECT
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
@@ -557,13 +579,13 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       ORDER BY s.code ASC
     `);
     const records = rows as unknown as Array<Record<string, unknown>>;
-    const downtimeByCode = downtimeSummariesForServices(records.map((r) => String(r.code ?? '')), 24 * 60);
+    const downtimeByCode = await readDowntimeSummaries(records.map((r) => String(r.code ?? '')), 24 * 60);
     return c.json({
       services: records.map((r) => serviceRowView(r, downtimeByCode.get(String(r.code ?? '')) ?? null)),
     });
   });
 
-  app.get('/api/v1/services/:code', (c) => {
+  app.get('/api/v1/services/:code', async (c) => {
     const code = c.req.param('code');
     const rows = db().all(drizzleSql`
       SELECT
@@ -587,8 +609,9 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     `) as Array<Record<string, unknown>>;
     if (rows.length === 0) return c.json({ error: 'not_found' }, 404);
     const r = rows[0]!;
+    const downtime = (await readDowntimeSummaries([code], 24 * 60)).get(code) ?? null;
     return c.json({
-      ...serviceRowView(r, downtimeSummaryForService(code, 24 * 60)),
+      ...serviceRowView(r, downtime),
       id: r.id,
       instance_id: r.instance_id ?? null,
     });
@@ -654,7 +677,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
   });
 
   // 稼働率の時系列 (liveness_history の ok 1/0)。 起動中サービスのメトリクスグラフ用。
-  app.get('/api/v1/services/:code/liveness', (c) => {
+  app.get('/api/v1/services/:code/liveness', async (c) => {
     const code = c.req.param('code');
     const windowMin = Math.max(1, Math.min(1440, Number(c.req.query('window_min') ?? 120)));
     const since = Date.now() - windowMin * 60_000;
@@ -669,7 +692,7 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
     `) as Array<{ t: number; ok: number }>;
     const series = rows.map((r) => ({ t: Number(r.t), ok: Number(r.ok) }));
     const sampleRatio = series.length > 0 ? series.reduce((a, s) => a + s.ok, 0) / series.length : null;
-    const downtime = downtimeSummaryForService(code, windowMin);
+    const downtime = (await readDowntimeSummaries([code], windowMin)).get(code) ?? null;
     return c.json({
       code,
       window_min: windowMin,
@@ -901,6 +924,11 @@ export async function bootObservability(): Promise<ObservabilityHandle> {
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { parquetHandle.stop(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
+      try {
+        await downtimeWorker?.close();
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'downtime worker close failed');
+      }
     },
   };
 }
