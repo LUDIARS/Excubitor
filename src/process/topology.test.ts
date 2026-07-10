@@ -29,7 +29,8 @@ function cat(services: Service[]): Catalog {
       wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
       cpu_alert: { enabled: true, threshold_pct: 85, window_min: 15, sustained_ratio: 0.8, min_samples: 8 },
     },
-    retention: { enabled: true, logs_hours: 72, liveness_hours: 168, interval_min: 60, batch_rows: 50_000 },
+    retention: { enabled: true, logs_hours: 72, liveness_hours: 168, parquet_days: 90, interval_min: 60, batch_rows: 50_000 },
+    log_store: { ring_lines_per_service: 2_000, ring_lines_global: 20_000, compact_hour_utc: 18 },
   };
 }
 

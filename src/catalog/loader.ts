@@ -277,20 +277,26 @@ const GlobalSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 });
 
-/**
- * append-only テーブル (service_instance_logs / liveness_history) の保持設定
- * (catalog top-level、 省略時は既定値)。 剪定本体は db/retention.ts。
- */
+/** 構造化履歴と Parquet ログの保持設定。 */
 const RetentionSchema = z.object({
   enabled: z.boolean().default(true),
-  /** service_instance_logs (プロセスログ) の保持時間。 */
+  /** Phase 4 の設定掃除まで受理する旧ログ保持時間。 Phase 1 以降は使用しない。 */
   logs_hours: z.number().positive().default(72),
   /** liveness_history (死活履歴) の保持時間。 */
   liveness_hours: z.number().positive().default(168),
+  /** 圧縮済み Parquet ログの保持日数。 */
+  parquet_days: z.number().int().positive().default(90),
   /** 剪定周期 (分)。 */
   interval_min: z.number().positive().default(60),
   /** 1 バッチの削除行数上限 (書き込みロックの長期保持回避)。 */
   batch_rows: z.number().int().positive().default(50_000),
+});
+
+/** ライブリングと日次圧縮の設定。 */
+const LogStoreSchema = z.object({
+  ring_lines_per_service: z.number().int().positive().default(2_000),
+  ring_lines_global: z.number().int().positive().default(20_000),
+  compact_hour_utc: z.number().int().min(0).max(23).default(18),
 });
 
 const CatalogSchema = z.object({
@@ -300,8 +306,10 @@ const CatalogSchema = z.object({
   global: GlobalSchema.optional(),
   /** メモリ監視のグローバル設定 (interval / 保持期間 / WSL)。 */
   memory_monitor: MemoryGlobalSchema.default({}),
-  /** append-only テーブルの保持期間 (ログ / 死活履歴)。 */
+  /** 構造化履歴と Parquet ログの保持期間。 */
   retention: RetentionSchema.default({}),
+  /** ログのライブ保持と日次圧縮。 */
+  log_store: LogStoreSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;

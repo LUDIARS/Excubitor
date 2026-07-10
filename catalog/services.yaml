@@ -872,11 +872,16 @@ memory_monitor:
     leak_window_min: 120
     leak_threshold_mb_per_hr: 200
 
-# append-only テーブルの保持期間 (db/retention.ts が周期剪定)。
-# 無制限に成長して DB 肥大 → backend RSS 増の主因だったため導入 (2026-07-10 実測 477MB)。
+# 構造化履歴と圧縮済みログの保持期間。
 retention:
   enabled: true
-  logs_hours: 72          # service_instance_logs (プロセスログ)
+  logs_hours: 72          # Phase 4 で削除予定 (Phase 1 以降は no-op)
   liveness_hours: 168     # liveness_history (死活履歴)
+  parquet_days: 90        # Vestigium JSONL から圧縮した Parquet
   interval_min: 60        # 剪定周期
   batch_rows: 50000       # 1 バッチの削除行数上限 (長時間ロック回避)
+
+log_store:
+  ring_lines_per_service: 2000
+  ring_lines_global: 20000
+  compact_hour_utc: 18
