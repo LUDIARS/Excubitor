@@ -21,6 +21,7 @@ import { runPreflight } from './preflight.js';
 import { startSelection, stopSelection } from './orchestrator.js';
 import { expandWithDependencies } from './order.js';
 import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
+import type { DowntimeSummaryReader } from '../scanner/downtime-reader.js';
 import {
   getServiceMap,
   setServiceMap,
@@ -29,7 +30,6 @@ import {
 } from '../secrets/config-store.js';
 import { resolveInjectEnv } from '../process/inject.js';
 import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
-import { downtimeSummariesForServices } from '../scanner/downtime.js';
 
 const SaveProfileSchema = z.object({
   selection: z.array(z.string()),
@@ -92,7 +92,11 @@ function stateByCode(): Map<string, string> {
   return map;
 }
 
-export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: (reason: string) => Promise<number>): Hono {
+export function buildLaunchRouter(
+  getCatalog: () => Catalog,
+  readDowntimeSummaries: DowntimeSummaryReader,
+  onCatalogChanged?: (reason: string) => Promise<number>,
+): Hono {
   const app = new Hono();
 
   // 起動セット選択画面の plan (profile + project 別サービス)。
@@ -226,14 +230,17 @@ export function buildLaunchRouter(getCatalog: () => Catalog, onCatalogChanged?: 
     });
   });
 
-  app.get('/api/v1/projects', (c) => {
+  app.get('/api/v1/projects', async (c) => {
     const profile = getLaunchProfile();
     const catalog = getCatalog();
     const projects = buildPlanProjects(
       catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
     );
     const detail = instanceDetailByCode();
-    const downtimeByCode = downtimeSummariesForServices(projects.flatMap((p) => p.services.map((s) => s.code)), 24 * 60);
+    const downtimeByCode = await readDowntimeSummaries(
+      projects.flatMap((p) => p.services.map((s) => s.code)),
+      24 * 60,
+    );
     const view = projects.map((p) => ({
         project_code: p.project_code,
         project_name: p.project_code,

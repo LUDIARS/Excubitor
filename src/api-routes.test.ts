@@ -5,6 +5,8 @@ import { sql } from 'drizzle-orm';
 import type { Hono } from 'hono';
 import { openDb, closeDb } from './db/index.js';
 import { db, resetDbClientForTests } from './db/client.js';
+import type { BootObservabilityOptions } from './index.js';
+import type { DowntimeSummary } from './scanner/downtime.js';
 
 type AnyCatalog = {
   project_versions: Record<string, { major: number; minor: number }>;
@@ -435,9 +437,9 @@ function seedDb(): void {
   `);
 }
 
-async function bootRouter(): Promise<Hono> {
+async function bootRouter(options?: BootObservabilityOptions): Promise<Hono> {
   const mod = await import('./index.js');
-  const booted = await mod.bootObservability();
+  const booted = await mod.bootObservability(options);
   return booted.router;
 }
 
@@ -549,6 +551,27 @@ describe('Excubitor HTTP APIs', () => {
     }>(router, 'GET', '/api/v1/projects');
     const svc = projects.data.projects.flatMap((p) => p.components).find((c) => c.code === 'svc-a');
     expect(svc?.downtime_24h).toMatchObject({ downtime_ms: 0 });
+  });
+
+  it('keeps health responsive while the project downtime read is pending', async () => {
+    let finishRead: ((value: Map<string, DowntimeSummary>) => void) | undefined;
+    const readDowntimeSummaries = vi.fn(() => new Promise<Map<string, DowntimeSummary>>((resolve) => {
+      finishRead = resolve;
+    }));
+    const isolatedRouter = await bootRouter({ readDowntimeSummaries });
+
+    let projectsSettled = false;
+    const projectsRequest = Promise.resolve(isolatedRouter.request('/api/v1/projects')).finally(() => {
+      projectsSettled = true;
+    });
+    await vi.waitFor(() => expect(readDowntimeSummaries).toHaveBeenCalledOnce());
+
+    const health = await isolatedRouter.request('/health');
+    expect(health.status).toBe(200);
+    expect(projectsSettled).toBe(false);
+
+    finishRead?.(new Map<string, DowntimeSummary>());
+    expect((await projectsRequest).status).toBe(200);
   });
 
   it('caches expensive discovery reads briefly', async () => {
