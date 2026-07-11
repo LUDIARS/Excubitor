@@ -108,6 +108,10 @@ const ServiceSchema = z.object({
    * 侁E cernere-backend / cernere-frontend は project_code: "cernere"、E
    */
   project_code: z.string().optional(),
+  /** develop clone から生成された派生サービス。 */
+  develop_derived: z.boolean().default(false),
+  /** develop 派生元の catalog code。ポート共有ペアの識別にも使う。 */
+  develop_from: z.string().optional(),
   /** "backend" | "frontend" | "db" | "worker" などの役割タグ、E*/
   component: z.string().optional(),
   /** 主要Elistening port (host から見える�E)、E*/
