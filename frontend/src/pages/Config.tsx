@@ -6,9 +6,13 @@ import {
   testIdentity,
   saveServices,
   saveDomainRoot,
+  fetchNotificationConfig,
+  saveDiscordNotificationConfig,
+  testDiscordNotification,
   type CatalogService,
   type ConfigInfisical,
   type ServiceInfisical,
+  type DiscordNotificationStatus,
 } from '../lib/api';
 
 interface SvcRow extends ServiceInfisical {
@@ -47,19 +51,33 @@ export default function Config() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [domainRootDraft, setDomainRootDraft] = useState('');
+  const [discord, setDiscord] = useState<DiscordNotificationStatus | null>(null);
+  const [discordWebhook, setDiscordWebhook] = useState('');
+  const [discordEnabled, setDiscordEnabled] = useState(false);
+  const [discordThreshold, setDiscordThreshold] = useState(60);
+  const [discordRecovery, setDiscordRecovery] = useState(true);
+  const [discordTest, setDiscordTest] = useState<{ ok: boolean; message: string } | null>(null);
 
   // services editor
   const [rows, setRows] = useState<SvcRow[]>([]);
   const [catalog, setCatalog] = useState<CatalogService[]>([]);
 
   const load = async () => {
-    const [c, svcs] = await Promise.all([fetchConfig(), fetchCatalogServices().catch(() => [])]);
+    const [c, svcs, notification] = await Promise.all([
+      fetchConfig(),
+      fetchCatalogServices().catch(() => []),
+      fetchNotificationConfig(),
+    ]);
     setCfg(c);
     setCatalog(svcs);
     if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
     if (c.identity.environment) setEnvironment(c.identity.environment);
     setDomainRootDraft(c.domain_root.value);
     setRows(toRows(c.services));
+    setDiscord(notification);
+    setDiscordEnabled(notification.enabled);
+    setDiscordThreshold(notification.downtime_threshold_sec);
+    setDiscordRecovery(notification.notify_recovery);
   };
 
   useEffect(() => {
@@ -110,6 +128,37 @@ export default function Config() {
     }
   };
 
+  const submitDiscord = async () => {
+    setBusy('discord');
+    setDiscordTest(null);
+    try {
+      await saveDiscordNotificationConfig({
+        webhook_url: discordWebhook.trim() || undefined,
+        enabled: discordEnabled,
+        downtime_threshold_sec: discordThreshold,
+        notify_recovery: discordRecovery,
+      });
+      setDiscordWebhook('');
+      await load();
+    } catch (err) {
+      setDiscordTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runDiscordTest = async () => {
+    setBusy('discord-test');
+    setDiscordTest(null);
+    try {
+      setDiscordTest(await testDiscordNotification());
+    } catch (err) {
+      setDiscordTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const updateRow = (i: number, patch: Partial<SvcRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRow = () =>
@@ -151,6 +200,70 @@ export default function Config() {
               {busy === 'domain-root' ? 'Saving...' : 'Save domain root'}
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>Discord downtime notifications</h2>
+        <p className="muted">
+          Sends one alert after a service has failed health checks continuously for at least one minute,
+          and optionally sends a recovery message. Webhook URLs are encrypted at rest and are never returned by the API.
+        </p>
+        <p className="muted small">
+          Current: <strong className={discord?.configured ? 'ok' : 'fail'}>
+            {discord?.configured ? 'configured' : 'not configured'}
+          </strong> ({discord?.source ?? 'unset'}). Saved at <code>{discord?.storePath ?? id.storePath}</code>.
+        </p>
+        <div className="config-form">
+          <label>
+            Discord webhook URL
+            <input
+              type="password"
+              value={discordWebhook}
+              onChange={(event) => setDiscordWebhook(event.target.value)}
+              placeholder={discord?.configured ? '(enter only to replace)' : 'https://discord.com/api/webhooks/...'}
+            />
+          </label>
+          <label>
+            Downtime threshold (seconds, minimum 60)
+            <input
+              type="number"
+              min={60}
+              max={86400}
+              value={discordThreshold}
+              onChange={(event) => setDiscordThreshold(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={discordEnabled}
+              onChange={(event) => setDiscordEnabled(event.target.checked)}
+            /> Enable Discord notifications
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={discordRecovery}
+              onChange={(event) => setDiscordRecovery(event.target.checked)}
+            /> Notify when the service recovers
+          </label>
+          <div className="config-actions">
+            <button className="primary" disabled={busy !== null} onClick={() => void submitDiscord()}>
+              {busy === 'discord' ? 'Saving...' : 'Save Discord settings'}
+            </button>
+            <button
+              disabled={busy !== null || !discord?.configured || !discordEnabled}
+              onClick={() => void runDiscordTest()}
+            >
+              {busy === 'discord-test' ? 'Sending...' : 'Send test'}
+            </button>
+          </div>
+          {discordTest && (
+            <p className={`muted small ${discordTest.ok ? 'ok' : 'fail'}`}>
+              {discordTest.ok ? '✓' : '✗'} {discordTest.message}
+            </p>
+          )}
         </div>
       </section>
 

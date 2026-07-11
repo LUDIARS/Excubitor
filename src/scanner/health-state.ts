@@ -10,16 +10,33 @@ export interface HealthStateSyncResult {
   checked: number;
   running: string[];
   stopped: string[];
+  observations: HealthObservation[];
+}
+
+export interface HealthObservation {
+  code: string;
+  name: string;
+  ok: boolean;
+  reason: ServiceHealthResult['reason'];
+  detail: string | null;
 }
 
 export async function syncHealthyServiceStates(catalog: Catalog): Promise<HealthStateSyncResult> {
   const results = await serviceHealthResults(catalog);
   const running: string[] = [];
   const stopped: string[] = [];
+  const observations: HealthObservation[] = [];
   for (const svc of catalog.services) {
     const result = results.get(svc.code);
     if (!result) continue;
     if (result.reason === 'not_configured') continue;
+    observations.push({
+      code: svc.code,
+      name: svc.name,
+      ok: result.ok,
+      reason: result.reason,
+      detail: result.detail ?? null,
+    });
     markServiceHealth(svc.code, result);
     if (result.ok) running.push(svc.code);
     else stopped.push(svc.code);
@@ -27,7 +44,7 @@ export async function syncHealthyServiceStates(catalog: Catalog): Promise<Health
   if (running.length > 0 || stopped.length > 0) {
     logger.info({ running, stopped }, 'health scan updated service states');
   }
-  return { checked: catalog.services.length, running, stopped };
+  return { checked: catalog.services.length, running, stopped, observations };
 }
 
 function markServiceHealth(code: string, result: ServiceHealthResult): void {

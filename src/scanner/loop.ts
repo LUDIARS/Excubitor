@@ -6,6 +6,7 @@ import { scanHostProcesses } from './host-process.js';
 import { syncHealthyServiceStates } from './health-state.js';
 import { type Catalog } from '../catalog/loader.js';
 import { ensureTail, stopTail, isTailingService } from '../log/docker-tail.js';
+import { processDowntimeAlerts } from './downtime-alert.js';
 
 const logger = createNamedLogger('excubitor.scanner');
 
@@ -40,7 +41,8 @@ export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL
 
       // running 中の docker サービスだけに docker logs -f を張めE(DB の state を見る)
       try {
-        await syncHealthyServiceStates(catalog);
+        const health = await syncHealthyServiceStates(catalog);
+        await processDowntimeAlerts(health.observations);
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'health state scan failed');
       }

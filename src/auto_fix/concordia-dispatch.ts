@@ -22,6 +22,8 @@ export interface ConcordiaDispatchResult {
   error?: string;
 }
 
+type ReconciliationResult = 'found' | 'not_found' | 'unavailable';
+
 interface ConcordiaInvokeBody {
   call_name: string;
   args: Record<string, unknown>;
@@ -94,7 +96,7 @@ export async function maybeDispatchCrashFixToConcordia(
     body = buildConcordiaInvokeBody(input);
   } catch (err) {
     const error = (err as Error).message;
-    await markDispatch(input.errorTaskId, 'concordia_dispatch_failed', error);
+    await markDispatchFailure(input.errorTaskId, error);
     return { dispatched: false, reason: 'invalid_input', error };
   }
 
@@ -111,7 +113,7 @@ export async function maybeDispatchCrashFixToConcordia(
     const payload = safeJson(text) as Record<string, unknown> | null;
     if (!res.ok) {
       const detail = `Concordia dispatch failed HTTP ${res.status}: ${truncate(text, 1000)}`;
-      await markDispatch(input.errorTaskId, 'concordia_dispatch_failed', detail);
+      await markDispatchFailure(input.errorTaskId, detail);
       return { dispatched: false, status: res.status, error: detail };
     }
     const run = payload?.run && typeof payload.run === 'object'
@@ -128,9 +130,43 @@ export async function maybeDispatchCrashFixToConcordia(
     return { dispatched: true, status: res.status, runId };
   } catch (err) {
     const error = (err as Error).message;
-    await markDispatch(input.errorTaskId, 'concordia_dispatch_failed', error);
+    await markDispatchFailure(input.errorTaskId, error);
     logger.warn({ errorTaskId: input.errorTaskId, err: error }, 'Concordia dispatch failed');
     return { dispatched: false, error };
+  }
+}
+
+export async function reconcileConcordiaDispatch(
+  errorTaskId: string,
+): Promise<ReconciliationResult> {
+  const triggeredBy = `excubitor:error-task:${errorTaskId}`;
+  try {
+    const res = await fetch(concordiaUrl('/v1/delegation/runs?limit=500'), {
+      signal: AbortSignal.timeout(resolveTimeoutMs()),
+    });
+    if (!res.ok) {
+      await markDispatchFailure(errorTaskId, `Concordia reconciliation failed HTTP ${res.status}`);
+      return 'unavailable';
+    }
+    const payload = safeJson(await res.text()) as { runs?: unknown } | null;
+    if (!Array.isArray(payload?.runs)) {
+      await markDispatchFailure(errorTaskId, 'Concordia reconciliation returned an invalid response');
+      return 'unavailable';
+    }
+    const runs = payload.runs as Array<Record<string, unknown>>;
+    const run = runs.find((candidate) => candidate.triggered_by === triggeredBy);
+    if (!run) return 'not_found';
+    const runId = typeof run.id === 'string' ? run.id : undefined;
+    await markDispatch(
+      errorTaskId,
+      'delegated_concordia',
+      `reconciled existing Concordia run${runId ? ` run=${runId}` : ''}`,
+      runId,
+    );
+    return 'found';
+  } catch (err) {
+    await markDispatchFailure(errorTaskId, `Concordia reconciliation failed: ${(err as Error).message}`);
+    return 'unavailable';
   }
 }
 
@@ -144,6 +180,33 @@ async function markDispatch(
     UPDATE error_tasks
     SET auto_fix_state = ${state},
         auto_fix_run_id = ${runId ?? null},
+        issue_dispatch_attempts = CASE
+          WHEN ${state} = 'concordia_dispatching' THEN issue_dispatch_attempts + 1
+          ELSE issue_dispatch_attempts
+        END,
+        issue_dispatch_next_at = NULL,
+        note = CASE
+          WHEN note IS NULL OR note = '' THEN ${note}
+          ELSE note || char(10) || ${note}
+        END,
+        updated_at = unixepoch() * 1000
+    WHERE id = ${errorTaskId}
+  `);
+}
+
+async function markDispatchFailure(errorTaskId: string, note: string): Promise<void> {
+  const row = db().get(sql`
+    SELECT issue_dispatch_attempts
+    FROM error_tasks
+    WHERE id = ${errorTaskId}
+  `) as { issue_dispatch_attempts: number } | undefined;
+  const attempts = Math.max(1, Number(row?.issue_dispatch_attempts ?? 1));
+  const retryMs = Math.min(5 * 60_000, 10_000 * 2 ** Math.min(5, attempts - 1));
+  const nextAt = Date.now() + retryMs;
+  db().run(sql`
+    UPDATE error_tasks
+    SET auto_fix_state = 'concordia_dispatch_failed',
+        issue_dispatch_next_at = ${nextAt},
         note = CASE
           WHEN note IS NULL OR note = '' THEN ${note}
           ELSE note || char(10) || ${note}
