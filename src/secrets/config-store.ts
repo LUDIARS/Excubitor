@@ -22,6 +22,7 @@ import { homedir } from 'node:os';
 import { createNamedLogger } from '../shared/logger.js';
 import { encryptJson, decryptJson, isEncryptedBlob, type EncryptedBlob } from './crypto.js';
 import { masterSecret } from './master-key.js';
+import { normalizeDiscordWebhookUrl } from '../notify/discord-webhook.js';
 
 const logger = createNamedLogger('excubitor.config');
 
@@ -48,7 +49,34 @@ interface ExcubitorConfig {
   services?: Record<string, ServiceInfisical>;
   settings?: {
     domainRoot?: string;
+    notifications?: {
+      discord?: DiscordNotificationConfig;
+    };
   };
+}
+
+export interface DiscordNotificationConfig {
+  webhookUrl: string;
+  enabled: boolean;
+  downtimeThresholdSec: number;
+  notifyRecovery: boolean;
+}
+
+export interface DiscordNotificationStatus {
+  configured: boolean;
+  enabled: boolean;
+  source: 'env' | 'config' | 'unset';
+  downtime_threshold_sec: number;
+  notify_recovery: boolean;
+  storePath: string;
+}
+
+export interface DiscordNotificationInput {
+  webhookUrl?: string;
+  enabled: boolean;
+  downtimeThresholdSec?: number;
+  notifyRecovery?: boolean;
+  clearWebhook?: boolean;
 }
 
 export const DEFAULT_DOMAIN_ROOT = '';
@@ -165,6 +193,67 @@ export function getDomainRootStatus(): DomainRootStatus {
     default_value: DEFAULT_DOMAIN_ROOT,
     storePath: configPath(),
   };
+}
+
+export function getDiscordNotificationConfig(): DiscordNotificationConfig | null {
+  const envUrl = process.env.EXCUBITOR_DISCORD_WEBHOOK_URL?.trim();
+  const stored = readConfig().settings?.notifications?.discord;
+  const webhookUrl = envUrl ? normalizeDiscordWebhookUrl(envUrl) : stored?.webhookUrl;
+  if (!webhookUrl) return null;
+  return {
+    webhookUrl: normalizeDiscordWebhookUrl(webhookUrl),
+    enabled: stored?.enabled ?? true,
+    downtimeThresholdSec: normalizeDowntimeThreshold(stored?.downtimeThresholdSec),
+    notifyRecovery: stored?.notifyRecovery ?? true,
+  };
+}
+
+export function getDiscordNotificationStatus(): DiscordNotificationStatus {
+  const envUrl = process.env.EXCUBITOR_DISCORD_WEBHOOK_URL?.trim();
+  const config = getDiscordNotificationConfig();
+  return {
+    configured: config !== null,
+    enabled: config?.enabled ?? false,
+    source: envUrl ? 'env' : config ? 'config' : 'unset',
+    downtime_threshold_sec: config?.downtimeThresholdSec ?? 60,
+    notify_recovery: config?.notifyRecovery ?? true,
+    storePath: configPath(),
+  };
+}
+
+export function saveDiscordNotificationConfig(input: DiscordNotificationInput): DiscordNotificationStatus {
+  const cfg = readConfig();
+  const current = cfg.settings?.notifications?.discord;
+  const webhookUrl = input.clearWebhook
+    ? ''
+    : input.webhookUrl?.trim()
+      ? normalizeDiscordWebhookUrl(input.webhookUrl)
+      : current?.webhookUrl ?? '';
+  if (input.enabled && !webhookUrl && !process.env.EXCUBITOR_DISCORD_WEBHOOK_URL?.trim()) {
+    throw new Error('Discord webhook URL is required when notifications are enabled');
+  }
+  const discord: DiscordNotificationConfig = {
+    webhookUrl,
+    enabled: input.enabled,
+    downtimeThresholdSec: normalizeDowntimeThreshold(input.downtimeThresholdSec),
+    notifyRecovery: input.notifyRecovery ?? true,
+  };
+  cfg.settings = {
+    ...(cfg.settings ?? {}),
+    notifications: {
+      ...(cfg.settings?.notifications ?? {}),
+      discord,
+    },
+  };
+  writeConfig(cfg);
+  logger.info({ enabled: discord.enabled }, 'saved Discord notification settings');
+  return getDiscordNotificationStatus();
+}
+
+function normalizeDowntimeThreshold(value: number | undefined): number {
+  if (value === undefined) return 60;
+  if (!Number.isFinite(value)) throw new Error('downtime threshold must be finite');
+  return Math.max(60, Math.min(86_400, Math.floor(value)));
 }
 
 // ─────────────── Identity ───────────────
