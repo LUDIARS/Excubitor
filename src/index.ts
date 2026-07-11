@@ -35,6 +35,7 @@ import { startErrorDetector, setCatalogProvider } from './log/error-detector.js'
 import { seedDefaultRules } from './auto_fix/seed.js';
 import { runAutoFix } from './auto_fix/runner.js';
 import { runInvestigation } from './auto_fix/investigate.js';
+import { startConcordiaDispatchLoop } from './auto_fix/concordia-dispatch-loop.js';
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
 import { buildLaunchRouter } from './launch/router.js';
@@ -412,7 +413,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   attachProcessBridge();
   const fileTailHandle: FileTailHandle = startFileTail(currentCatalog);
   setCatalogProvider(() => currentCatalog!);
-  await startErrorDetector();
+  const errorDetectorHandle = await startErrorDetector();
+  const dispatchHandle = startConcordiaDispatchLoop(() => currentCatalog!);
   const scannerHandle = startScannerLoop(currentCatalog);
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
@@ -920,6 +922,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       // 明示停止は stop API / launcher stop からのみ行う。
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
+      try { dispatchHandle.stop(); } catch { /* best-effort shutdown */ }
+      try { errorDetectorHandle.stop(); } catch { /* best-effort shutdown */ }
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { parquetHandle.stop(); } catch { /* noop */ }

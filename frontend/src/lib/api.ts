@@ -317,6 +317,15 @@ export interface ConfigInfisical {
   domain_root: DomainRootStatus;
 }
 
+export interface DiscordNotificationStatus {
+  configured: boolean;
+  enabled: boolean;
+  source: 'env' | 'config' | 'unset';
+  downtime_threshold_sec: number;
+  notify_recovery: boolean;
+  storePath: string;
+}
+
 export interface IdentityInput {
   siteUrl: string;
   environment?: string;
@@ -594,6 +603,30 @@ export function saveDomainRoot(domainRoot: string) {
   return putJSON<{ ok: boolean; domain_root: DomainRootStatus }>('/api/v1/config/domain-root', {
     domain_root: domainRoot,
   });
+}
+
+export function fetchNotificationConfig(): Promise<DiscordNotificationStatus> {
+  return getJSON<{ discord: DiscordNotificationStatus }>('/api/v1/config/notifications')
+    .then((response) => response.discord);
+}
+
+export function saveDiscordNotificationConfig(input: {
+  webhook_url?: string;
+  enabled: boolean;
+  downtime_threshold_sec: number;
+  notify_recovery: boolean;
+}) {
+  return putJSON<{ ok: boolean; discord: DiscordNotificationStatus }>(
+    '/api/v1/config/notifications/discord',
+    input,
+  );
+}
+
+export function testDiscordNotification() {
+  return postJSON<{ ok: boolean; message: string }>(
+    '/api/v1/config/notifications/discord/test',
+    {},
+  );
 }
 
 // ─── updates / discovery ───
