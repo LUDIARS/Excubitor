@@ -26,6 +26,12 @@ export function requiredEnvKeysForService(svc: Service): string[] {
     ...(cfg?.required_env ?? []),
     ...(cfg?.include ?? []),
     ...(svc.requires_secret ?? []).flatMap((req) => req.keys),
+    ...(svc.cernere_launch_credentials
+      ? [
+          svc.cernere_launch_credentials.issuer_client_id_env,
+          svc.cernere_launch_credentials.issuer_client_secret_env,
+        ]
+      : []),
   ]);
 }
 
