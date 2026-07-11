@@ -39,6 +39,13 @@ const RequiresSecretSchema = z.object({
   keys: z.array(z.string()).min(1),
 });
 
+/** Cernereに起動対象projectのcredentialをspawn直前発行させる設定。 */
+const CernereLaunchCredentialsSchema = z.object({
+  target_project: z.string().min(1),
+  issuer_client_id_env: z.string().default('EXCUBITOR_CERNERE_CLIENT_ID'),
+  issuer_client_secret_env: z.string().default('EXCUBITOR_CERNERE_CLIENT_SECRET'),
+});
+
 /**
  * 自動修正設定、E
  * - enabled: true で error_task 作�E時に Claude Code CLI を�E動起勁E
@@ -185,6 +192,11 @@ const ServiceSchema = z.object({
    *       keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
    */
   requires_secret: z.array(RequiresSecretSchema).optional(),
+  /**
+   * 起動ごとにCernereへcredential発行を要求し、返却値を子プロセスenvへ注入する。
+   * issuer credentialはEx内部でだけ消費し、spawn子には渡さない。
+   */
+  cernere_launch_credentials: CernereLaunchCredentialsSchema.optional(),
   /**
    * このサービスが他サービスへ公開する topology env (URL/port 等)。
    * Excubitor が catalog から導出して全サービスの spawn env に注入する。

@@ -97,6 +97,20 @@ describe('catalog (services.yaml)', () => {
     expect(di?.env?.BACKEND_PORT).toBe('3110');
   });
 
+  it('EducationLabはCernere依存で、起動ごとにcredentialを受け取る', () => {
+    const EducationLab = catalog.services.find((s) => s.code === 'EducationLab');
+    expect(EducationLab).toMatchObject({
+      port: 5187,
+      depends_on: ['cernere'],
+      uses_corpus: true,
+      cernere_launch_credentials: { target_project: 'EducationLab' },
+    });
+    expect(EducationLab?.requires_secret?.[0]?.keys).toEqual([
+      'EXCUBITOR_CERNERE_CLIENT_ID',
+      'EXCUBITOR_CERNERE_CLIENT_SECRET',
+    ]);
+  });
+
   it('registers Calliope on its canonical port with its upstream dependencies', () => {
     const calliope = catalog.services.find((s) => s.code === 'calliope');
     expect(calliope).toMatchObject({
