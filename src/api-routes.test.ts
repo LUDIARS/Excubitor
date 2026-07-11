@@ -69,7 +69,8 @@ const mocks = vi.hoisted(() => ({
   runAutostart: vi.fn(async () => undefined),
   attachProcessBridge: vi.fn(),
   startFileTail: vi.fn(() => ({ refresh: vi.fn(), stop: vi.fn() })),
-  startErrorDetector: vi.fn(async () => undefined),
+  startErrorDetector: vi.fn(async () => ({ stop: vi.fn() })),
+  startConcordiaDispatchLoop: vi.fn(() => ({ stop: vi.fn() })),
   setCatalogProvider: vi.fn(),
   seedDefaultRules: vi.fn(async () => undefined),
   runAutoFix: vi.fn(async () => ({ state: 'queued', branch: 'auto/fix' })),
@@ -212,6 +213,9 @@ vi.mock('./log/file-tail.js', () => ({ startFileTail: mocks.startFileTail }));
 vi.mock('./log/error-detector.js', () => ({
   startErrorDetector: mocks.startErrorDetector,
   setCatalogProvider: mocks.setCatalogProvider,
+}));
+vi.mock('./auto_fix/concordia-dispatch-loop.js', () => ({
+  startConcordiaDispatchLoop: mocks.startConcordiaDispatchLoop,
 }));
 vi.mock('./log/logs-root.js', () => ({ sharedLogsRoot: () => mocks.logsRoot }));
 

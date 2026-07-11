@@ -66,6 +66,16 @@ export const livenessHistory = sqliteTable('liveness_history', {
   detail: text('detail', { mode: 'json' }),
 });
 
+export const healthAlertState = sqliteTable('health_alert_state', {
+  service_code: text('service_code').primaryKey(),
+  down_since: integer('down_since', { mode: 'timestamp_ms' }),
+  notified_at: integer('notified_at', { mode: 'timestamp_ms' }),
+  last_probe_at: integer('last_probe_at', { mode: 'timestamp_ms' }).notNull(),
+  last_attempt_at: integer('last_attempt_at', { mode: 'timestamp_ms' }),
+  last_error: text('last_error'),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});
+
 // Excubitor の process_logs めErename. Concordia の processes (managed processes)
 // 由来の process_logs と別物.
 export const serviceInstanceLogs = sqliteTable('service_instance_logs', {
@@ -107,6 +117,8 @@ export const errorTasks = sqliteTable('error_tasks', {
   auto_fix_state: text('auto_fix_state'),
   auto_fix_attempts: integer('auto_fix_attempts').notNull().default(0),
   auto_fix_run_id: text('auto_fix_run_id'),
+  issue_dispatch_attempts: integer('issue_dispatch_attempts').notNull().default(0),
+  issue_dispatch_next_at: integer('issue_dispatch_next_at', { mode: 'timestamp_ms' }),
   created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
@@ -226,6 +238,7 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS service_instances (id TEXT PRIMARY KEY, service_id TEXT NOT NULL REFERENCES services(id), host_id TEXT REFERENCES hosts(id), pid INTEGER, docker_id TEXT, state TEXT NOT NULL DEFAULT 'unknown', last_seen_at INTEGER, started_at INTEGER, exit_code INTEGER, git_branch TEXT, git_hash TEXT, git_dirty INTEGER, package_version TEXT, port INTEGER, extra TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   `CREATE TABLE IF NOT EXISTS service_instance_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, service_instance_id TEXT NOT NULL REFERENCES service_instances(id), ts INTEGER NOT NULL, level TEXT, line TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS liveness_history (id INTEGER PRIMARY KEY AUTOINCREMENT, service_instance_id TEXT NOT NULL REFERENCES service_instances(id), probed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), ok INTEGER NOT NULL, latency_ms INTEGER, detail TEXT)`,
+  `CREATE TABLE IF NOT EXISTS health_alert_state (service_code TEXT PRIMARY KEY, down_since INTEGER, notified_at INTEGER, last_probe_at INTEGER NOT NULL, last_attempt_at INTEGER, last_error TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   `CREATE INDEX IF NOT EXISTS idx_services_active_code ON services (is_active, code)`,
   `CREATE INDEX IF NOT EXISTS idx_service_instances_service_id ON service_instances (service_id)`,
   `CREATE INDEX IF NOT EXISTS idx_service_instance_logs_ts ON service_instance_logs (ts DESC, id DESC)`,
@@ -261,6 +274,8 @@ const ADD_COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   // federation: Cloudflare Access Service Token (任意)。 既存 remote_peers を壊さず拡張。
   { table: 'remote_peers', column: 'cf_access_id', ddl: 'cf_access_id TEXT' },
   { table: 'remote_peers', column: 'cf_access_secret', ddl: 'cf_access_secret TEXT' },
+  { table: 'error_tasks', column: 'issue_dispatch_attempts', ddl: 'issue_dispatch_attempts INTEGER NOT NULL DEFAULT 0' },
+  { table: 'error_tasks', column: 'issue_dispatch_next_at', ddl: 'issue_dispatch_next_at INTEGER' },
 ];
 
 function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {

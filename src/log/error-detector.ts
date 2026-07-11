@@ -3,7 +3,7 @@
  *
  * - regex (pattern_type='regex') / keyword (pattern_type='keyword')
  * - service_codes が指定されてれ�E対象を絞る
- * - 同一 (rule_id, service_instance_id, summary) めE60 秒以冁E��めEoccurrence_count++ で dedup
+ * - 同一 (rule_id, service_instance_id) の未解決 task は occurrence_count++ で集約
  * - 新要E/ 復活時�E error_tasks に行を作る (state='open')
  */
 import { randomUUID } from 'node:crypto';
@@ -112,7 +112,7 @@ async function recordHit(rule: Rule, line: LogLine): Promise<void> {
   // SQLite では PG の data-modifying CTE (WITH ... UPDATE ... FROM si) めE
   // 直接書けなぁE�Eで、E同一トランザクションで以下�E手頁E��刁E��する:
   //   1) service_instance_id めEresolve
-  //   2) 60 秒以冁E�E吁Erule ÁEinstance ÁEopen 系 task めEUPDATE ... RETURNING
+  //   2) 吁Erule ÁEinstance ÁEopen 系 task めEUPDATE ... RETURNING
   //   3) ヒッチE0 件なめEINSERT
   const siRow = db().get(sql`
     SELECT si.id AS id
@@ -122,16 +122,20 @@ async function recordHit(rule: Rule, line: LogLine): Promise<void> {
     LIMIT 1
   `) as { id: string } | undefined;
   if (!siRow) return;
-  const sixtySecondsAgo = Date.now() - 60_000;
   const existing = db().all(sql`
     UPDATE error_tasks
     SET occurrence_count = occurrence_count + 1,
         last_seen_at = unixepoch() * 1000,
         updated_at = unixepoch() * 1000
-    WHERE rule_id = ${rule.id}
-      AND service_instance_id = ${siRow.id}
-      AND state IN ('open','ack','snoozed')
-      AND last_seen_at > ${sixtySecondsAgo}
+    WHERE id = (
+      SELECT id
+      FROM error_tasks
+      WHERE rule_id = ${rule.id}
+        AND service_instance_id = ${siRow.id}
+        AND state IN ('open','ack','snoozed')
+      ORDER BY last_seen_at DESC, created_at DESC
+      LIMIT 1
+    )
     RETURNING id
   `) as Array<{ id: string }>;
   if (existing.length === 0) {
@@ -160,10 +164,15 @@ async function recordHit(rule: Rule, line: LogLine): Promise<void> {
   // 起動すめE(= POST /api/v1/error-tasks/:id/investigate or /auto-fix)、E
 }
 
-export async function startErrorDetector(): Promise<void> {
+export interface ErrorDetectorHandle {
+  stop(): void;
+}
+
+export async function startErrorDetector(): Promise<ErrorDetectorHandle> {
   await reloadRules();
-  subscribe((l) => void onLine(l));
+  const unsubscribe = subscribe((l) => void onLine(l));
   logger.info('error detector subscribed');
+  return { stop: unsubscribe };
 }
 
 
