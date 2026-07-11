@@ -108,4 +108,63 @@ describe('prepareSpawnEnv', () => {
     }, { fetchImpl: fetchImpl as typeof fetch }))
       .rejects.toThrow('HTTP 403');
   });
+
+  it('retries a network failure with the same launch id and secret', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      if (bodies.length === 1) throw new TypeError('connection reset');
+      const body = JSON.parse(bodies[1]!) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        targetProjectKey: 'glab',
+        launchId: body.launch_id,
+        clientId: 'glab-id',
+        adminUserIds: ['33333333-3333-4333-8333-333333333333'],
+        issuedAt: '2026-07-11T00:00:00.000Z',
+        idempotent: true,
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    await prepareSpawnEnv(service(), {
+      CERNERE_BASE_URL: 'http://127.0.0.1:8080',
+      EXCUBITOR_CERNERE_CLIENT_ID: 'ex-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'ex-secret',
+    }, {
+      fetchImpl: fetchImpl as typeof fetch,
+      launchId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      targetClientSecret: 'stable-secret-across-retries-0123456789abcdef',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it('rejects a response bound to another launch', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      targetProjectKey: 'glab',
+      launchId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      clientId: 'glab-id',
+      adminUserIds: ['44444444-4444-4444-8444-444444444444'],
+      issuedAt: '2026-07-11T00:00:00.000Z',
+      idempotent: false,
+    }), { status: 201, headers: { 'content-type': 'application/json' } }));
+
+    await expect(prepareSpawnEnv(service(), {
+      CERNERE_BASE_URL: 'https://cernere.example',
+      EXCUBITOR_CERNERE_CLIENT_ID: 'ex-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'ex-secret',
+    }, {
+      fetchImpl: fetchImpl as typeof fetch,
+      launchId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      targetClientSecret: 'generated-secret-0123456789abcdef',
+    })).rejects.toThrow('response is invalid');
+  });
+
+  it('rejects plaintext transport to a non-loopback Cernere host', async () => {
+    await expect(prepareSpawnEnv(service(), {
+      CERNERE_BASE_URL: 'http://cernere.example',
+      EXCUBITOR_CERNERE_CLIENT_ID: 'ex-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'ex-secret',
+    })).rejects.toThrow('must use HTTPS');
+  });
 });
