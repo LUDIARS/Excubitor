@@ -640,6 +640,33 @@ services:
     provides:
       THALEIA_URL: http://${host}:${port}
 
+  - code: calliope
+    name: Calliope (planning orchestrator)
+    tier: personal
+    project_code: calliope
+    component: backend
+    port: 8891
+    depends_on:
+      - actio
+      - schedula
+      - memoria-server
+    repo: LUDIARS/Calliope
+    runtime: node
+    cwd: ${ARS_ROOT}/Calliope
+    command: npm run start
+    env:
+      CALLIOPE_PORT: "8891"
+      ACTIO_BASE_URL: http://127.0.0.1:3000
+      SCHEDULA_BASE_URL: http://127.0.0.1:3300
+      MEMORIA_BASE_URL: http://127.0.0.1:5180
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8891/health
+      interval_sec: 30
+    provides:
+      CALLIOPE_URL: http://${host}:${port}
+
   - code: concordia
     name: Concordia (AI 協調)
     tier: personal

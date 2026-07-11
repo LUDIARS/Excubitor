@@ -96,4 +96,16 @@ describe('catalog (services.yaml)', () => {
     expect(nuntius?.port).toBe(3100);
     expect(di?.env?.BACKEND_PORT).toBe('3110');
   });
+
+  it('registers Calliope on its canonical port with its upstream dependencies', () => {
+    const calliope = catalog.services.find((s) => s.code === 'calliope');
+    expect(calliope).toMatchObject({
+      port: 8891,
+      project_code: 'calliope',
+      runtime: 'node',
+      health: { type: 'http', url: 'http://localhost:8891/health' },
+    });
+    expect(calliope?.depends_on).toEqual(['actio', 'schedula', 'memoria-server']);
+    expect(calliope?.env?.CALLIOPE_PORT).toBe('8891');
+  });
 });
