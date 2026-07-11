@@ -343,6 +343,7 @@ services:
       interval_sec: 30
     provides:
       AEDILIS_URL: http://${host}:${port}
+      AEDILIS_BASE_URL: http://${host}:${port}
     # Cernere (認証/ID) 発行のクライアント資格情報を Excubitor 経由で借りる (cross-service delegation)。
     # AEDILIS_CERNERE_CLIENT_ID/SECRET が Cernere の Infisical project に無ければ preflight が fail closed する。
     requires_secret:
@@ -481,6 +482,36 @@ services:
       interval_sec: 30
     provides:
       VANTANHUB_URL: http://${host}:${port}
+
+  - code: glab
+    name: GLAB (学校運営 hub)
+    tier: saas
+    project_code: glab
+    component: server
+    port: 5187
+    repo: VGA-GLAB/GLAB-Hub
+    runtime: node
+    cwd: ${ARS_ROOT}/GLAB
+    command: npm run dev
+    allow_hot_reload: true
+    uses_corpus: true
+    depends_on: [cernere]
+    autostart: false
+    env:
+      CORPUS_PUBLIC_URL: http://localhost:5187
+    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL]
+    # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
+    # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
+    requires_secret:
+      - service: cernere
+        keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]
+    cernere_launch_credentials:
+      target_project: glab
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      GLAB_URL: http://${host}:${port}
 
   # ─────────────── Tirocinium (面接練習) ───────────────
   - code: tirocinium

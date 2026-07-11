@@ -25,6 +25,7 @@ import { runServiceBuild } from './build.js';
 import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
+import { prepareSpawnEnv } from './cernere-launch-credential.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -147,6 +148,13 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   // ライブログ/エラー検知は process-file がこのファイルを tail して log bus に publish する。
   await assertHotReloadAllowed(svc, hotReloadSource, { allowHotReload: opts.allowHotReload });
 
+  // build完了後、実spawnの直前に起動単位credentialを発行する。
+  // issuer secretはprepareSpawnEnv内で削除され、子にはtarget credentialだけが渡る。
+  const inheritedEnv = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+  const childEnv = await prepareSpawnEnv(svc, { ...inheritedEnv, ...(opts.env ?? {}) });
+
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
   // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
   const resolvedCwd =
@@ -178,7 +186,7 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
     // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
     shell: svc.runtime !== 'app',
-    env: { ...process.env, ...(opts.env ?? {}) },
+    env: childEnv,
     stdio: ['ignore', stdoutFd, stderrFd],
     detached,
     windowsHide: true,

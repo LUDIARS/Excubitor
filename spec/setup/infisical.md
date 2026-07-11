@@ -44,6 +44,18 @@ cd frontend && npm run dev  # WebUI (17333)
 
 「マッピングを保存」で一括保存。
 
+### Cernere launcher credential
+
+GLAB用credentialはInfisicalへ保存しない。保存するのはEx自身がCernereへissuerとして
+認証するための次の2キーだけである。
+
+- `EXCUBITOR_CERNERE_CLIENT_ID`
+- `EXCUBITOR_CERNERE_CLIENT_SECRET`
+
+これらはCernere serviceのInfisical projectに置く。catalogのGLAB `requires_secret`が
+Ex内部へだけ解決し、`cernere_launch_credentials`がspawn直前に消費する。issuer値は
+子envから削除し、Exが毎回生成したGLAB用secretだけをGLABへ渡す。
+
 ## API (WebUI が叩く)
 
 - `GET /api/v1/config/infisical` — identity 状態 + サービスマッピング

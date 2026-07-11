@@ -349,6 +349,10 @@ infra(0) → Cernere(1) → Corpus(2) → corpus 依存(VantanHub, 3) → leaf(5
 - `src/secrets/infisical.ts`: Excubitor 自身の machine identity (`INFISICAL_SITE_URL/CLIENT_ID/CLIENT_SECRET`) で universal-auth login → `/api/v3/secrets/raw`。token 5min / secret 60s キャッシュ。
 - catalog の `infisical: { project_id, environment, inject, prefix, include, exclude }` を ServiceSchema に接続 (従来は未接続で捨てられていた)。`inject:true` のサービスは spawn 時に該当 project の secret を取得し、prefix/include/exclude を適用して子プロセス env にリレー (`process/inject.ts` の `resolveInjectEnv`)。
 - **起動前チェック (preflight)**: 選択セットの各サービスで cwd / compose_file 実在 + (inject 対象なら) identity 有無 + secret 解決可否を spawn 前に検査。NG は起動から除外しレポート。`POST /api/v1/launch/preflight`、`/launch/start` は内部で preflight 実行。
+- **動的project credential**: `cernere_launch_credentials`を持つserviceは、Exが実spawn直前に
+  launch IDと32-byte secretを生成してCernereへ送る。Cernereがissuer grantを検査して暗号化
+  永続化・現行hash rotateを完了した場合だけ、target用credentialを子envへ注入する。
+  Ex自身のissuer secretは`requires_secret`で取得するが子envから必ず除外する。
 
 ### 12.4 API 追加
 

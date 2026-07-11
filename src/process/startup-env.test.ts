@@ -56,4 +56,18 @@ describe('startup env validation', () => {
       ready: false,
     });
   });
+
+  it('requires the stable Excubitor issuer credential for dynamic Cernere launches', () => {
+    const svc = service({
+      cernere_launch_credentials: {
+        target_project: 'glab',
+        issuer_client_id_env: 'EXCUBITOR_CERNERE_CLIENT_ID',
+        issuer_client_secret_env: 'EXCUBITOR_CERNERE_CLIENT_SECRET',
+      },
+    });
+    expect(requiredEnvKeysForService(svc)).toEqual([
+      'EXCUBITOR_CERNERE_CLIENT_ID',
+      'EXCUBITOR_CERNERE_CLIENT_SECRET',
+    ]);
+  });
 });
