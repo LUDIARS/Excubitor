@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseNetstat, parseSs, parseTasklist, detectDeclaredConflicts } from './ports.js';
+import {
+  parseNetstat,
+  parseSs,
+  parseTasklist,
+  detectConcurrentDevelopConflicts,
+  detectDeclaredConflicts,
+} from './ports.js';
 import type { Catalog } from '../catalog/loader.js';
 
 describe('parseNetstat', () => {
@@ -46,8 +52,10 @@ describe('parseTasklist', () => {
 });
 
 describe('detectDeclaredConflicts', () => {
-  const mk = (code: string, port?: number): Catalog['services'][number] =>
+  const mk = (code: string, port?: number, extra: Partial<Catalog['services'][number]> = {}): Catalog['services'][number] =>
     ({ code, name: code, runtime: 'node', port, monitor_only: false, autostart: false,
+       develop_derived: false,
+       ...extra,
        restart_policy: 'no', max_restart: 5 } as Catalog['services'][number]);
 
   it('同一 port を宣言する複数サービスを検出する', () => {
@@ -59,5 +67,48 @@ describe('detectDeclaredConflicts', () => {
   it('port 未宣言は無視する', () => {
     const catalog = { services: [mk('a'), mk('b')], memory_monitor: {} } as unknown as Catalog;
     expect(detectDeclaredConflicts(catalog)).toEqual([]);
+  });
+
+  it('同じ project_code の正規 main/develop ペアは衝突から除外する', () => {
+    const catalog = { services: [
+      mk('concordia', 11111, { project_code: 'concordia' }),
+      mk('concordia-develop', 11111, {
+        project_code: 'concordia',
+        develop_derived: true,
+        develop_from: 'concordia',
+      }),
+    ], memory_monitor: {} } as unknown as Catalog;
+    expect(detectDeclaredConflicts(catalog)).toEqual([]);
+  });
+
+  it('develop suffix だけ、または別 project の重複は衝突として残す', () => {
+    const catalog = { services: [
+      mk('a', 3000, { project_code: 'a' }),
+      mk('a-develop', 3000, { project_code: 'a' }),
+      mk('b-develop', 4000, { project_code: 'b', develop_derived: true, develop_from: 'b' }),
+      mk('c', 4000, { project_code: 'c' }),
+    ], memory_monitor: {} } as unknown as Catalog;
+    expect(detectDeclaredConflicts(catalog)).toEqual([
+      { port: 3000, codes: ['a:service', 'a-develop:service'] },
+      { port: 4000, codes: ['b-develop:service', 'c:service'] },
+    ]);
+  });
+
+  it('main/develop ペアが共に running かつ LISTEN 中なら実行時衝突にする', () => {
+    const catalog = { services: [
+      mk('concordia', 11111, { project_code: 'concordia' }),
+      mk('concordia-develop', 11111, {
+        project_code: 'concordia',
+        develop_derived: true,
+        develop_from: 'concordia',
+      }),
+    ], memory_monitor: {} } as unknown as Catalog;
+    const states = new Map([['concordia', 'running'], ['concordia-develop', 'running']]);
+
+    expect([...detectConcurrentDevelopConflicts(catalog, states, new Set([11111]))]).toEqual([
+      'concordia:service',
+      'concordia-develop:service',
+    ]);
+    expect(detectConcurrentDevelopConflicts(catalog, states, new Set())).toEqual(new Set());
   });
 });

@@ -6,13 +6,14 @@
  * 生成先は services.auto.yaml (手書き services.yaml は壊さない)。
  */
 
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createNamedLogger } from '../shared/logger.js';
-import { safeExec } from '../shared/exec.js';
-import type { Catalog } from './loader.js';
+import type { Catalog, Service } from './loader.js';
 import { discoverServices, type DiscoveredRepo } from '../discovery/scan.js';
 import { readAutoCatalogRaw, writeAutoServices } from './auto-catalog-file.js';
+import { repoDirOf } from '../update/checker.js';
+import { arsRoot, developRoot } from '../shared/roots.js';
 
 const logger = createNamedLogger('excubitor.auto-catalog');
 
@@ -29,6 +30,72 @@ export interface GeneratedService {
   port?: number;
   autostart: boolean;
   monitor_only: boolean;
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function repoRootsFor(svc: Service): { main: string; develop: string } | null {
+  const root = resolve(arsRoot());
+  const repoDir = repoDirOf(svc);
+  if (repoDir) {
+    const rel = relative(root, resolve(repoDir));
+    const first = rel.split(sep)[0];
+    if (first && first !== '..' && !isAbsolute(rel)) {
+      return { main: join(root, first), develop: join(resolve(developRoot()), first) };
+    }
+  }
+
+  const repoName = svc.repo?.match(/([^/:]+?)(?:\.git)?$/)?.[1];
+  if (!repoName) return null;
+  return { main: join(root, repoName), develop: join(resolve(developRoot()), repoName) };
+}
+
+function rebaseRepoPath(path: string | undefined, mainRoot: string, developRepoRoot: string): string | undefined {
+  if (!path) return undefined;
+  const rel = relative(resolve(mainRoot), resolve(path));
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return path;
+  return normalizePath(join(developRepoRoot, rel));
+}
+
+/** 既存サービスから、存在する develop clone 用の派生サービスを生成する。 */
+export function developServiceFor(svc: Service): Service | null {
+  if (svc.develop_derived || svc.disabled || svc.monitor_only) return null;
+  if (svc.code === 'excubitor' || svc.project_code === 'excubitor' || svc.code.startsWith('infra-')) return null;
+
+  const roots = repoRootsFor(svc);
+  if (!roots || !isDirectory(roots.develop)) return null;
+
+  const cwd = rebaseRepoPath(svc.cwd, roots.main, roots.develop) ?? normalizePath(roots.develop);
+  const composeFile = rebaseRepoPath(svc.compose_file, roots.main, roots.develop);
+  const startScript = rebaseRepoPath(svc.start_script, roots.main, roots.develop);
+  const exec = rebaseRepoPath(svc.exec, roots.main, roots.develop);
+  const autoFixWorkingDir = rebaseRepoPath(svc.auto_fix?.working_dir, roots.main, roots.develop);
+
+  return {
+    ...svc,
+    code: `${svc.code}-develop`,
+    name: `${svc.name} (develop)`,
+    cwd,
+    ...(composeFile ? { compose_file: composeFile } : {}),
+    ...(startScript ? { start_script: startScript } : {}),
+    ...(exec ? { exec } : {}),
+    ...(svc.auto_fix && autoFixWorkingDir
+      ? { auto_fix: { ...svc.auto_fix, working_dir: autoFixWorkingDir } }
+      : {}),
+    autostart: false,
+    develop_derived: true,
+    develop_from: svc.code,
+  };
 }
 
 interface PackageJson {
@@ -162,11 +229,13 @@ export async function runScan(catalog: Catalog): Promise<ScanResult> {
   const ignoredCodes = new Set(autoCatalog.ignored_codes);
 
   // 既存 auto を code→entry で持ち、 新規/更新をマージする。
-  const merged = new Map<string, GeneratedService>();
+  const previousAutoCodes = new Set<string>();
+  const merged = new Map<string, unknown>();
   for (const e of autoCatalog.services) {
     const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string') previousAutoCodes.add(code);
     if (typeof code === 'string' && ignoredCodes.has(code)) continue;
-    if (typeof code === 'string') merged.set(code, e as GeneratedService);
+    if (typeof code === 'string' && !(e as { develop_derived?: unknown }).develop_derived) merged.set(code, e);
   }
 
   const created: string[] = [];
@@ -191,6 +260,18 @@ export async function runScan(catalog: Catalog): Promise<ScanResult> {
     const isNew = !merged.has(entry.code);
     merged.set(entry.code, entry);
     if (isNew) created.push(entry.code);
+    if (entry.port) ports[entry.code] = entry.port;
+  }
+
+  const nonDerivedCatalogCodes = new Set(
+    catalog.services.filter((svc) => !svc.develop_derived).map((svc) => svc.code),
+  );
+  for (const svc of catalog.services) {
+    const entry = developServiceFor(svc);
+    if (!entry || ignoredCodes.has(entry.code)) continue;
+    if (nonDerivedCatalogCodes.has(entry.code) || merged.has(entry.code)) continue;
+    merged.set(entry.code, entry);
+    if (!previousAutoCodes.has(entry.code)) created.push(entry.code);
     if (entry.port) ports[entry.code] = entry.port;
   }
 

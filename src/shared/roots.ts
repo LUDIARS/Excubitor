@@ -11,7 +11,7 @@
  * catalog 等にはドライブを焼き込まない。
  */
 
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DEFAULT_DOMAIN_ROOT, getDomainRootOverride, normalizeDomainRoot } from "../secrets/config-store.js";
 
 /** 末尾スラッシュを除去し、 forward-slash に正規化する (catalog の path 表記と揃える)。 */
@@ -33,6 +33,15 @@ export function arsRoot(): string {
   const env = (process.env.EXCUBITOR_ARS_ROOT ?? process.env.LUDIARS_ROOT ?? "").trim();
   const base = env || dirname(resolve(process.cwd()));
   return normalizeRoot(base);
+}
+
+/**
+ * develop 系クローンの親ディレクトリ。
+ * env 未指定時は `<ARS_ROOT>/develop` を使う。
+ */
+export function developRoot(): string {
+  const env = (process.env.EXCUBITOR_DEVELOP_ROOT ?? "").trim();
+  return normalizeRoot(env || join(arsRoot(), "develop"));
 }
 
 /**
