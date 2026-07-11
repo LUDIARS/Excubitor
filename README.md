@@ -22,6 +22,7 @@ LUDIARS 全サービスの可観測性 + 復旧操作 + 集中設定の中央サ
 | 復旧操作 | ダウン中のサービスを UI から start / restart |
 | 自動起動 | catalog `autostart: true` を起動時に自動 spawn (dev-process.md 互換) |
 | Secret 注入 | Infisical fetch → 子プロセス env に直接渡して `.env` ファイルを残さない |
+| 起動credential | GLAB等のspawn直前にExがsecret生成 → Cernereへ暗号化記録 → 子envへ注入 |
 | Infisical 遠隔設定 | secret CRUD を Excubitor 1 か所から |
 
 設計書: [`spec/v0.1-design.md`](spec/v0.1-design.md)
@@ -85,3 +86,13 @@ Excubitor は LUDIARS 起動チェーンの最先頭にあり、Infisical / Cern
 - `backendUrl`: backend (Excubitor server) の URL (default http://localhost:17332)
 
 機密値はここに置かない (公開ドメインや port 等のみ)。
+
+## GLABの起動credential
+
+GLABは固定のCernere project secretを持たない。Exは`glab`をspawnするたびに32-byte secretを
+生成し、Cernereの`/api/auth/project-launch-credential`へ送る。Cernereが受領値をDBへ
+AES-256-GCM暗号化保存し、現行bcrypt hashへrotateした後、Exがその起動プロセスのenvへだけ
+`CERNERE_PROJECT_CLIENT_ID` / `CERNERE_PROJECT_CLIENT_SECRET`を渡す。
+
+Ex自身のissuer credentialだけは一度発行し、Cernere用Infisical projectへ
+`EXCUBITOR_CERNERE_CLIENT_ID` / `EXCUBITOR_CERNERE_CLIENT_SECRET`として保存する。
