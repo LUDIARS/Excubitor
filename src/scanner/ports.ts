@@ -163,20 +163,63 @@ function portfulServices(catalog: Catalog): Service[] {
   return catalog.services.filter((s) => managedPortsForService(s).length > 0);
 }
 
-/** catalog 内の port 重複宣言を検出する (infra の compose 共有等も含めて素朴に列挙)。 */
-export function detectDeclaredConflicts(catalog: Catalog): DeclaredConflict[] {
-  const byPort = new Map<number, string[]>();
-  for (const s of portfulServices(catalog)) {
-    for (const p of managedPortsForService(s)) {
-      const list = byPort.get(p.port) ?? [];
-      list.push(`${s.code}:${p.role}`);
-      byPort.set(p.port, list);
+function isDevelopPair(a: Service, b: Service): boolean {
+  if (!a.project_code || a.project_code !== b.project_code) return false;
+  return (a.develop_derived && a.develop_from === b.code)
+    || (b.develop_derived && b.develop_from === a.code);
+}
+
+interface PortDeclaration {
+  svc: Service;
+  role: string;
+}
+
+function declarationsByPort(catalog: Catalog): Map<number, PortDeclaration[]> {
+  const byPort = new Map<number, PortDeclaration[]>();
+  for (const svc of portfulServices(catalog)) {
+    for (const managed of managedPortsForService(svc)) {
+      const list = byPort.get(managed.port) ?? [];
+      list.push({ svc, role: managed.role });
+      byPort.set(managed.port, list);
     }
   }
-  return [...byPort.entries()]
-    .filter(([, codes]) => codes.length > 1)
-    .map(([port, codes]) => ({ port, codes }))
+  return byPort;
+}
+
+/** catalog 内の port 重複宣言を検出する。正規の main/develop ペアだけは除外する。 */
+export function detectDeclaredConflicts(catalog: Catalog): DeclaredConflict[] {
+  return [...declarationsByPort(catalog).entries()]
+    .map(([port, declarations]) => {
+      const conflicting = declarations.filter((current, index) => declarations.some(
+        (other, otherIndex) => index !== otherIndex && !isDevelopPair(current.svc, other.svc),
+      ));
+      return { port, codes: conflicting.map(({ svc, role }) => `${svc.code}:${role}`) };
+    })
+    .filter(({ codes }) => codes.length > 1)
     .sort((a, b) => a.port - b.port);
+}
+
+/** LISTEN 中の同一 port で main/develop ペアが共に running なら両方を異常扱いする。 */
+export function detectConcurrentDevelopConflicts(
+  catalog: Catalog,
+  stateByCode: Map<string, string>,
+  listeningPorts: Set<number>,
+): Set<string> {
+  const conflicts = new Set<string>();
+  for (const [port, declarations] of declarationsByPort(catalog)) {
+    if (!listeningPorts.has(port)) continue;
+    for (let i = 0; i < declarations.length; i += 1) {
+      for (let j = i + 1; j < declarations.length; j += 1) {
+        const a = declarations[i];
+        const b = declarations[j];
+        if (!a || !b || !isDevelopPair(a.svc, b.svc)) continue;
+        if (stateByCode.get(a.svc.code) !== 'running' || stateByCode.get(b.svc.code) !== 'running') continue;
+        conflicts.add(`${a.svc.code}:${a.role}`);
+        conflicts.add(`${b.svc.code}:${b.role}`);
+      }
+    }
+  }
+  return conflicts;
 }
 
 /**
@@ -189,13 +232,18 @@ export async function buildPortReport(
 ): Promise<PortReport> {
   const listeners = await listListeners();
   const byPort = new Map(listeners.map((l) => [l.port, l]));
+  const concurrentDevelopConflicts = detectConcurrentDevelopConflicts(
+    catalog,
+    stateByCode,
+    new Set(listeners.map((listener) => listener.port)),
+  );
 
   const services: ServicePortStatus[] = portfulServices(catalog).flatMap((s) => managedPortsForService(s).map((p) => {
     const l = byPort.get(p.port);
     const state = stateByCode.get(s.code) ?? 'unknown';
     const listening = !!l;
     // 起動中サービスが port を掴んでいる = 正常。 停止中なのに掴まれている = foreign 占有。
-    const conflict = listening && state !== 'running';
+    const conflict = listening && (state !== 'running' || concurrentDevelopConflicts.has(`${s.code}:${p.role}`));
     return {
       code: s.code,
       name: s.name,

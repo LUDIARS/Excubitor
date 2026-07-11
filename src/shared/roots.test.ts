@@ -2,10 +2,10 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { arsRoot, domainRoot } from "./roots.js";
+import { arsRoot, developRoot, domainRoot } from "./roots.js";
 import { setDomainRootOverride } from "../secrets/config-store.js";
 
-const ENV_KEYS = ["EXCUBITOR_ARS_ROOT", "LUDIARS_ROOT", "EXCUBITOR_DOMAIN_ROOT", "EXCUBITOR_CONFIG_PATH"] as const;
+const ENV_KEYS = ["EXCUBITOR_ARS_ROOT", "EXCUBITOR_DEVELOP_ROOT", "LUDIARS_ROOT", "EXCUBITOR_DOMAIN_ROOT", "EXCUBITOR_CONFIG_PATH"] as const;
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
 let tempConfigDir: string | null = null;
@@ -42,6 +42,19 @@ describe("arsRoot", () => {
     delete process.env.LUDIARS_ROOT;
     const expected = dirname(resolve(process.cwd())).replace(/\\/g, "/");
     expect(arsRoot()).toBe(expected);
+  });
+});
+
+describe("developRoot", () => {
+  it("既定は <ARS_ROOT>/develop", () => {
+    process.env.EXCUBITOR_ARS_ROOT = "D:\\LUDIARS\\";
+    delete process.env.EXCUBITOR_DEVELOP_ROOT;
+    expect(developRoot()).toBe("D:/LUDIARS/develop");
+  });
+
+  it("EXCUBITOR_DEVELOP_ROOT で上書きできる", () => {
+    process.env.EXCUBITOR_DEVELOP_ROOT = "F:\\clones\\develop\\";
+    expect(developRoot()).toBe("F:/clones/develop");
   });
 });
 
