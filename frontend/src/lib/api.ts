@@ -343,13 +343,21 @@ async function getJSON<T>(path: string): Promise<T> {
 async function responseErrorMessage(path: string, res: Response): Promise<string> {
   let message = `${path} ${res.status}`;
   try {
-    const body = await res.clone().json() as { error?: unknown; message?: unknown };
-    const detail = typeof body.message === 'string'
-      ? body.message
-      : typeof body.error === 'string'
-        ? body.error
-        : null;
+    const body = await res.clone().json() as {
+      error?: unknown;
+      message?: unknown;
+      stderr?: unknown;
+      cli?: unknown;
+    };
+    const detail = typeof body.stderr === 'string' && body.stderr.trim()
+      ? body.stderr.trim()
+      : typeof body.message === 'string'
+        ? body.message
+        : typeof body.error === 'string'
+          ? body.error
+          : null;
     if (detail) message += `: ${detail}`;
+    if (typeof body.cli === 'string' && body.cli.trim()) message += `\nRun locally: ${body.cli.trim()}`;
   } catch {
     const text = await res.text().catch(() => '');
     if (text) message += `: ${text.slice(0, 200)}`;
@@ -363,6 +371,7 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error(await responseErrorMessage(path, res));
   return (await res.json()) as T;
 }
 
@@ -401,11 +410,35 @@ export function fetchCatalogServices(): Promise<CatalogService[]> {
     .then((d) => d.services.map((s) => ({ code: s.code, name: s.name })));
 }
 
-export function controlService(code: string, action: ControlAction) {
-  return postJSON<{ ok: boolean; exit_code: number; command: string; stdout: string; stderr: string }>(
-    `/api/v1/services/${encodeURIComponent(code)}/control`,
-    { action },
-  );
+export interface ServiceControlResult {
+  ok: boolean;
+  exit_code: number;
+  command: string;
+  stdout: string;
+  stderr: string;
+}
+
+export function serviceControlCliCommand(code: string, action: ControlAction): string {
+  return `npm run ctl -- service ${code} ${action} --json`;
+}
+
+export async function controlService(code: string, action: ControlAction): Promise<ServiceControlResult> {
+  try {
+    const result = await postJSON<ServiceControlResult>(
+      `/api/v1/services/${encodeURIComponent(code)}/control`,
+      { action },
+    );
+    if (!result.ok) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `exit code ${result.exit_code}`);
+    }
+    return result;
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const fallback = detail.includes('Run locally:') ? '' : `\nRun locally: ${serviceControlCliCommand(code, action)}`;
+    throw new Error(
+      `Local control proxy failed for ${code} ${action}: ${detail}${fallback}`,
+    );
+  }
 }
 
 export interface EmergencyResult {

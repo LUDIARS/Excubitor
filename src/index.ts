@@ -27,9 +27,12 @@ import { syncCatalog } from './catalog/sync.js';
 import { watchCatalog } from './catalog/watcher.js';
 import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
-import { controlService } from './control/manager.js';
-import { runAutostart } from './process/autostart.js';
-import { attachProcessBridge } from './log/process-bridge.js';
+import {
+  controlServiceViaLocalTool,
+  emergencyServiceViaLocalTool,
+  localControlStatus,
+} from './local-control/service-adapter.js';
+import { requestLocalControl } from './local-control/client.js';
 import { startFileTail, type FileTailHandle } from './log/file-tail.js';
 import { startErrorDetector, setCatalogProvider } from './log/error-detector.js';
 import { seedDefaultRules } from './auto_fix/seed.js';
@@ -39,13 +42,10 @@ import { startConcordiaDispatchLoop } from './auto_fix/concordia-dispatch-loop.j
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
 import { buildLaunchRouter } from './launch/router.js';
-import { getLaunchProfile } from './launch/profile.js';
-import { startSelection } from './launch/orchestrator.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
-import { reconcileProcesses } from './process/reconcile.js';
 import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
@@ -69,10 +69,10 @@ import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { startRetentionLoop } from './db/retention.js';
+import { startProcessLogTail } from './log/process-log-tail.js';
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson } from './mcp/mcp-json.js';
 import { buildMcpHttpRouter } from './mcp/http.js';
-import { runEmergencyAction } from './ops/emergency.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
 import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
@@ -95,6 +95,10 @@ const BUILD_VERSION_REDIS_TTL_MS = cacheStorageTtl(BUILD_VERSION_CACHE_MS);
 const FUNCTION_METRICS_TIMEOUT_MS = readPositiveIntEnv('EXCUBITOR_FUNCTION_METRICS_TIMEOUT_MS', 10_000);
 
 const ControlBodySchema = z.object({
+  action: z.enum(['start', 'stop', 'restart']),
+});
+
+const ExcubitorControlBodySchema = z.object({
   action: z.enum(['start', 'stop', 'restart']),
 });
 
@@ -404,14 +408,13 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   setCatalogServices(currentCatalog.services);
   setGlobalEnv(currentCatalog.global?.env ?? {});
 
-  // 永続化された running/pending な node プロセスを実体と突合 (生存→再採用 / 死亡→crashed)。
-  // detached 起動なので Excubitor 再起動を跨いでサービスは生きており、 ここで管理下に戻す。
-  reconcileProcesses(currentCatalog);
+  // Lifecycle ownership and PID reconciliation live in the local supervisor.
+  // This process only mirrors observed health into the monitoring database.
   await syncHealthyServiceStates(currentCatalog);
 
   await seedDefaultRules();
-  attachProcessBridge();
   const fileTailHandle: FileTailHandle = startFileTail(currentCatalog);
+  const processLogTailHandle = await startProcessLogTail(currentCatalog);
   setCatalogProvider(() => currentCatalog!);
   const errorDetectorHandle = await startErrorDetector();
   const dispatchHandle = startConcordiaDispatchLoop(() => currentCatalog!);
@@ -444,6 +447,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     setCatalogServices(fresh.services);
     setGlobalEnv(fresh.global?.env ?? {});
     fileTailHandle.refresh(fresh);
+    await processLogTailHandle.refresh(fresh);
     logger.info(
       { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length, reason },
       'catalog reloaded',
@@ -453,28 +457,12 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
     await reloadCatalog('file change');
   });
-  // SafeMode: 何も起動せず Excubitor 本体だけ立ち上げる (autostart / auto-launch を抑止)。
-  // 監視・スキャン・Web GUI・制御 API は通常どおり動くので、 起動後に手動で立ち上げられる。
-  const serviceMode = detectServiceMode();
+  // The backend never owns service lifecycle. Safe mode remains visible for
+  // compatibility, while autostart/launch decisions are made by the supervisor.
   const safeMode = detectSafeMode();
+  const serviceMode = detectServiceMode();
   setSafeMode(safeMode);
-  if (safeMode) {
-    logger.warn(
-      'SAFE MODE: autostart と保存済み起動セットの auto-launch をスキップ (Excubitor のみ起動)',
-    );
-  } else {
-    await runAutostart(currentCatalog);
-
-    // 初回ウィザード完了済み + auto_launch なら、 保存済み起動セットを boot で一括起動する
-    // (「次回自動」)。 未設定 (初回) なら何も起動せず、 UI のウィザードを待つ。
-    const profile = getLaunchProfile();
-    if (profile.configured && profile.autoLaunch && profile.selection.length > 0) {
-      logger.info({ selection: profile.selection }, 'auto-launching saved launch set');
-      void startSelection(currentCatalog, profile.selection).catch((err: unknown) =>
-        logger.error({ err: (err as Error).message }, 'auto-launch failed'),
-      );
-    }
-  }
+  logger.info({ safeMode }, 'service lifecycle delegated to local-control supervisor');
 
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
@@ -498,10 +486,77 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     c.json({
       ok: true,
       service: 'excubitor',
+      pid: process.pid,
+      instance_token: process.env.EXCUBITOR_INSTANCE_TOKEN ?? null,
       safe_mode: isSafeMode(),
       started_at: observabilityStartedAt,
     }),
   );
+
+  app.get('/api/v1/local-control/status', async (c) => {
+    try {
+      const supervisor = await localControlStatus({ timeoutMs: 1_000 });
+      return c.json({ ok: true, supervisor });
+    } catch (error) {
+      return c.json({
+        ok: false,
+        error: 'local_control_unavailable',
+        message: error instanceof Error ? error.message : String(error),
+        cli: 'npm run ctl -- excubitor status --json',
+      }, 503);
+    }
+  });
+
+  app.post('/api/v1/excubitor/control', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = ExcubitorControlBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    }
+    const actor = c.req.header('x-excubitor-actor') ?? 'anonymous';
+    const isDeferred = parsed.data.action === 'stop' || parsed.data.action === 'restart';
+    try {
+      const response = await requestLocalControl({
+        target: { kind: 'excubitor' },
+        action: parsed.data.action,
+        actor,
+        dispatch: isDeferred ? 'prepare' : 'execute',
+      }, { timeoutMs: 5_000 });
+      if (isDeferred && response.state === 'accepted') {
+        const commit = (): void => {
+          void requestLocalControl({
+            operation_id: response.operation_id,
+            target: { kind: 'excubitor' },
+            action: parsed.data.action,
+            actor,
+            dispatch: 'commit',
+          }, { timeoutMs: 5_000 }).catch((error: unknown) =>
+            logger.error(
+              { operation_id: response.operation_id, err: error instanceof Error ? error.message : String(error) },
+              'failed to commit deferred Excubitor lifecycle operation',
+            ),
+          );
+        };
+        const environment = c.env as unknown as {
+          outgoing?: { once: (event: 'finish', listener: () => void) => unknown };
+        } | undefined;
+        const outgoing = environment?.outgoing;
+        if (outgoing) outgoing.once('finish', commit);
+        else queueMicrotask(commit); // Hono in-memory/test adapter has no Node ServerResponse.
+      }
+      const payload = { ...response, action: parsed.data.action };
+      if (response.state === 'accepted') return c.json(payload, 202);
+      if (response.ok) return c.json(payload, 200);
+      return c.json(payload, 502);
+    } catch (error) {
+      return c.json({
+        ok: false,
+        error: 'local_control_unavailable',
+        message: error instanceof Error ? error.message : String(error),
+        cli: `npm run ctl -- excubitor ${parsed.data.action} --json`,
+      }, 503);
+    }
+  });
 
   // MCP (Streamable HTTP, stateless)。 セッション毎 stdio プロセス (≈100MB×N) の置き換え。
   app.route('/', buildMcpHttpRouter(`http://127.0.0.1:${backendPort()}`));
@@ -735,7 +790,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       note?: string;
       snooze_until?: string;
     };
-    const actor = c.req.header('x-concordia-actor') ?? c.req.header('x-excubitor-actor') ?? 'anonymous';
+    const actor = c.req.header('x-excubitor-actor') ?? 'anonymous';
     const targetState = body.state ?? null;
     const snoozeMs = body.snooze_until ? new Date(body.snooze_until).getTime() : null;
     db().run(drizzleSql`
@@ -795,7 +850,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const resolved = await resolveTaskAndService(taskId);
     if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
     const { task: t, service: svc } = resolved;
-    const actor = c.req.header('x-concordia-actor') ?? 'manual';
+    const actor = c.req.header('x-excubitor-actor') ?? 'manual';
     try {
       const result = await runAutoFix({
         errorTaskId: taskId,
@@ -815,7 +870,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const resolved = await resolveTaskAndService(taskId);
     if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
     const { task: t, service: svc } = resolved;
-    const actor = c.req.header('x-concordia-actor') ?? 'manual';
+    const actor = c.req.header('x-excubitor-actor') ?? 'manual';
     try {
       const result = await runInvestigation({
         errorTaskId: taskId,
@@ -856,24 +911,34 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const code = c.req.param('code');
     const svc = findService(code);
     if (!svc) return c.json({ error: 'not_found' }, 404);
-    if (svc.disabled) return c.json({ error: 'service_disabled' }, 400);
 
     const body = await c.req.json().catch(() => ({}));
     const parsed = ControlBodySchema.safeParse(body);
     if (!parsed.success) {
       return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     }
-    const actor = c.req.header('x-concordia-actor') ?? 'anonymous';
-    const result = await controlService(svc, parsed.data.action, actor);
-    void syncDockerInstances(currentCatalog!).catch(() => {});
-    return c.json({
+    if (svc.disabled && parsed.data.action !== 'stop') return c.json({ error: 'service_disabled' }, 400);
+    const actor = c.req.header('x-excubitor-actor') ?? 'anonymous';
+    const result = await controlServiceViaLocalTool(svc, parsed.data.action, actor);
+    void syncDockerInstances(currentCatalog!).catch((error: unknown) =>
+      logger.warn({ err: error instanceof Error ? error.message : String(error) }, 'post-control docker sync failed'),
+    );
+    const payload = {
       ok: result.ok,
       action: parsed.data.action,
       exit_code: result.exit_code,
       command: result.command,
       stdout: result.stdout,
       stderr: result.stderr,
-    });
+      ...(result.stdout_truncated ? { stdout_truncated: true } : {}),
+      ...(result.stderr_truncated ? { stderr_truncated: true } : {}),
+      ...(result.command_truncated ? { command_truncated: true } : {}),
+      ...(result.local_control_error ? { error: `local_control_${result.local_control_error}` } : {}),
+      cli: `npm run ctl -- service ${svc.code} ${parsed.data.action} --json`,
+    };
+    if (result.ok) return c.json(payload, 200);
+    if (result.local_control_error === 'unavailable') return c.json(payload, 503);
+    return c.json(payload, 502);
   });
 
   app.post('/api/v1/services/:code/emergency', async (c) => {
@@ -887,8 +952,11 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     if (!parsed.success) {
       return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     }
-    const actor = c.req.header('x-concordia-actor') ?? c.req.header('x-excubitor-actor') ?? 'anonymous';
-    const result = await runEmergencyAction(currentCatalog!, svc, parsed.data.action, parsed.data.prompt, parsed.data.port);
+    const actor = c.req.header('x-excubitor-actor') ?? 'anonymous';
+    const result = await emergencyServiceViaLocalTool(svc, parsed.data.action, actor, {
+      ...(parsed.data.prompt ? { prompt: parsed.data.prompt } : {}),
+      ...(parsed.data.port !== undefined ? { port: parsed.data.port } : {}),
+    });
     db().run(drizzleSql`
       INSERT INTO audit_log (actor, action, target_type, target_id, payload)
       VALUES (
@@ -905,8 +973,17 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
         })}
       )
     `);
-    void syncDockerInstances(currentCatalog!).catch(() => {});
-    return c.json(result);
+    void syncDockerInstances(currentCatalog!).catch((error: unknown) =>
+      logger.warn({ err: error instanceof Error ? error.message : String(error) }, 'post-emergency docker sync failed'),
+    );
+    const payload = {
+      ...result,
+      ...(result.local_control_error ? { error: `local_control_${result.local_control_error}` } : {}),
+      cli: `npm run ctl -- service ${svc.code} ${parsed.data.action} --json${parsed.data.port ? ` --port=${parsed.data.port}` : ''}`,
+    };
+    if (result.ok) return c.json(payload, 200);
+    if (result.local_control_error === 'unavailable') return c.json(payload, 503);
+    return c.json(payload, 502);
   });
 
   // ─── built Web UI (frontend/dist) 配信 ─────────────────────
@@ -928,6 +1005,11 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { parquetHandle.stop(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
+      try {
+        await processLogTailHandle.stop();
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'process log tail stop failed');
+      }
       try {
         await downtimeWorker?.close();
       } catch (err) {

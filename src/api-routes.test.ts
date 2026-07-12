@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { request as nodeHttpRequest } from 'node:http';
 import { join } from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { serve } from '@hono/node-server';
 import { sql } from 'drizzle-orm';
 import type { Hono } from 'hono';
 import { openDb, closeDb } from './db/index.js';
@@ -65,10 +69,47 @@ const mocks = vi.hoisted(() => ({
     command: 'mock-control',
     stdout: 'started',
     stderr: '',
+    local_control_error: undefined as 'unavailable' | 'invalid_response' | undefined,
+  })),
+  emergencyService: vi.fn(async (
+    service: { code: string },
+    action: 'kill-port' | 'claude-port-fix',
+    _actor: string,
+    parameters: { port?: number } = {},
+  ) => ({
+    ok: true,
+    action,
+    code: service.code,
+    port: parameters.port ?? null,
+    pids: parameters.port ? [1111] : [],
+    stdout: 'fixed',
+    stderr: '',
+    local_control_error: undefined as 'unavailable' | 'invalid_response' | undefined,
+  })),
+  localControlStatus: vi.fn(async () => ({
+    kind: 'excubitor-status' as const,
+    state: 'running' as const,
+    desired_state: 'running' as const,
+    pid: 4321,
+    restart_count: 0,
+    last_exit_code: null,
+    last_signal: null,
+    last_error: null,
+    instance_token: 'mock-instance',
+  })),
+  requestLocalControl: vi.fn(async (input: { action: string }) => ({
+    protocol_version: 1 as const,
+    operation_id: 'mock-operation',
+    ok: true,
+    state: input.action === 'stop' || input.action === 'restart' ? 'accepted' as const : 'completed' as const,
+    payload: input.action === 'stop' || input.action === 'restart'
+      ? { kind: 'accepted' as const, deferred: true as const, target_key: 'excubitor' }
+      : undefined,
   })),
   runAutostart: vi.fn(async () => undefined),
   attachProcessBridge: vi.fn(),
   startFileTail: vi.fn(() => ({ refresh: vi.fn(), stop: vi.fn() })),
+  startProcessLogTail: vi.fn(async () => ({ refresh: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) })),
   startErrorDetector: vi.fn(async () => ({ stop: vi.fn() })),
   startConcordiaDispatchLoop: vi.fn(() => ({ stop: vi.fn() })),
   setCatalogProvider: vi.fn(),
@@ -196,7 +237,12 @@ vi.mock('./scanner/sync.js', () => ({ syncDockerInstances: mocks.syncDockerInsta
 vi.mock('./scanner/health-state.js', () => ({ syncHealthyServiceStates: mocks.syncHealthyServiceStates }));
 vi.mock('./scanner/ports.js', () => ({ buildPortReport: mocks.buildPortReport }));
 
-vi.mock('./control/manager.js', () => ({ controlService: mocks.controlService }));
+vi.mock('./local-control/service-adapter.js', () => ({
+  controlServiceViaLocalTool: mocks.controlService,
+  emergencyServiceViaLocalTool: mocks.emergencyService,
+  localControlStatus: mocks.localControlStatus,
+}));
+vi.mock('./local-control/client.js', () => ({ requestLocalControl: mocks.requestLocalControl }));
 vi.mock('./process/autostart.js', () => ({ runAutostart: mocks.runAutostart }));
 vi.mock('./process/reconcile.js', () => ({ reconcileProcesses: mocks.reconcileProcesses }));
 vi.mock('./process/topology.js', () => ({
@@ -210,6 +256,7 @@ vi.mock('./process/inject.js', () => ({
 
 vi.mock('./log/process-bridge.js', () => ({ attachProcessBridge: mocks.attachProcessBridge }));
 vi.mock('./log/file-tail.js', () => ({ startFileTail: mocks.startFileTail }));
+vi.mock('./log/process-log-tail.js', () => ({ startProcessLogTail: mocks.startProcessLogTail }));
 vi.mock('./log/error-detector.js', () => ({
   startErrorDetector: mocks.startErrorDetector,
   setCatalogProvider: mocks.setCatalogProvider,
@@ -466,6 +513,23 @@ async function requestJson<T = Record<string, unknown>>(
   return { res, data };
 }
 
+async function listenRouter(router: Hono): Promise<{
+  server: ReturnType<typeof serve>;
+  baseUrl: string;
+}> {
+  const server = serve({ fetch: router.fetch, hostname: '127.0.0.1', port: 0 });
+  if (!server.listening) await once(server, 'listening');
+  const address = server.address() as AddressInfo | null;
+  if (!address) throw new Error('test HTTP server has no address');
+  return { server, baseUrl: `http://127.0.0.1:${address.port}` };
+}
+
+function closeHttpServer(server: ReturnType<typeof serve>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+}
+
 describe('Excubitor HTTP APIs', () => {
   let router: Hono;
 
@@ -700,12 +764,42 @@ describe('Excubitor HTTP APIs', () => {
   });
 
   it('validates and runs service control APIs', async () => {
+    const localControl = await requestJson(router, 'GET', '/api/v1/local-control/status');
+    expect(localControl.res.status).toBe(200);
+    expect(localControl.data).toMatchObject({ ok: true, supervisor: { state: 'running', pid: 4321 } });
+
+    const selfRestart = await requestJson(router, 'POST', '/api/v1/excubitor/control', { action: 'restart' });
+    expect(selfRestart.res.status).toBe(202);
+    expect(selfRestart.data).toMatchObject({ ok: true, state: 'accepted', action: 'restart' });
+    await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
+    expect(mocks.requestLocalControl).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'restart', dispatch: 'prepare' }),
+      expect.any(Object),
+    );
+    expect(mocks.requestLocalControl).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'restart', dispatch: 'commit', operation_id: 'mock-operation' }),
+      expect.any(Object),
+    );
+
     const invalid = await requestJson(router, 'POST', '/api/v1/services/svc-a/control', { action: 'bad' });
     expect(invalid.res.status).toBe(400);
 
     const started = await requestJson(router, 'POST', '/api/v1/services/svc-a/control', { action: 'start' });
     expect(started.res.status).toBe(200);
     expect(started.data).toMatchObject({ ok: true, action: 'start' });
+
+    mocks.controlService.mockResolvedValueOnce({
+      ok: false,
+      exit_code: -1,
+      command: 'excubitorctl service svc-a restart',
+      stdout: '',
+      stderr: 'connect ENOENT',
+      local_control_error: 'unavailable',
+    });
+    const unavailable = await requestJson(router, 'POST', '/api/v1/services/svc-a/control', { action: 'restart' });
+    expect(unavailable.res.status).toBe(503);
+    expect(unavailable.data).toMatchObject({ error: 'local_control_unavailable' });
+    expect(unavailable.data).toHaveProperty('cli');
 
     const disabled = await requestJson(router, 'POST', '/api/v1/services/disabled/control', { action: 'start' });
     expect(disabled.res.status).toBe(400);
@@ -716,6 +810,111 @@ describe('Excubitor HTTP APIs', () => {
     });
     expect(emergency.res.status).toBe(200);
     expect(emergency.data).toMatchObject({ ok: true, action: 'kill-port' });
+  });
+
+  it('commits self-restart only after the real Node response finishes', async () => {
+    const originalImplementation = mocks.requestLocalControl.getMockImplementation();
+    const events: string[] = [];
+    mocks.requestLocalControl.mockImplementation(async (input) => {
+      const dispatch = (input as { dispatch?: string }).dispatch;
+      if (dispatch === 'commit') events.push('commit');
+      return dispatch === 'prepare'
+        ? {
+            protocol_version: 1 as const,
+            operation_id: 'http-finish-operation',
+            ok: true,
+            state: 'accepted' as const,
+            payload: { kind: 'accepted' as const, deferred: true as const, target_key: 'excubitor' },
+          }
+        : {
+            protocol_version: 1 as const,
+            operation_id: 'http-finish-operation',
+            ok: true,
+            state: 'completed' as const,
+            payload: undefined,
+          };
+    });
+    const { server, baseUrl } = await listenRouter(router);
+    server.on('request', (request, response) => {
+      if (request.url === '/api/v1/excubitor/control') {
+        response.once('finish', () => events.push('finish'));
+      }
+    });
+
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/excubitor/control`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'restart' }),
+      });
+      expect(response.status).toBe(202);
+      await response.text();
+      await vi.waitFor(() => expect(events).toContain('commit'));
+      expect(events.indexOf('finish')).toBeGreaterThanOrEqual(0);
+      expect(events.indexOf('finish')).toBeLessThan(events.indexOf('commit'));
+    } finally {
+      if (originalImplementation) mocks.requestLocalControl.mockImplementation(originalImplementation);
+      await closeHttpServer(server);
+    }
+  });
+
+  it('does not commit self-restart when the HTTP client disconnects before a response', async () => {
+    const originalImplementation = mocks.requestLocalControl.getMockImplementation();
+    let releasePrepare: (() => void) | undefined;
+    let markPrepareSeen: (() => void) | undefined;
+    let commitCalls = 0;
+    const prepareSeen = new Promise<void>((resolve) => { markPrepareSeen = resolve; });
+    const pendingPrepare = new Promise<{
+      protocol_version: 1;
+      operation_id: string;
+      ok: true;
+      state: 'accepted';
+      payload: { kind: 'accepted'; deferred: true; target_key: string };
+    }>((resolve) => {
+      releasePrepare = () => resolve({
+        protocol_version: 1,
+        operation_id: 'aborted-http-operation',
+        ok: true,
+        state: 'accepted',
+        payload: { kind: 'accepted', deferred: true, target_key: 'excubitor' },
+      });
+    });
+    mocks.requestLocalControl.mockImplementation(async (input) => {
+      const dispatch = (input as { dispatch?: string }).dispatch;
+      if (dispatch === 'prepare') {
+        markPrepareSeen?.();
+        return pendingPrepare;
+      }
+      if (dispatch === 'commit') commitCalls += 1;
+      return {
+        protocol_version: 1 as const,
+        operation_id: 'aborted-http-operation',
+        ok: true,
+        state: 'completed' as const,
+        payload: undefined,
+      };
+    });
+    const { server, baseUrl } = await listenRouter(router);
+
+    try {
+      const request = nodeHttpRequest(`${baseUrl}/api/v1/excubitor/control`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      request.on('error', () => undefined);
+      request.end(JSON.stringify({ action: 'restart' }));
+      await prepareSeen;
+      const closed = new Promise<void>((resolve) => request.once('close', () => resolve()));
+      request.destroy();
+      await closed;
+      releasePrepare?.();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(commitCalls).toBe(0);
+    } finally {
+      releasePrepare?.();
+      if (originalImplementation) mocks.requestLocalControl.mockImplementation(originalImplementation);
+      await closeHttpServer(server);
+    }
   });
 
   it('mutates launch, env, and catalog APIs', async () => {
@@ -838,6 +1037,48 @@ describe('Excubitor HTTP APIs', () => {
     );
     expect(localControl.res.status).toBe(200);
     expect(localControl.data).toMatchObject({ ok: true, action: 'restart' });
+
+    mocks.controlService.mockResolvedValueOnce({
+      ok: false,
+      exit_code: -1,
+      command: 'excubitorctl service svc-a restart',
+      stdout: '',
+      stderr: 'connect ENOENT',
+      local_control_error: 'unavailable',
+    });
+    const unavailableControl = await requestJson(
+      router,
+      'POST',
+      '/api/v1/federation/control',
+      { code: 'svc-a', action: 'restart' },
+      { authorization: 'Bearer good' },
+    );
+    expect(unavailableControl.res.status).toBe(503);
+    expect(unavailableControl.data).toMatchObject({
+      ok: false,
+      error: 'local_control_unavailable',
+      stderr: 'connect ENOENT',
+      command: 'excubitorctl service svc-a restart',
+    });
+    expect(unavailableControl.data).toHaveProperty('cli');
+
+    mocks.controlService.mockResolvedValueOnce({
+      ok: false,
+      exit_code: 17,
+      command: 'excubitorctl service svc-a restart',
+      stdout: '',
+      stderr: 'restart rejected',
+      local_control_error: 'invalid_response',
+    });
+    const rejectedControl = await requestJson(
+      router,
+      'POST',
+      '/api/v1/federation/control',
+      { code: 'svc-a', action: 'restart' },
+      { authorization: 'Bearer good' },
+    );
+    expect(rejectedControl.res.status).toBe(502);
+    expect(rejectedControl.data).toMatchObject({ ok: false, error: 'control_failed', stderr: 'restart rejected' });
 
     const localUpdate = await requestJson(
       router,

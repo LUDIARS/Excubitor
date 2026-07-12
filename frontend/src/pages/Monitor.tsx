@@ -284,6 +284,8 @@ function ComponentStatusLine({
       const r = await controlService(c.code, action);
       if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
       await onChanged();
+    } catch (error) {
+      alert(`${action} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -295,6 +297,8 @@ function ComponentStatusLine({
       if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
       else alert(`${action}: ${r.stdout || `ok (${r.pids.join(', ') || 'no pid'})`}`);
       await onChanged();
+    } catch (error) {
+      alert(`${action} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setOpsBusy(false);
     }
@@ -390,6 +394,8 @@ function ServiceDetailOverlay({
       const r = await controlService(c.code, action);
       if (!r.ok) alert(`${action} failed: ${r.stderr || r.stdout}`);
       await onChanged();
+    } catch (error) {
+      alert(`${action} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }

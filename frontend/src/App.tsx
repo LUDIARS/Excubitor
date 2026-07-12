@@ -17,15 +17,15 @@ type Tab = 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'f
 const TAB_IDS: Tab[] = ['dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' },
   { id: 'monitor', label: 'Monitor' },
-  { id: 'function-metrics', label: 'Function Metrics' },
-  { id: 'memory', label: 'Memory' },
   { id: 'logs', label: 'Logs' },
-  { id: 'federation', label: 'Federation' },
-  { id: 'catalog', label: 'Catalog' },
-  { id: 'errors', label: 'Errors' },
   { id: 'config', label: 'Config' },
+  { id: 'catalog', label: 'Catalog' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'errors', label: 'Errors' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'function-metrics', label: 'Function Metrics' },
+  { id: 'federation', label: 'Federation' },
 ];
 
 const frontendUrls = (config.allowedHosts as readonly string[])
@@ -35,7 +35,7 @@ const frontendUrls = (config.allowedHosts as readonly string[])
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return TAB_IDS.includes(h) ? h : 'dashboard';
+    return TAB_IDS.includes(h) ? h : 'monitor';
   });
 
   const [safeMode, setSafeMode] = useState(false);

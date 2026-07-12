@@ -18,7 +18,6 @@ import {
 } from '../lib/api';
 
 const FAVORITES_STORAGE_KEY = 'excubitor.dashboard.favoriteServiceCodes';
-const RUNNING_STATES = new Set(['running', 'pending']);
 const METRIC_POLL_STATES = new Set(['running', 'pending', 'stale']);
 const HEALTH_STALE_MS = 90_000;
 
@@ -97,10 +96,7 @@ export default function Dashboard() {
   }, [favoriteCodes]);
 
   const allServices = useMemo(() => flattenServices(projects ?? []), [projects]);
-  const services = useMemo(
-    () => allServices.filter((s) => shouldShowOnDashboard(s.component, favoriteCodes)),
-    [allServices, favoriteCodes],
-  );
+  const services = allServices;
   const favoriteCandidates = useMemo(
     () => allServices.filter((s) => !favoriteCodes.has(s.component.code)),
     [allServices, favoriteCodes],
@@ -144,7 +140,7 @@ export default function Dashboard() {
       <div className="dashboard-head">
         <div>
           <h2>Dashboard</h2>
-          <div className="dashboard-sub">Autostart, active, and favorite service operations.</div>
+          <div className="dashboard-sub">All registered services, including stopped and unhealthy targets.</div>
         </div>
         <div className="dashboard-head-actions">
           <select value={favoriteDraft} onChange={(e) => setFavoriteDraft(e.target.value)} aria-label="Add favorite service">
@@ -173,10 +169,6 @@ export default function Dashboard() {
 
       {projects === null && !error && <div className="empty-state">Loading...</div>}
       {projects !== null && allServices.length === 0 && <div className="empty-state">No services registered.</div>}
-      {projects !== null && allServices.length > 0 && services.length === 0 && (
-        <div className="empty-state">No dashboard targets. Enable autostart, start a service, or add a favorite.</div>
-      )}
-
       {services.length > 0 && (
         <div className="dashboard-layout">
           <section className="dashboard-service-list">
@@ -459,10 +451,6 @@ function flattenServices(projects: Project[]): DashboardService[] {
       if (attention !== 0) return attention;
       return a.component.code.localeCompare(b.component.code);
     });
-}
-
-function shouldShowOnDashboard(c: Component, favorites: Set<string>): boolean {
-  return c.autostart === true || RUNNING_STATES.has(componentDisplayState(c)) || favorites.has(c.code);
 }
 
 function metricCandidates(projects: Project[]): Component[] {

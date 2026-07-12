@@ -4,12 +4,16 @@
   "private": true,
   "description": "LUDIARS service liveness, log aggregation, and error triage monitor server.",
   "type": "module",
+  "bin": {
+    "excubitorctl": "dist/local-control/cli.js"
+  },
   "scripts": {
     "dev": "npm install --include=dev && npm run build && npm run start",
     "dev:safe": "npm install --include=dev && npm run build && npm run start:safe",
     "build": "tsc",
     "start": "node dist/server.js",
     "service": "node dist/service-runner.js",
+    "ctl": "node dist/local-control/cli.js",
     "start:service": "node dist/server.js --service",
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",

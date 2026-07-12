@@ -1,16 +1,6 @@
 /**
- * Auto-fix runner 窶・Claude Code CLI 蟄舌・繝ｭ繧ｻ繧ｹ繧定ｵｷ蜍輔＠縺ｦ service 縺ｮ cwd 縺ｧ
- * 菫ｮ豁｣繧定ｩｦ縺ｿ繧九・螳御ｺ・ｾ・service 繧・restart 縺励※ health probe 縺ｧ verify 縺吶ｋ縲・
- *
- * 豬√ｌ:
- *   1. auto_fix_runs 縺ｫ陦後ｒ菴懈・ (state=pending)
- *   2. branch 蛻・ｋ (git switch -c <branch>)
- *   3. claude -p 縺ｫ prompt 繧・stdin 縺ｧ貂｡縺励※ spawn
- *   4. 邨ゆｺ・ｾ後・git diff 繧堤｢ｺ隱・
- *   5. git add + commit + push + (optional) gh pr create
- *   6. service 繧・Excubitor 縺ｮ謗ｧ縺・API 邨檎罰縺ｧ restart
- *   7. health endpoint 繧・probe 縺励※ verify
- *   8. error_task / auto_fix_runs 繧呈峩譁ｰ
+ * Runs the configured repair CLI, publishes its branch, then verifies the
+ * service through the local-control supervisor before probing health.
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -19,7 +9,7 @@ import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
-import { controlService } from '../control/manager.js';
+import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { autoFixConfig } from './config.js';
 
 const logger = createNamedLogger('excubitor.auto_fix');
@@ -59,8 +49,7 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
     throw new Error(`no working_dir resolvable for ${code}`);
   }
 
-  // run row 菴懈・縲・action_type='fix' 繧呈・遉ｺ 窶・DB 縺ｮ繝・ヵ繧ｩ繝ｫ繝亥､縺ｨ荳閾ｴ縺吶ｋ縺後・
-  // investigate 縺ｨ荳ｦ縺ｶ邉ｻ邨ｱ縺ｧ縺ゅｋ縺薙→繧・SQL 荳翫〒譏守｢ｺ縺ｫ縺吶ｋ縲・
+  // Persist the explicit fix action before starting external side effects.
   const runId = randomUUID();
   db().run(sql`
     INSERT INTO auto_fix_runs (id, error_task_id, service_code, agent, state, action_type, triggered_by, started_at)
@@ -74,7 +63,7 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
 
     db().run(sql`UPDATE auto_fix_runs SET branch = ${branch}, prompt = ${prompt} WHERE id = ${runId}`);
 
-    // 1) branch 蛻・ｋ (螟ｱ謨励＠縺ｦ繧らｶ夊｡・窶・claude 蛛ｴ縺ｫ莉ｻ縺帙ｋ驕ｸ謚槭ｂ縺ゅｊ)
+    // Create an isolated repair branch; the agent can recover if it already exists.
     await execCapture('git', ['switch', '-c', branch], workingDir).catch(() => {
       logger.warn({ code, branch }, 'git switch failed (maybe branch already exists), continuing');
     });
@@ -94,8 +83,7 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
       throw new Error(`claude CLI exit ${cli.exitCode}: ${cli.stderr.slice(-500)}`);
     }
 
-    // 2.5) safeguard 窶・branch 縺ｫ縲悟些髯ｺ縺ｪ繝輔ぃ繧､繝ｫ縲阪′蜷ｫ縺ｾ繧後※縺・↑縺・°讀懈渊縲・
-    //      .env / *.bak / *.pem / *.key 遲峨・ secret-risk file 縺ｯ push 繧定ｨｱ蜿ｯ縺帙★莠ｺ髢灘愛譁ｭ縺ｸ縲・
+    // Refuse to publish secret-bearing or backup files created by the repair agent.
     const allChanged = await collectChangedFiles(workingDir);
     const unsafe = pickUnsafeFiles(allChanged);
     if (unsafe.length > 0) {
@@ -114,10 +102,10 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
       return { runId, state: 'failed' };
     }
 
-    // 3) diff 遒ｺ隱・+ commit + push + PR (claude 縺梧里縺ｫ繧・▲縺ｦ繧句ｴ蜷医ｂ縺ゅｋ縺後・陬懷ｮ後〒螳滓命)
+    // Commit and publish any changes the repair agent left in the worktree.
     const diff = await execCapture('git', ['status', '--porcelain'], workingDir);
     if (diff.stdout.trim().length === 0) {
-      // claude 縺・commit 縺励※縺・※ working tree 縺後″繧後＞縺ｪ繧峨・譌｢縺ｫ push 貂医∩縺狗｢ｺ隱・
+      // A clean worktree may mean the repair agent already committed its change.
       const lastCommit = await execCapture('git', ['log', '-1', '--pretty=%H'], workingDir);
       db().run(sql`
         UPDATE auto_fix_runs SET commit_hash = ${lastCommit.stdout.trim()} WHERE id = ${runId}
@@ -325,9 +313,16 @@ async function execCapture(
   });
 }
 
-async function verifyService(svc: Service): Promise<'ok' | 'health_failed' | 'still_crashing' | 'not_attempted'> {
+export async function verifyService(svc: Service): Promise<'ok' | 'health_failed' | 'still_crashing' | 'not_attempted'> {
   try {
-    await controlService(svc, 'restart', 'auto-fix');
+    const restart = await controlServiceViaLocalTool(svc, 'restart', 'auto-fix');
+    if (!restart.ok) {
+      logger.warn(
+        { code: svc.code, command: restart.command, stderr: restart.stderr },
+        'verify restart failed',
+      );
+      return 'still_crashing';
+    }
   } catch (err) {
     logger.warn({ code: svc.code, err: (err as Error).message }, 'verify restart failed');
     return 'still_crashing';
@@ -355,5 +350,4 @@ async function markError(taskId: string, state: string, runId: string | null): P
     WHERE id = ${taskId}
   `);
 }
-
 

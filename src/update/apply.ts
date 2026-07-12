@@ -12,7 +12,7 @@ import { execCapture } from '../shared/exec.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { repoDirOf, checkUpdate } from './checker.js';
-import { controlService } from '../control/manager.js';
+import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { isManaged } from '../process/manager.js';
 
 const logger = createNamedLogger('excubitor.update.apply');
@@ -90,7 +90,7 @@ export async function applyUpdate(
   // 4. 起動中なら restart (反映)。
   const running = isManaged(svc.code) || currentState(svc.code) === 'running';
   if (restart && running) {
-    const r = await controlService(svc, 'restart', actor);
+    const r = await controlServiceViaLocalTool(svc, 'restart', actor);
     steps.push({ step: 'restart', ok: r.ok, detail: tail(r.stdout + r.stderr) });
     if (!r.ok) return fail('restart', tail(r.stderr));
   } else {

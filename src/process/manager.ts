@@ -26,6 +26,7 @@ import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
+import { verifyProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -36,9 +37,27 @@ export interface SpawnedProcess {
   restartCount: number;
 }
 
+interface ManagedProcess extends SpawnedProcess {
+  intentionalStop: boolean;
+  termination: Promise<void>;
+  resolveTermination: () => void;
+}
+
 type LineHandler = (svc: Service, channel: 'stdout' | 'stderr', line: string) => void;
 
-const processes = new Map<string, SpawnedProcess>();
+const processes = new Map<string, ManagedProcess>();
+const spawnReservations = new Map<string, number>();
+const spawnSettlements = new Map<string, {
+  generation: number;
+  settled: Promise<void>;
+  resolve: () => void;
+  failure?: Error;
+}>();
+const restartTimers = new Map<string, NodeJS.Timeout>();
+const desiredStates = new Map<string, { state: 'running' | 'stopped'; generation: number }>();
+let restartSchedulingEnabled = true;
+const TERMINATION_GRACE_MS = 5_000;
+const TERMINATION_POLL_MS = 50;
 
 /**
  * adopted: Excubitor 再起動前に detached で起動され、 boot 時に pid 生存確認で
@@ -54,14 +73,51 @@ const adopted = new Map<string, AdoptedProcess>();
 const lineHandlers = new Set<LineHandler>();
 
 /** boot 再採用: 既に detached で動いている pid を Excubitor の管理下に戻す。 */
-export function adoptProcess(code: string, pid: number, startedAt: Date): void {
-  if (processes.has(code)) return; // 自前 spawn が優先
-  adopted.set(code, { code, pid, startedAt });
+export function adoptProcess(code: string, identity: VerifiedProcessIdentity): void {
+  if (processes.has(code)) return;
+  adopted.set(code, { code, pid: identity.pid, startedAt: identity.startedAt });
+  markServiceRunning(code);
 }
 
 /** code が (自前 spawn or 再採用で) 管理下にあるか。 */
 export function isManaged(code: string): boolean {
   return processes.has(code) || adopted.has(code);
+}
+
+/**
+ * Revalidate the operating-system identity behind a managed entry.
+ * Adopted PIDs can be reused after the original process exits, so callers that
+ * make lifecycle decisions must use this check instead of trusting map state.
+ */
+export async function validateManagedProcess(code: string): Promise<boolean> {
+  const spawned = processes.get(code);
+  if (spawned) {
+    if (spawned.child.exitCode === null && spawned.child.signalCode === null) return true;
+    if (processes.get(code) !== spawned) return true;
+    processes.delete(code);
+    await updateState(code, 'crashed', null, spawned.child.exitCode ?? undefined);
+    return false;
+  }
+
+  const candidate = adopted.get(code);
+  if (!candidate) return false;
+  const verified = await verifyProcessIdentity(candidate.pid, candidate.startedAt);
+  if (verified) return adopted.get(code) === candidate || processes.has(code);
+
+  // Identity verification is asynchronous. Never remove an entry that was
+  // replaced by reconciliation or a concurrent start while verification ran.
+  if (adopted.get(code) !== candidate) return isManaged(code);
+  adopted.delete(code);
+  await updateState(code, 'crashed', null);
+  return false;
+}
+
+export function listAdoptedProcessCodes(): string[] {
+  return Array.from(adopted.keys());
+}
+
+export function isAdoptedProcess(code: string): boolean {
+  return adopted.has(code);
 }
 
 /** pid が生存しているか (signal 0)。 */
@@ -83,6 +139,10 @@ export function getRunningProcess(code: string): SpawnedProcess | undefined {
   return processes.get(code);
 }
 
+export function getManagedPid(code: string): number | undefined {
+  return processes.get(code)?.child.pid ?? adopted.get(code)?.pid;
+}
+
 export function listRunningProcesses(): SpawnedProcess[] {
   return Array.from(processes.values());
 }
@@ -97,9 +157,94 @@ export interface SpawnOptions {
   initialRestartCount?: number;
   /** Test/explicit override. Normal service starts use catalog allow_hot_reload. */
   allowHotReload?: boolean;
+  /** Internal generation used to cancel a start that became stale while awaiting I/O. */
+  expectedGeneration?: number;
+}
+
+export function markServiceRunning(code: string): number {
+  return updateDesiredState(code, 'running');
+}
+
+export function markServiceStopped(code: string): boolean {
+  const hadPendingWork = restartTimers.has(code) || spawnReservations.has(code);
+  updateDesiredState(code, 'stopped');
+  return hadPendingWork;
+}
+
+export function cancelServiceRestart(code: string): number {
+  const current = desiredStates.get(code);
+  return updateDesiredState(code, current?.state ?? 'running');
+}
+
+export function isServiceDesiredRunning(code: string): boolean {
+  return desiredStates.get(code)?.state === 'running';
+}
+
+export async function waitForPendingSpawn(code: string): Promise<void> {
+  const pending = spawnSettlements.get(code);
+  if (pending) await pending.settled;
+}
+
+export function suspendProcessRestarts(): void {
+  restartSchedulingEnabled = false;
+  for (const timer of restartTimers.values()) clearTimeout(timer);
+  restartTimers.clear();
+  for (const [code, desired] of desiredStates) {
+    desiredStates.set(code, { state: desired.state, generation: desired.generation + 1 });
+  }
+}
+
+export function resumeProcessRestarts(): void {
+  restartSchedulingEnabled = true;
+}
+
+function updateDesiredState(code: string, state: 'running' | 'stopped'): number {
+  const timer = restartTimers.get(code);
+  if (timer) clearTimeout(timer);
+  restartTimers.delete(code);
+  const generation = (desiredStates.get(code)?.generation ?? 0) + 1;
+  desiredStates.set(code, { state, generation });
+  return generation;
+}
+
+function isCurrentRunningGeneration(code: string, generation: number): boolean {
+  const desired = desiredStates.get(code);
+  return restartSchedulingEnabled && desired?.state === 'running' && desired.generation === generation;
+}
+
+function reserveSpawn(code: string, expectedGeneration?: number): number {
+  if (!restartSchedulingEnabled) throw new Error(`service ${code} start canceled: supervisor is shutting down`);
+  if (processes.has(code) || adopted.has(code) || spawnReservations.has(code)) {
+    throw new Error(`service ${code} is already managed or being started`);
+  }
+  const generation = expectedGeneration ?? markServiceRunning(code);
+  if (!isCurrentRunningGeneration(code, generation)) {
+    throw new Error(`service ${code} start canceled by a newer lifecycle request`);
+  }
+  spawnReservations.set(code, generation);
+  let resolveSettlement = (): void => undefined;
+  const settled = new Promise<void>((resolve) => {
+    resolveSettlement = resolve;
+  });
+  spawnSettlements.set(code, { generation, settled, resolve: resolveSettlement });
+  return generation;
 }
 
 export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promise<SpawnedProcess> {
+  const generation = reserveSpawn(svc.code, opts.expectedGeneration);
+  try {
+    return await spawnReservedService(svc, { ...opts, expectedGeneration: generation });
+  } finally {
+    if (spawnReservations.get(svc.code) === generation) spawnReservations.delete(svc.code);
+    const settlement = spawnSettlements.get(svc.code);
+    if (settlement?.generation === generation) {
+      spawnSettlements.delete(svc.code);
+      settlement.resolve();
+    }
+  }
+}
+
+async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<SpawnedProcess> {
   if (processes.has(svc.code)) {
     throw new Error(`service ${svc.code} is already spawned`);
   }
@@ -155,6 +300,18 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   );
   const childEnv = await prepareSpawnEnv(svc, { ...inheritedEnv, ...(opts.env ?? {}) });
 
+  // credential preparation performs asynchronous I/O. A stop or supervisor
+  // shutdown may invalidate this reservation while it is in flight; recheck
+  // immediately before the synchronous log-open/spawn sequence.
+  const generation = opts.expectedGeneration;
+  if (generation === undefined || !isCurrentRunningGeneration(svc.code, generation)) {
+    throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
+  }
+  await updateState(svc.code, 'pending', null);
+  if (!isCurrentRunningGeneration(svc.code, generation)) {
+    throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
+  }
+
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
   // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
   const resolvedCwd =
@@ -164,24 +321,15 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
       : svc.start_script
         ? dirname(svc.start_script)
         : undefined);
-  // #req1: Windows でコンソールウィンドウを出さずに起動する (バックグラウンド常駐)。
-  //
-  // Windows の CreateProcess 仕様上、 windowsHide が立てる CREATE_NO_WINDOW は
-  // detached が立てる DETACHED_PROCESS と併用すると「無視」される
-  // (https://learn.microsoft.com/windows/win32/procthread/process-creation-flags)。
-  // 旧実装は detached:true + windowsHide:true を併用していたため窓抑止が効かず、
-  // コンソール非保持の cmd.exe が自前で新規コンソール窓を出していた。
-  //
-  // → Windows では detached を外し windowsHide(=CREATE_NO_WINDOW)を有効化する。
-  //   cmd.exe は「窓を持たない自前コンソール」上でコマンドを走らせる。
-  //   - 再起動耐性: Windows は親終了で子を連鎖終了しない (detached 不要で生存)。
-  //     boot 時の pid 再採用 (reconcile/adoptProcess) もそのまま機能。
-  //   - Ctrl-C 巻き添え防止: CREATE_NO_WINDOW の子は親と別コンソールを持つため、
-  //     Excubitor 側コンソールの Ctrl-C は届かない。
-  //   - 停止は taskkill /T /F (killService)、 ログは fd 直結なので detached と無関係。
-  // 非 Windows は setsid/プロセスグループ生存のため従来どおり detached を維持する。
-  const detached = process.platform !== 'win32';
-  const child = spawn(cmd, args, {
+  // Managed services are deliberately detached from the supervisor's process
+  // group/job. This is the failure-domain boundary that lets them survive an
+  // OS-manager restart of the local-control supervisor. windowsHide keeps the
+  // Scheduled Task path non-interactive; explicit stop still uses taskkill /T.
+  const detached = true;
+  let child: ChildProcess;
+  let spawnedAt: Date;
+  try {
+    child = spawn(cmd, args, {
     cwd: resolvedCwd,
     // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
     // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
@@ -189,78 +337,218 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
     env: childEnv,
     stdio: ['ignore', stdoutFd, stderrFd],
     detached,
-    windowsHide: true,
-  });
+      windowsHide: true,
+    });
+    spawnedAt = new Date();
+  } catch (err) {
+    await recordSpawnFailure(svc.code, err);
+    throw err;
+  }
   // 親 (Excubitor) の event loop を子に縛られないよう unref。
   child.unref();
+
+  try {
+    // Attach spawn/error listeners first, then durably publish the pid before
+    // waiting for spawn completion. Reconciliation can adopt this detached
+    // process if the supervisor dies during the spawn event window.
+    await Promise.all([
+      waitForSpawn(child),
+      updateState(svc.code, 'pending', child.pid ?? null, undefined, spawnedAt),
+    ]);
+  } catch (err) {
+    let cleanupFailure: Error | null = null;
+    try {
+      await terminateUnregisteredChild(svc.code, child);
+    } catch (cleanupError) {
+      retainRejectedSpawn(svc.code, child, spawnedAt, cleanupError);
+      cleanupFailure = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
+      logger.error({ code: svc.code, err: (cleanupError as Error).message }, 'failed to terminate rejected spawn');
+    }
+    if (cleanupFailure && child.pid) {
+      stopProcessLog(svc.code);
+      await updateState(svc.code, 'pending', child.pid, undefined, spawnedAt).catch((stateError: unknown) => {
+        logger.error({ code: svc.code, err: (stateError as Error).message }, 'failed to retain rejected spawn identity');
+      });
+      throw new AggregateError([err, cleanupFailure], `spawn failed and service ${svc.code} could not be terminated`);
+    }
+    await recordSpawnFailure(svc.code, err);
+    throw err;
+  }
+
+  // spawn completion is asynchronous as well. If stop/shutdown won the race,
+  // terminate the unregistered child before resolving the reservation so the
+  // stop caller cannot return while a stale process is still being introduced.
+  if (!isCurrentRunningGeneration(svc.code, generation)) {
+    try {
+      await terminateUnregisteredChild(svc.code, child);
+    } catch (cleanupError) {
+      retainRejectedSpawn(svc.code, child, spawnedAt, cleanupError);
+      throw cleanupError;
+    } finally {
+      stopProcessLog(svc.code);
+    }
+    throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
+  }
 
   // adopted 側に同 code が残っていれば、 自前 spawn が真実なので除去。
   adopted.delete(svc.code);
   const restartCount = opts.initialRestartCount ?? 0;
-  const spawned: SpawnedProcess = { code: svc.code, child, startedAt: new Date(), restartCount };
+  let resolveTermination = (): void => undefined;
+  const termination = new Promise<void>((resolve) => {
+    resolveTermination = resolve;
+  });
+  const spawned: ManagedProcess = {
+    code: svc.code,
+    child,
+    startedAt: spawnedAt,
+    restartCount,
+    intentionalStop: false,
+    termination,
+    resolveTermination,
+  };
   processes.set(svc.code, spawned);
   logger.info({ code: svc.code, pid: child.pid, restartCount, detached }, 'spawned (windowless)');
 
-  await updateState(svc.code, 'running', child.pid ?? null);
+  const runningState = updateState(svc.code, 'running', child.pid ?? null, undefined, spawnedAt);
 
-  child.on('exit', (code, signal) => {
-    processes.delete(svc.code);
+  child.once('exit', (code, signal) => {
+    if (processes.get(svc.code)?.child === child) processes.delete(svc.code);
     stopProcessLog(svc.code);
     logger.info(
       { code: svc.code, exit_code: code, signal, restartCount },
       'process exited',
     );
-    void onExit(svc, code, signal, restartCount, opts);
+    void (async () => {
+      try {
+        await runningState.catch(() => undefined);
+        await onExit(svc, code, signal, restartCount, opts, spawned.intentionalStop);
+      } finally {
+        spawned.resolveTermination();
+      }
+    })();
   });
 
   child.on('error', (err) => {
     logger.error({ code: svc.code, err: err.message }, 'child error');
   });
 
+  await runningState.catch((error: unknown) => {
+    // The process side effect is real and its pending pid identity was already
+    // persisted. Keep the successful lifecycle result truthful; reconciliation
+    // can adopt the pending row if this supervisor exits before a later scan.
+    logger.error({ code: svc.code, err: (error as Error).message }, 'failed to promote spawned service state to running');
+  });
+
   return spawned;
 }
 
 export async function killService(code: string, signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
+  const pendingSpawn = spawnSettlements.get(code);
+  const canceledRestart = markServiceStopped(code);
+  if (pendingSpawn) await pendingSpawn.settled;
   const p = processes.get(code);
   if (p) {
-    const pid = p.child.pid;
-    if (pid && process.platform === 'win32') {
-      // detached + shell:true は子ツリー (cmd → node → ...) になるため、
-      // child.kill では shell しか落ちない。 taskkill /T でツリーごと終了。
-      await treeKill(pid);
-    } else {
-      try { p.child.kill(signal); } catch { /* noop */ }
-      setTimeout(() => {
-        if (processes.has(code)) {
-          try { p.child.kill('SIGKILL'); } catch { /* noop */ }
-        }
-      }, 5000);
+    p.intentionalStop = true;
+    try {
+      await terminateManagedProcess(p, signal);
+      return true;
+    } catch (err) {
+      if (processes.get(code) === p) p.intentionalStop = false;
+      throw err;
     }
-    return true;
   }
   // 再採用したサービス: ChildProcess を持たないので pid で kill。
   const a = adopted.get(code);
   if (a) {
+    const verified = await verifyProcessIdentity(a.pid, a.startedAt);
+    if (!verified) {
+      adopted.delete(code);
+      const alive = isPidAlive(a.pid);
+      await updateState(code, alive ? 'crashed' : 'stopped', null);
+      if (!alive) return true;
+      throw new Error(`refusing to stop stale or unverified adopted process ${code} pid=${a.pid}`);
+    }
     await treeKill(a.pid);
     adopted.delete(code);
     await updateState(code, 'stopped', null, 0);
     return true;
   }
-  return false;
+  if (pendingSpawn?.failure) throw pendingSpawn.failure;
+  return canceledRestart;
+}
+
+function retainRejectedSpawn(code: string, child: ChildProcess, startedAt: Date, error: unknown): void {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  const settlement = spawnSettlements.get(code);
+  if (settlement) settlement.failure = failure;
+  if (child.pid) adopted.set(code, { code, pid: child.pid, startedAt });
+}
+
+async function terminateUnregisteredChild(code: string, child: ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') {
+    await treeKill(pid);
+    return;
+  }
+
+  const groupSignaled = signalDetachedTree(pid, 'SIGTERM');
+  const childSignaled = child.kill('SIGTERM');
+  if (!groupSignaled && !childSignaled && isDetachedTreeAlive(pid)) {
+    throw new Error(`failed to cancel stale service ${code} pid=${pid}`);
+  }
+  if (await waitForChildTreeExit(child, pid, TERMINATION_GRACE_MS)) return;
+  const groupForced = signalDetachedTree(pid, 'SIGKILL');
+  const childForced = child.kill('SIGKILL');
+  if (!groupForced && !childForced && isDetachedTreeAlive(pid)) {
+    throw new Error(`failed to force-cancel stale service ${code} pid=${pid}`);
+  }
+  if (!(await waitForChildTreeExit(child, pid, TERMINATION_GRACE_MS))) {
+    throw new Error(`stale service ${code} pid=${pid} did not terminate`);
+  }
+}
+
+async function waitForChildTreeExit(child: ChildProcess, pid: number, timeoutMs: number): Promise<boolean> {
+  const [childExited, treeExited] = await Promise.all([
+    waitForChildExit(child, timeoutMs),
+    waitForDetachedTreeExit(pid, timeoutMs),
+  ]);
+  return childExited && treeExited;
+}
+
+function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve(false);
+    }, timeoutMs);
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once('exit', onExit);
+  });
 }
 
 /** pid のプロセスツリーを終了する (Windows=taskkill /T /F、 他=SIGTERM→SIGKILL)。 */
 async function treeKill(pid: number): Promise<void> {
+  if (!isDetachedTreeAlive(pid)) return;
+
   if (process.platform === 'win32') {
-    await execCapture('taskkill', ['/PID', String(pid), '/T', '/F'], process.cwd(), 10000);
-    return;
-  }
-  try { process.kill(pid, 'SIGTERM'); } catch { /* noop */ }
-  setTimeout(() => {
-    if (isPidAlive(pid)) {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* noop */ }
+    const result = await execCapture('taskkill', ['/PID', String(pid), '/T', '/F'], process.cwd(), 10000);
+    if (!result.ok && isPidAlive(pid)) {
+      throw new Error(`taskkill failed for pid=${pid}: ${result.stderr || `exit_code=${result.code ?? -1}`}`);
     }
-  }, 5000);
+  } else {
+    signalDetachedTree(pid, 'SIGTERM');
+    if (await waitForDetachedTreeExit(pid, TERMINATION_GRACE_MS)) return;
+    signalDetachedTree(pid, 'SIGKILL');
+  }
+
+  if (!(await waitForDetachedTreeExit(pid, TERMINATION_GRACE_MS))) {
+    throw new Error(`process pid=${pid} did not terminate`);
+  }
 }
 
 async function onExit(
@@ -269,12 +557,15 @@ async function onExit(
   signal: NodeJS.Signals | null,
   prevRestartCount: number,
   opts: SpawnOptions,
+  intentionalStop: boolean,
 ): Promise<void> {
   const policy = opts.restartPolicy ?? svc.restart_policy;
   const max = opts.maxRestart ?? svc.max_restart;
   const cleanExit = code === 0 && !signal;
 
-  await updateState(svc.code, cleanExit ? 'stopped' : 'crashed', null, code ?? undefined);
+  await updateState(svc.code, intentionalStop || cleanExit ? 'stopped' : 'crashed', null, code ?? undefined);
+
+  if (intentionalStop) return;
 
   const shouldRestart =
     (policy === 'always') ||
@@ -292,19 +583,30 @@ async function onExit(
   }
 
   // exponential backoff: 1s, 2s, 4s, ...
+  const desired = desiredStates.get(svc.code);
+  if (!restartSchedulingEnabled || desired?.state !== 'running') return;
+  const generation = desired.generation;
   const delay = Math.min(30_000, 1000 * 2 ** prevRestartCount);
-  setTimeout(() => {
-    void autoRestartService(svc, opts, prevRestartCount).catch((err: unknown) =>
+  const existingTimer = restartTimers.get(svc.code);
+  if (existingTimer) clearTimeout(existingTimer);
+  const timer = setTimeout(() => {
+    if (restartTimers.get(svc.code) === timer) restartTimers.delete(svc.code);
+    if (!isCurrentRunningGeneration(svc.code, generation)) return;
+    void autoRestartService(svc, opts, prevRestartCount, generation).catch((err: unknown) =>
       logger.error({ code: svc.code, err: (err as Error).message }, 'auto-restart failed'),
     );
   }, delay);
+  timer.unref?.();
+  restartTimers.set(svc.code, timer);
 }
 
 async function autoRestartService(
   svc: Service,
   opts: SpawnOptions,
   prevRestartCount: number,
+  generation: number,
 ): Promise<void> {
+  if (!isCurrentRunningGeneration(svc.code, generation)) return;
   assertStartupEnv(svc, opts.env ?? {});
   const build = await runServiceBuild(svc, 'auto-restart');
   if (!build.ok) {
@@ -315,10 +617,131 @@ async function autoRestartService(
     await raiseRestartBuildError(svc, build.command, build.stderr || build.stdout);
     return;
   }
+  if (!isCurrentRunningGeneration(svc.code, generation)) return;
   await spawnService(svc, {
       ...opts,
       initialRestartCount: prevRestartCount + 1,
+      expectedGeneration: generation,
     });
+}
+
+function waitForSpawn(child: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onSpawn = (): void => {
+      child.off('error', onError);
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      child.off('spawn', onSpawn);
+      reject(err);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
+}
+
+async function recordSpawnFailure(code: string, err: unknown): Promise<void> {
+  processes.delete(code);
+  try {
+    stopProcessLog(code);
+  } catch (logErr) {
+    logger.error({ code, err: (logErr as Error).message }, 'failed to close process log after spawn failure');
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  logger.error({ code, err: message }, 'spawn failed');
+  try {
+    await updateState(code, 'crashed', null);
+  } catch (stateErr) {
+    logger.error({ code, err: (stateErr as Error).message }, 'failed to record spawn failure state');
+  }
+}
+
+async function terminateManagedProcess(
+  processEntry: ManagedProcess,
+  signal: NodeJS.Signals,
+): Promise<void> {
+  const pid = processEntry.child.pid;
+  if (!pid) throw new Error(`service ${processEntry.code} has no process id`);
+
+  if (process.platform === 'win32') {
+    await treeKill(pid);
+  } else {
+    const groupSignalSent = signalDetachedTree(pid, signal);
+    const childSignalSent = processEntry.child.kill(signal);
+    if (!groupSignalSent && !childSignalSent && isDetachedTreeAlive(pid)) {
+      throw new Error(`failed to signal service ${processEntry.code} pid=${pid}`);
+    }
+  }
+
+  if (await waitForManagedTreeTermination(processEntry, pid, TERMINATION_GRACE_MS)) return;
+
+  const groupForceSent = process.platform === 'win32' ? false : signalDetachedTree(pid, 'SIGKILL');
+  const childForceSent = processEntry.child.kill('SIGKILL');
+  if (!groupForceSent && !childForceSent && isDetachedTreeAlive(pid)) {
+    throw new Error(`failed to force-stop service ${processEntry.code} pid=${pid}`);
+  }
+  if (!(await waitForManagedTreeTermination(processEntry, pid, TERMINATION_GRACE_MS))) {
+    throw new Error(`service ${processEntry.code} pid=${pid} did not terminate`);
+  }
+}
+
+async function waitForManagedTreeTermination(
+  processEntry: ManagedProcess,
+  pid: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const [childExited, treeExited] = await Promise.all([
+    withBooleanTimeout(processEntry.termination, timeoutMs),
+    waitForDetachedTreeExit(pid, timeoutMs),
+  ]);
+  return childExited && treeExited;
+}
+
+async function waitForDetachedTreeExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isDetachedTreeAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, TERMINATION_POLL_MS));
+  }
+  return true;
+}
+
+function signalDetachedTree(pid: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ESRCH') throw error;
+  }
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    return false;
+  }
+}
+
+function isDetachedTreeAlive(pid: number): boolean {
+  if (process.platform === 'win32') return isPidAlive(pid);
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
+  }
+  return isPidAlive(pid);
+}
+
+function withBooleanTimeout(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    void promise.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
 }
 
 function splitCommand(input: string): string[] {
@@ -331,9 +754,11 @@ async function updateState(
   state: 'running' | 'stopped' | 'crashed' | 'pending',
   pid: number | null,
   exit_code?: number,
+  startedAt?: Date,
 ): Promise<void> {
   // node / dev-process-md は docker scanner が instance 行を作らないため、
   // 無ければここで 1 行確保してから state を書く (UPDATE が no-op にならないように)。
+  const explicitStartedAt = startedAt?.getTime() ?? null;
   db().run(sql`
     INSERT INTO service_instances (id, service_id, state, created_at, updated_at)
     SELECT lower(hex(randomblob(16))), s.id, 'pending', unixepoch() * 1000, unixepoch() * 1000
@@ -347,7 +772,12 @@ async function updateState(
     SET state = ${state},
         pid = ${pid},
         last_seen_at = unixepoch() * 1000,
-        started_at = CASE WHEN ${state} = 'running' THEN unixepoch() * 1000 ELSE started_at END,
+        started_at = CASE
+          WHEN ${explicitStartedAt} IS NOT NULL THEN ${explicitStartedAt}
+          WHEN ${state} = 'running' OR (${state} = 'pending' AND ${pid} IS NOT NULL)
+            THEN unixepoch() * 1000
+          ELSE started_at
+        END,
         exit_code = ${exit_code ?? null},
         updated_at = unixepoch() * 1000
     WHERE service_id IN (SELECT id FROM services WHERE code = ${code})
@@ -410,8 +840,3 @@ async function raiseRestartBuildError(
     source: 'process',
   });
 }
-
-
-
-
-
