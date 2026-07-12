@@ -1,23 +1,41 @@
 @echo off
-REM ============================================================
-REM  Launch Excubitor in normal mode.
-REM  Normal mode runs Excubitor and auto-starts catalog autostart
-REM  services plus the saved launch set when auto launch is enabled.
-REM  backend  : http://localhost:17332  (EXCUBITOR_PORT default)
-REM  frontend : http://localhost:17333  (/api/* proxies to 17332)
-REM  NOTE: 17331 is taken by Concordia's Vite WebUI; do not use it.
-REM ============================================================
+setlocal
+cd /d "%~dp0"
 
-echo Starting Excubitor backend (:17332)...
-start "Excubitor backend :17332" /d "%~dp0" cmd /k "npm run dev"
+echo Installing Excubitor dependencies...
+call npm install
+if errorlevel 1 (
+  echo Excubitor dependency install failed. 1>&2
+  exit /b 1
+)
 
-echo Starting Excubitor frontend (:17333)...
-start "Excubitor frontend :17333" /d "%~dp0frontend" cmd /k "npm run dev"
+call npm --prefix frontend install
+if errorlevel 1 (
+  echo Excubitor frontend dependency install failed. 1>&2
+  exit /b 1
+)
 
-echo Opening Excubitor in browser in 12s...
-timeout /t 12 /nobreak >nul
-start "" "http://localhost:17333"
+echo Building Excubitor backend and WebUI...
+call npm run build
+if errorlevel 1 (
+  echo Excubitor backend build failed. 1>&2
+  exit /b 1
+)
 
-echo.
-echo Started Excubitor in normal mode.
-echo Autostart services and the saved launch set will start automatically when configured.
+call npm --prefix frontend run build
+if errorlevel 1 (
+  echo Excubitor WebUI build failed. 1>&2
+  exit /b 1
+)
+
+echo Requesting Excubitor start from the local supervisor...
+call npm run ctl -- excubitor start --json
+set "EXIT_CODE=%ERRORLEVEL%"
+
+if not "%EXIT_CODE%"=="0" (
+  echo Local supervisor request failed. Ensure the persistent supervisor is installed and running. 1>&2
+  echo Install on Windows: powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1 1>&2
+  echo Development supervisor command: npm run service 1>&2
+)
+
+exit /b %EXIT_CODE%

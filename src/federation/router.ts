@@ -22,7 +22,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Catalog } from '../catalog/loader.js';
 import { verifyAgentToken, getOrCreateAgentToken } from '../secrets/agent-token.js';
-import { controlService } from '../control/manager.js';
+import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { applyUpdate } from '../update/apply.js';
 import { summarizeServices, type ServiceStateRow } from '../hub/router.js';
 import {
@@ -138,8 +138,26 @@ export function buildFederationRouter(getCatalog: () => Catalog): Hono {
     const svc = getCatalog().services.find((s) => s.code === parsed.data.code);
     if (!svc) return c.json({ error: 'not_found' }, 404);
     const actor = `federation:${c.req.header('x-excubitor-peer') ?? 'remote'}`;
-    const result = await controlService(svc, parsed.data.action, actor);
-    return c.json({ ok: result.ok, action: parsed.data.action, exit_code: result.exit_code, stdout: result.stdout, stderr: result.stderr });
+    const result = await controlServiceViaLocalTool(svc, parsed.data.action, actor);
+    const status: 200 | 502 | 503 = result.ok
+      ? 200
+      : result.local_control_error === 'unavailable'
+        ? 503
+        : 502;
+    return c.json({
+      ok: result.ok,
+      error: result.ok
+        ? null
+        : result.local_control_error === 'unavailable'
+          ? 'local_control_unavailable'
+          : 'control_failed',
+      action: parsed.data.action,
+      exit_code: result.exit_code,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      command: result.command,
+      cli: `npm run ctl -- service ${svc.code} ${parsed.data.action} --json`,
+    }, status);
   });
 
   app.post('/api/v1/federation/update', async (c) => {

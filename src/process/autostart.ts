@@ -13,12 +13,14 @@ const logger = createNamedLogger('concordia.observability.autostart');
  */
 export async function runAutostart(
   catalog: Catalog,
+  shouldStop?: () => boolean,
 ): Promise<{ started: string[]; skipped: string[]; failed: string[] }> {
   const started: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
 
   for (const svc of catalog.services) {
+    if (shouldStop?.()) break;
     if (!svc.autostart) continue;
     if (svc.disabled) {
       skipped.push(svc.code);
@@ -37,6 +39,7 @@ export async function runAutostart(
     }
     try {
       const env = await resolveInjectEnv(svc);
+      if (shouldStop?.()) break;
       await spawnService(svc, { env });
       started.push(svc.code);
     } catch (err) {

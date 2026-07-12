@@ -9,6 +9,8 @@ const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
   type: z.enum(['http', 'tcp', 'cmd', 'process']),
   url: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).default([]),
   interval_sec: z.number().default(30),
   grace_period_sec: z.number().default(10),
 });
