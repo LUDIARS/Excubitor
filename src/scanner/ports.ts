@@ -100,6 +100,47 @@ export function parseSs(stdout: string): Array<{ port: number; pid: number }> {
   return out;
 }
 
+/**
+ * `lsof -nP -iTCP -sTCP:LISTEN -Fpn` (macOS) の出力を {port, pid}[] に解析する。
+ * -F のフィールド出力 (p=pid / n=name が各 1 行) を使う。 列分割だと COMMAND に
+ * 空白を含むプロセス (例 "Google Chrome") で崩れるため、 通常出力は解析しない。
+ */
+export function parseLsofListen(stdout: string): Array<{ port: number; pid: number }> {
+  const out: Array<{ port: number; pid: number }> = [];
+  let pid = -1;
+  for (const raw of stdout.split(/\r?\n/)) {
+    if (raw.startsWith('p')) {
+      const n = Number(raw.slice(1));
+      pid = Number.isFinite(n) ? n : -1;
+      continue;
+    }
+    if (!raw.startsWith('n')) continue; // f (fd) 等は無視
+    const portMatch = raw.match(/:(\d+)$/);
+    if (!portMatch) continue;
+    const port = Number(portMatch[1]);
+    if (Number.isFinite(port)) out.push({ port, pid });
+  }
+  return out;
+}
+
+/**
+ * `ps -eo pid=,comm=` (POSIX) を pid→name に解析する。 comm がフルパスのとき
+ * (macOS) は basename に落とし、 tasklist の "node.exe" と同じ粒度に揃える。
+ */
+export function parsePsPidComm(stdout: string): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const raw of stdout.split(/\r?\n/)) {
+    const m = raw.match(/^\s*(\d+)\s+(.+)$/);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    const comm = m[2]!.trim();
+    if (!comm || !Number.isFinite(pid)) continue;
+    const name = comm.slice(comm.lastIndexOf('/') + 1);
+    if (name) map.set(pid, name);
+  }
+  return map;
+}
+
 /** `tasklist /fo csv /nh` (Windows) を pid→name に解析する。 */
 export function parseTasklist(stdout: string): Map<number, string> {
   const map = new Map<number, string>();
@@ -115,22 +156,35 @@ export function parseTasklist(stdout: string): Map<number, string> {
   return map;
 }
 
-/** 現在 LISTEN している port → pid を OS から取得する。 */
+/** 現在 LISTEN している port → pid を OS から取得する (win32=netstat / darwin=lsof / 他=ss)。 */
 async function rawListeners(): Promise<Array<{ port: number; pid: number }>> {
   if (process.platform === 'win32') {
     const r = await execCapture('netstat', ['-ano', '-p', 'TCP'], process.cwd(), 10000);
     return r.ok ? parseNetstat(r.stdout) : [];
   }
+  if (process.platform === 'darwin') {
+    // macOS に ss は無い。 lsof は該当プロセスが 1 つも無いと exit 1 を返すので、
+    // 失敗は「LISTEN なし」と区別できないが空扱いで実害はない。
+    const r = await execCapture('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn'], process.cwd(), 10000);
+    return r.ok ? parseLsofListen(r.stdout) : [];
+  }
   const r = await execCapture('ss', ['-ltnH'], process.cwd(), 10000);
   return r.ok ? parseSs(r.stdout) : [];
 }
 
-/** pid 群の実行ファイル名を取得する (Windows=tasklist、 POSIX は省略)。 */
+/** pid 群の実行ファイル名を取得する (Windows=tasklist / POSIX=ps)。 */
 async function processNamesFor(pids: number[]): Promise<Map<number, string>> {
-  if (pids.length === 0 || process.platform !== 'win32') return new Map();
-  const r = await execCapture('tasklist', ['/fo', 'csv', '/nh'], process.cwd(), 10000);
-  if (!r.ok) return new Map();
-  const all = parseTasklist(r.stdout);
+  if (pids.length === 0) return new Map();
+  let all: Map<number, string>;
+  if (process.platform === 'win32') {
+    const r = await execCapture('tasklist', ['/fo', 'csv', '/nh'], process.cwd(), 10000);
+    if (!r.ok) return new Map();
+    all = parseTasklist(r.stdout);
+  } else {
+    const r = await execCapture('ps', ['-eo', 'pid=,comm='], process.cwd(), 10000);
+    if (!r.ok) return new Map();
+    all = parsePsPidComm(r.stdout);
+  }
   const filtered = new Map<number, string>();
   for (const pid of pids) {
     const name = all.get(pid);
