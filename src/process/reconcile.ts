@@ -15,6 +15,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Catalog } from '../catalog/loader.js';
 import { adoptProcess, isPidAlive } from './manager.js';
+import { verifyProcessIdentity } from './identity.js';
 
 const logger = createNamedLogger('excubitor.process.reconcile');
 
@@ -31,7 +32,7 @@ export interface ReconcileResult {
 }
 
 /** node / dev-process-md / app のうち、 DB 上 running/pending な行を実プロセスと突合する。 */
-export function reconcileProcesses(catalog: Catalog): ReconcileResult {
+export async function reconcileProcesses(catalog: Catalog): Promise<ReconcileResult> {
   const processRuntimes = new Set(
     catalog.services
       .filter((s) => s.runtime === 'node' || s.runtime === 'dev-process-md' || s.runtime === 'app')
@@ -49,8 +50,12 @@ export function reconcileProcesses(catalog: Catalog): ReconcileResult {
 
   for (const row of rows) {
     if (!processRuntimes.has(row.code)) continue; // docker 等は scanner 任せ
-    if (row.pid && isPidAlive(row.pid)) {
-      adoptProcess(row.code, row.pid, row.started_at ? new Date(row.started_at) : new Date());
+    const expectedStartedAt = row.started_at ? new Date(row.started_at) : null;
+    const identity = row.pid && expectedStartedAt && isPidAlive(row.pid)
+      ? await verifyProcessIdentity(row.pid, expectedStartedAt)
+      : null;
+    if (identity) {
+      adoptProcess(row.code, identity);
       result.adopted.push(row.code);
     } else {
       db().run(sql`

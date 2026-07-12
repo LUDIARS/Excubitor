@@ -5,12 +5,13 @@
  * - order.ts の tier 順に control を呼ぶ (infra → Cernere → Corpus → leaf)
  * - tier 間にだけ待ちを入れて、 依存基盤が上がってから leaf を起こす
  *
- * env の Infisical relay は controlService → resolveInjectEnv が行う (orchestrator は関与しない)。
+ * env の Infisical relay は local supervisor が行う (orchestrator は関与しない)。
  */
 
 import { createNamedLogger } from '../shared/logger.js';
-import type { Catalog } from '../catalog/loader.js';
-import { controlService } from '../control/manager.js';
+import type { Catalog, Service } from '../catalog/loader.js';
+import type { ControlAction, ControlResult } from '../control/docker-compose.js';
+import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { expandWithDependencies, orderForStart, orderForStop } from './order.js';
 import { runPreflight, type PreflightReport } from './preflight.js';
 import { withCorpusIfNeeded } from './corpus-prefs.js';
@@ -39,7 +40,17 @@ export interface StartOptions {
   /** preflight で ready でないサービスを起動対象から外す (default true)。 */
   skipNotReady?: boolean;
   actor?: string;
+  /** Supervisor bootstrap injects the direct executor before IPC starts. */
+  control?: ServiceControl;
+  /** Supervisor shutdown gate checked between every asynchronous launch step. */
+  shouldStop?: () => boolean;
 }
+
+export type ServiceControl = (
+  service: Service,
+  action: ControlAction,
+  actor: string,
+) => Promise<ControlResult>;
 
 export async function startSelection(
   catalog: Catalog,
@@ -48,6 +59,8 @@ export async function startSelection(
 ): Promise<LaunchResult> {
   const skipNotReady = opts.skipNotReady ?? true;
   const actor = opts.actor ?? 'launcher';
+  const control = opts.control ?? controlServiceViaLocalTool;
+  const shouldStop = opts.shouldStop ?? (() => false);
 
   // Corpus を使うサービスが含まれていれば Corpus も起動セットに加える (tier 順で先に上がる)。
   codes = withCorpusIfNeeded(catalog, expandWithDependencies(catalog.services, codes));
@@ -60,9 +73,11 @@ export async function startSelection(
   const tiers = orderForStart(catalog.services, codes);
   const results: LaunchItemResult[] = [];
 
-  for (let i = 0; i < tiers.length; i++) {
+  launch: for (let i = 0; i < tiers.length; i++) {
+    if (shouldStop()) break;
     const tier = tiers[i]!;
     for (const svc of tier.services) {
+      if (shouldStop()) break launch;
       if (svc.disabled) {
         results.push({ code: svc.code, ok: false, skipped: true, message: 'disabled in catalog' });
         continue;
@@ -72,13 +87,14 @@ export async function startSelection(
         continue;
       }
       try {
-        const r = await controlService(svc, 'start', actor);
+        const r = await control(svc, 'start', actor);
         results.push({ code: svc.code, ok: r.ok, skipped: false, message: r.ok ? r.stdout : r.stderr });
+        if (shouldStop()) break launch;
       } catch (err) {
         results.push({ code: svc.code, ok: false, skipped: false, message: (err as Error).message });
       }
     }
-    if (i < tiers.length - 1) await delay(TIER_GAP_MS);
+    if (i < tiers.length - 1 && !shouldStop()) await delay(TIER_GAP_MS);
   }
 
   logger.info(
@@ -93,7 +109,7 @@ export async function stopSelection(catalog: Catalog, codes: string[], actor = '
   const results: LaunchItemResult[] = [];
   for (const svc of ordered) {
     try {
-      const r = await controlService(svc, 'stop', actor);
+      const r = await controlServiceViaLocalTool(svc, 'stop', actor);
       results.push({ code: svc.code, ok: r.ok, skipped: false, message: r.ok ? r.stdout : r.stderr });
     } catch (err) {
       results.push({ code: svc.code, ok: false, skipped: false, message: (err as Error).message });

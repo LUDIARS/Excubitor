@@ -1,11 +1,13 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname } from 'node:path';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { listListeners } from '../scanner/ports.js';
 import { execCapture } from '../shared/exec.js';
 import { autoFixConfig } from '../auto_fix/config.js';
+import { managedPortsForService } from '../catalog/ports.js';
 
 export type EmergencyAction = 'kill-port' | 'claude-port-fix';
+const MAX_CLI_OUTPUT_CHARS = 64 * 1024;
 
 export interface EmergencyResult {
   ok: boolean;
@@ -33,6 +35,18 @@ async function killServicePort(svc: Service, portOverride?: number): Promise<Eme
   const targetPort = portOverride ?? svc.port;
   if (typeof targetPort !== 'number') {
     return { ok: false, action: 'kill-port', code: svc.code, port: null, pids: [], stdout: '', stderr: 'service has no port' };
+  }
+  const declaredPorts = new Set(managedPortsForService(svc).map((entry) => entry.port));
+  if (!declaredPorts.has(targetPort)) {
+    return {
+      ok: false,
+      action: 'kill-port',
+      code: svc.code,
+      port: targetPort,
+      pids: [],
+      stdout: '',
+      stderr: `port ${targetPort} is not declared for service ${svc.code}`,
+    };
   }
   const listener = (await listListeners()).find((l) => l.port === targetPort);
   const pids = listener?.pids ?? [];
@@ -113,14 +127,17 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
         CLAUDE_CODE_GIT_BASH_PATH: autoFixConfig.claudeBashPath,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch { /* noop */ }
+      void terminateClaudeProcessTree(proc).catch((error: unknown) => {
+        stderr = appendBounded(stderr, `\ntermination failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }, 120_000);
-    proc.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf8')));
-    proc.stderr.on('data', (c: Buffer) => (stderr += c.toString('utf8')));
+    proc.stdout.on('data', (c: Buffer) => { stdout = appendBounded(stdout, c.toString('utf8')); });
+    proc.stderr.on('data', (c: Buffer) => { stderr = appendBounded(stderr, c.toString('utf8')); });
     proc.on('error', (err) => {
       clearTimeout(timeout);
       resolveP({ exitCode: -1, stdout, stderr: stderr + `\nspawn error: ${err.message}` });
@@ -131,4 +148,27 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
     });
     proc.stdin.end(prompt);
   });
+}
+
+async function terminateClaudeProcessTree(proc: ChildProcess): Promise<void> {
+  if (!proc.pid || proc.exitCode !== null || proc.signalCode !== null) return;
+  if (process.platform === 'win32') {
+    const result = await execCapture('taskkill', ['/PID', String(proc.pid), '/T', '/F'], process.cwd(), 10_000);
+    if (!result.ok && proc.exitCode === null && proc.signalCode === null) {
+      throw new Error(result.stderr || `taskkill exited ${result.code}`);
+    }
+    return;
+  }
+  try { process.kill(-proc.pid, 'SIGTERM'); } catch { return; }
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  if (proc.exitCode === null && proc.signalCode === null) {
+    try { process.kill(-proc.pid, 'SIGKILL'); } catch { /* already exited */ }
+  }
+}
+
+function appendBounded(current: string, chunk: string): string {
+  const combined = current + chunk;
+  return combined.length <= MAX_CLI_OUTPUT_CHARS
+    ? combined
+    : combined.slice(-MAX_CLI_OUTPUT_CHARS);
 }

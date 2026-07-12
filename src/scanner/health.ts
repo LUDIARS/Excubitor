@@ -52,8 +52,8 @@ export async function probeServiceHealth(
   }
 
   if (health?.type === 'cmd') {
-    if (!svc.command || !svc.cwd) return { ok: false, reason: 'failed', detail: 'cmd health command missing' };
-    const r = await execCapture(svc.command, [], svc.cwd, timeoutMs);
+    if (!health.command) return { ok: false, reason: 'failed', detail: 'health.command is required for cmd health' };
+    const r = await execCapture(health.command, health.args, svc.cwd ?? process.cwd(), timeoutMs);
     return { ok: r.ok, reason: r.ok ? 'cmd' : 'failed', detail: r.ok ? 'exit 0' : r.stderr.slice(-200) };
   }
 
