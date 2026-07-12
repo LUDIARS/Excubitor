@@ -71,7 +71,11 @@ describe('catalog (services.yaml)', () => {
 
   it('フロントエンドは catalog から除外されている', () => {
     const frontends = catalog.services.filter((s) => s.component === 'frontend');
-    expect(frontends.map((s) => s.code).sort()).toEqual(['concordia-web', 'praeforma-web']);
+    expect(frontends.map((s) => s.code).sort()).toEqual([
+      'cernere-frontend',
+      'concordia-web',
+      'praeforma-web',
+    ]);
     expect(catalog.services.find((s) => s.code === 'cernere-frontend-dev')).toBeUndefined();
     expect(catalog.services.find((s) => s.code === 'actio-frontend')).toBeUndefined();
   });
@@ -101,7 +105,7 @@ describe('catalog (services.yaml)', () => {
     const glab = catalog.services.find((s) => s.code === 'glab');
     expect(glab).toMatchObject({
       port: 5187,
-      depends_on: ['cernere'],
+      depends_on: ['cernere', 'cernere-frontend'],
       uses_corpus: true,
       cernere_launch_credentials: { target_project: 'glab' },
     });

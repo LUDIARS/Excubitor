@@ -114,6 +114,8 @@ services:
     services: [backend-dev]
     container_names: [cernere-backend-dev]
     autostart: false
+    env:
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
     health:
       type: http
       url: http://localhost:8080/health
@@ -135,6 +137,26 @@ services:
       branch_prefix: excubitor/auto-fix/
       create_pr: true
       pr_draft: true
+
+  - code: cernere-frontend
+    name: Cernere login frontend
+    tier: saas
+    project_code: cernere
+    component: frontend
+    port: 5173
+    repo: LUDIARS/Cernere
+    runtime: docker-compose
+    compose_file: ${ARS_ROOT}/Cernere/docker-compose.yaml
+    services: [frontend-dev]
+    container_names: [cernere-frontend-dev]
+    depends_on: [cernere]
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5173/
+      interval_sec: 30
+    provides:
+      CERNERE_FRONTEND_URL: http://${host}:${port}
 
   - code: actio
     name: Actio
@@ -495,12 +517,12 @@ services:
     command: npm run dev
     allow_hot_reload: true
     uses_corpus: true
-    depends_on: [cernere]
+    depends_on: [cernere, cernere-frontend]
     autostart: false
     env:
       CORPUS_PUBLIC_URL: http://localhost:5187
       CORPUS_TOKEN_MODE: cernere-project-token
-    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
+    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
     # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
     # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
     requires_secret:
