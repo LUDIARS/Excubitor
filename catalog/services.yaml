@@ -499,7 +499,8 @@ services:
     autostart: false
     env:
       CORPUS_PUBLIC_URL: http://localhost:5187
-    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL]
+      CORPUS_TOKEN_MODE: cernere-project-token
+    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
     # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
     # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
     requires_secret:
