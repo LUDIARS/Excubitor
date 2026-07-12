@@ -109,12 +109,13 @@ services:
     component: backend
     port: 8080
     repo: LUDIARS/Cernere
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Cernere/docker-compose.yaml
-    services: [backend-dev]
-    container_names: [cernere-backend-dev]
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/server
+    command: npm run dev
+    allow_hot_reload: true
     autostart: false
     env:
+      LISTEN_PORT: "8080"
       CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
     health:
       type: http
@@ -145,12 +146,14 @@ services:
     component: frontend
     port: 5173
     repo: LUDIARS/Cernere
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Cernere/docker-compose.yaml
-    services: [frontend-dev]
-    container_names: [cernere-frontend-dev]
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/frontend
+    command: npm run dev -- --host 0.0.0.0
+    allow_hot_reload: true
     depends_on: [cernere]
     autostart: false
+    env:
+      VITE_BACKEND_URL: http://localhost:8080
     health:
       type: http
       url: http://localhost:5173/
