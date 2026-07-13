@@ -320,8 +320,6 @@ services:
     cwd: ${ARS_ROOT}/Pagus
     command: npm run dev
     allow_hot_reload: true
-    # start-pagus.bat: stale :4310/:4320 を解放 → server(WS) + client を起動 (PAGUS_BRAIN=llm)。
-    start_script: ${ARS_ROOT}/start-pagus.bat
     autostart: false
     health:
       type: tcp
@@ -342,8 +340,6 @@ services:
     cwd: ${ARS_ROOT}/Peregrinatio
     command: npm run dev
     allow_hot_reload: true
-    # start-peregrinatio.bat: stale :8090 を解放 → web を single-origin dist にビルドして :8090 で配信。
-    start_script: ${ARS_ROOT}/start-peregrinatio.bat
     autostart: false
     health:
       type: tcp
@@ -386,7 +382,6 @@ services:
     cwd: ${ARS_ROOT}/Bibliotheca
     command: npm run dev
     allow_hot_reload: true
-    start_script: ${ARS_ROOT}/start-bibliotheca.bat
     autostart: false
     health:
       type: tcp
@@ -407,7 +402,6 @@ services:
     cwd: ${ARS_ROOT}/Quaestor
     command: npm run dev
     allow_hot_reload: true
-    start_script: ${ARS_ROOT}/start-quaestor.bat
     autostart: false
     health:
       type: tcp
@@ -551,8 +545,7 @@ services:
     cwd: ${ARS_ROOT}/Tirocinium
     command: npm run dev:server
     allow_hot_reload: true
-    # start-tirocinium.bat は server(8084)+desktop(5178) を 1 プロセスツリーで起動 + port 掃除。
-    start_script: ${ARS_ROOT}/start-tirocinium.bat
+    # server(8084) のみ起動する。 desktop(5178) は Tirocinium 側の start-tirocinium.command から。
     autostart: false
     health:
       type: http
@@ -561,10 +554,13 @@ services:
     # secret-agent が tirocinium サービスの secret を解決するための Infisical マッピング。
     # 値の実体は Infisical (infisical.vtn-game.com) の本プロジェクトに置く。 dev は
     # claude CLI バックエンド (TIROCINIUM_LLM_BACKEND=cli) で API キー不要。
+    # inject: false — サービス側は secret を env から一切読まない (required_env も空) ため
+    # 注入しても供給するものが無い。 加えて上記 project_id は fetch が 403 になり (実 ID 未確認)、
+    # inject: true のままだと secret fetch の throw で起動自体が落ちる。 実 ID 入手後に true へ戻す。
     infisical:
       project_id: 798d69f4-18a1-4a8a-8e53-4e663748caa6
       environment: dev
-      inject: true
+      inject: false
     provides:
       TIROCINIUM_URL: http://${host}:${port}
 
@@ -584,9 +580,8 @@ services:
     cwd: ${ARS_ROOT}/Discutere
     command: npm run dev:server
     allow_hot_reload: true
-    # start-discutere.bat を使う。 BACKEND_PORT=3110 は env: で spawn env に注入され、
-    # bat → npm → node が継承するので bat 自身が 3100 を書いていても 3110 で上がる。
-    start_script: ${ARS_ROOT}/start-discutere.bat
+    # BACKEND_PORT=3110 は env: で spawn env に注入され、 npm → node が継承する
+    # (Nuntius(3100) との port 競合回避)。
     autostart: false
     env:
       BACKEND_PORT: "3110"
@@ -612,8 +607,6 @@ services:
     cwd: ${ARS_ROOT}/Memoria/server
     command: npm run dev
     allow_hot_reload: true
-    # 既存 start-memoria.bat (cd Memoria/server → npm run dev) をウィンドウ無しで起動。
-    start_script: ${ARS_ROOT}/start-memoria.bat
     autostart: false
     health:
       type: http
