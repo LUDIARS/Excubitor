@@ -669,6 +669,29 @@ services:
     provides:
       AUGUR_URL: http://${host}:${port}
 
+  - code: fundamentum-datahub
+    name: Fundamentum datahub (共有データ hub)
+    tier: personal
+    project_code: fundamentum
+    component: backend
+    port: 4220
+    repo: LUDIARS/Fundamentum
+    runtime: node
+    cwd: ${ARS_ROOT}/Fundamentum/datahub
+    # serve は build → 起動 (stale dist 事故防止)。LLM (claude -p) は PATH の claude CLI を使う
+    command: npm run serve
+    autostart: false
+    env:
+      FUNDAMENTUM_DATAHUB_PORT: "4220"
+    health:
+      type: http
+      url: http://localhost:4220/v1/health
+      interval_sec: 30
+    provides:
+      FUNDAMENTUM_DATAHUB_URL: http://${host}:${port}
+    # Vestigium JSONL (serviceCode=fundamentum-datahub)。spawn 時に VESTIGIUM_LOGS_DIR 注入
+    log_path: ${ARS_ROOT}/logs/fundamentum-datahub
+
   - code: thaleia
     name: Thaleia (unified spec/domain view)
     tier: personal
