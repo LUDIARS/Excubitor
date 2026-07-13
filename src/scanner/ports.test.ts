@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   parseNetstat,
   parseSs,
+  parseLsofListen,
+  parsePsPidComm,
   parseTasklist,
   detectConcurrentDevelopConflicts,
   detectDeclaredConflicts,
@@ -39,6 +41,47 @@ describe('parseSs', () => {
   it('pid 不明でも port は取れる (-1)', () => {
     const out = 'LISTEN 0 511 *:3000 *:*';
     expect(parseSs(out)).toEqual([{ port: 3000, pid: -1 }]);
+  });
+});
+
+describe('parseLsofListen', () => {
+  it('-Fpn のフィールド出力から port と pid を取る (p 行が後続 n 行に効く)', () => {
+    const out = [
+      'p22757',
+      'f34',
+      'n127.0.0.1:17332',
+      'p87026',
+      'f27',
+      'n127.0.0.1:8084',
+      'n[::1]:8084',
+    ].join('\n');
+    expect(parseLsofListen(out)).toEqual([
+      { port: 17332, pid: 22757 },
+      { port: 8084, pid: 87026 },
+      { port: 8084, pid: 87026 },
+    ]);
+  });
+
+  it('ワイルドカード listen (*:port) も取れる', () => {
+    expect(parseLsofListen('p42\nn*:3000')).toEqual([{ port: 3000, pid: 42 }]);
+  });
+
+  it('port の無い n 行 (UNIX ソケット等) は無視する', () => {
+    expect(parseLsofListen('p42\nn/var/run/some.sock')).toEqual([]);
+  });
+});
+
+describe('parsePsPidComm', () => {
+  it('pid と comm を取り、フルパスは basename に落とす', () => {
+    const out = [
+      '  22757 /opt/homebrew/Cellar/node@22/22.22.3/bin/node',
+      '  87026 node',
+      '    123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    ].join('\n');
+    const m = parsePsPidComm(out);
+    expect(m.get(22757)).toBe('node');
+    expect(m.get(87026)).toBe('node');
+    expect(m.get(123)).toBe('Google Chrome');
   });
 });
 
