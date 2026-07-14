@@ -1,13 +1,16 @@
-// /api/v1/reviews/* — LUDIARS 全リポの review/ フォルダを Excubitor から横断閲覧する。
+// /api/v1/reviews/*  ELUDIARS 全リポ�E review/ フォルダめEExcubitor から横断閲覧する、E
 //
-// Skill `ludiars-review` が各リポの review/<YYYY-MM-DD>/REVIEW_*.md と
-// review/latest.json を書き出す。 ここではファイルシステム経由でそのまま返す。
+// Skill `ludiars-review` が各リポ�E review/<YYYY-MM-DD>/REVIEW_*.md と
+// review/latest.json を書き�Eす、EここではファイルシスチE��経由でそ�Eまま返す、E
 
 import { Hono } from 'hono';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { arsRoot } from '../shared/roots.js';
 
-const LUDIARS_ROOT = resolve(process.env.LUDIARS_ROOT ?? 'E:/Document/Ars');
+// ワークスペースルートは shared/roots.ts に集約 (env EXCUBITOR_ARS_ROOT / LUDIARS_ROOT
+// → cwd の親)。 旧 `LUDIARS_ROOT ?? 'E:/Document/Ars'` のドライブ焼き込みを廃止。
+const LUDIARS_ROOT = resolve(arsRoot());
 
 const REVIEW_FILES = [
   'REVIEW.md',
@@ -112,3 +115,5 @@ export function buildReviewsRouter(): Hono {
 
   return r;
 }
+
+

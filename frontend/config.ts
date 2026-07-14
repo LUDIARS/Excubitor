@@ -24,19 +24,23 @@ export const config = {
   allowedHosts: [
     'localhost',
     'excubitor.vtn-game.com',
+    'ex.ai-run-do.com',
   ],
 
   /**
    * frontend dev server の listen port。
    * 変更時は dev-process.md / Concordia 等の参照側も更新すること。
+   * 17331 は Concordia の Vite WebUI が strictPort で占有するため使用しない
+   * (衝突すると Concordia WebUI が起動できず 404 になる)。 backend=17332 / frontend=17333。
    */
-  port: 17332,
+  port: 17333,
 
   /**
    * `/api/*` を proxy する backend (Excubitor server) の URL。
    * 同一ホスト上で server を動かしている前提 (LUDIARS standard)。
+   * backend は server.ts の既定 (EXCUBITOR_PORT ?? 17332) に揃える。
    */
-  backendUrl: 'http://localhost:17331',
+  backendUrl: 'http://localhost:17332',
 } as const;
 
 /**
@@ -47,5 +51,9 @@ export function resolveAllowedHosts(): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  return [...config.allowedHosts, ...extra];
+  const shared = (process.env.LUDIARS_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...config.allowedHosts, ...extra, ...shared];
 }

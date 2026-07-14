@@ -1,5 +1,5 @@
 /**
- * ProcessManager の line emit を logbus に橋渡し。
+ * ProcessManager の line emit めElogbus に橋渡し、E
  */
 import { registerLineHandler } from '../process/manager.js';
 import { publish } from './bus.js';
@@ -14,3 +14,5 @@ export function attachProcessBridge(): void {
     });
   });
 }
+
+

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "excubitor": {
+      "command": "node",
+      "args": ["node_modules/tsx/dist/cli.mjs", "src/mcp/server.ts"],
+      "env": {
+        "EXCUBITOR_PORT": "${EXCUBITOR_PORT:-17332}"
+      }
+    }
+  }
+}

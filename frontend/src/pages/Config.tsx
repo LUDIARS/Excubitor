@@ -1,0 +1,350 @@
+import { useEffect, useState } from 'react';
+import {
+  fetchConfig,
+  fetchCatalogServices,
+  saveIdentity,
+  testIdentity,
+  saveServices,
+  saveDomainRoot,
+  fetchNotificationConfig,
+  saveDiscordNotificationConfig,
+  testDiscordNotification,
+  type CatalogService,
+  type ConfigInfisical,
+  type ServiceInfisical,
+  type DiscordNotificationStatus,
+} from '../lib/api';
+
+interface SvcRow extends ServiceInfisical {
+  code: string;
+}
+
+function toRows(map: Record<string, ServiceInfisical>): SvcRow[] {
+  return Object.entries(map).map(([code, v]) => ({ code, ...v }));
+}
+
+function toMap(rows: SvcRow[]): Record<string, ServiceInfisical> {
+  const out: Record<string, ServiceInfisical> = {};
+  for (const r of rows) {
+    if (!r.code.trim() || !r.project_id.trim()) continue;
+    out[r.code.trim()] = {
+      project_id: r.project_id.trim(),
+      environment: r.environment || 'dev',
+      inject: r.inject,
+      prefix: r.prefix ?? '',
+      include: r.include,
+      exclude: r.exclude,
+      required_env: r.required_env,
+    };
+  }
+  return out;
+}
+
+export default function Config() {
+  const [cfg, setCfg] = useState<ConfigInfisical | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // identity form
+  const [siteUrl, setSiteUrl] = useState('https://app.infisical.com');
+  const [environment, setEnvironment] = useState('dev');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [domainRootDraft, setDomainRootDraft] = useState('');
+  const [discord, setDiscord] = useState<DiscordNotificationStatus | null>(null);
+  const [discordWebhook, setDiscordWebhook] = useState('');
+  const [discordEnabled, setDiscordEnabled] = useState(false);
+  const [discordThreshold, setDiscordThreshold] = useState(60);
+  const [discordRecovery, setDiscordRecovery] = useState(true);
+  const [discordTest, setDiscordTest] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // services editor
+  const [rows, setRows] = useState<SvcRow[]>([]);
+  const [catalog, setCatalog] = useState<CatalogService[]>([]);
+
+  const load = async () => {
+    const [c, svcs, notification] = await Promise.all([
+      fetchConfig(),
+      fetchCatalogServices().catch(() => []),
+      fetchNotificationConfig(),
+    ]);
+    setCfg(c);
+    setCatalog(svcs);
+    if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
+    if (c.identity.environment) setEnvironment(c.identity.environment);
+    setDomainRootDraft(c.domain_root.value);
+    setRows(toRows(c.services));
+    setDiscord(notification);
+    setDiscordEnabled(notification.enabled);
+    setDiscordThreshold(notification.downtime_threshold_sec);
+    setDiscordRecovery(notification.notify_recovery);
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const submitIdentity = async () => {
+    setBusy('identity');
+    try {
+      await saveIdentity({ siteUrl, environment, clientId, clientSecret });
+      setClientId('');
+      setClientSecret('');
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runTest = async () => {
+    setBusy('test');
+    setTestResult(null);
+    try {
+      setTestResult(await testIdentity());
+    } catch (e) {
+      setTestResult({ ok: false, message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitServices = async () => {
+    setBusy('services');
+    try {
+      await saveServices(toMap(rows));
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitDomainRoot = async () => {
+    setBusy('domain-root');
+    try {
+      await saveDomainRoot(domainRootDraft);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitDiscord = async () => {
+    setBusy('discord');
+    setDiscordTest(null);
+    try {
+      await saveDiscordNotificationConfig({
+        webhook_url: discordWebhook.trim() || undefined,
+        enabled: discordEnabled,
+        downtime_threshold_sec: discordThreshold,
+        notify_recovery: discordRecovery,
+      });
+      setDiscordWebhook('');
+      await load();
+    } catch (err) {
+      setDiscordTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runDiscordTest = async () => {
+    setBusy('discord-test');
+    setDiscordTest(null);
+    try {
+      setDiscordTest(await testDiscordNotification());
+    } catch (err) {
+      setDiscordTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateRow = (i: number, patch: Partial<SvcRow>) =>
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const addRow = () =>
+    setRows((rs) => [...rs, { code: '', project_id: '', environment: 'dev', inject: true, prefix: '' }]);
+  const removeRow = (i: number) => setRows((rs) => rs.filter((_, idx) => idx !== i));
+
+  if (!cfg) return <div className="config">読み込み中…</div>;
+
+  const id = cfg.identity;
+  const domainRoot = cfg.domain_root;
+
+  return (
+    <div className="config">
+      <section className="config-card">
+        <h2>Domain root</h2>
+        <p className="muted">
+          Injected into all services through catalog global.env as <code>LUDIARS_ALLOWED_HOSTS</code>.
+          Current: <strong>{domainRoot.value || '(unset)'}</strong> ({domainRoot.source})
+        </p>
+        <p className="muted small">
+          Saved at <code>{domainRoot.storePath}</code>.
+          {domainRoot.env ? <> <code>EXCUBITOR_DOMAIN_ROOT</code> is set, so env takes precedence.</> : null}
+        </p>
+        <div className="config-form">
+          <label>
+            Domain root
+            <input
+              value={domainRootDraft}
+              onChange={(e) => setDomainRootDraft(e.target.value)}
+              placeholder="example.com"
+            />
+          </label>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null || !domainRootDraft.trim()}
+              onClick={() => void submitDomainRoot()}
+            >
+              {busy === 'domain-root' ? 'Saving...' : 'Save domain root'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>Discord downtime notifications</h2>
+        <p className="muted">
+          Sends one alert after a service has failed health checks continuously for at least one minute,
+          and optionally sends a recovery message. Webhook URLs are encrypted at rest and are never returned by the API.
+        </p>
+        <p className="muted small">
+          Current: <strong className={discord?.configured ? 'ok' : 'fail'}>
+            {discord?.configured ? 'configured' : 'not configured'}
+          </strong> ({discord?.source ?? 'unset'}). Saved at <code>{discord?.storePath ?? id.storePath}</code>.
+        </p>
+        <div className="config-form">
+          <label>
+            Discord webhook URL
+            <input
+              type="password"
+              value={discordWebhook}
+              onChange={(event) => setDiscordWebhook(event.target.value)}
+              placeholder={discord?.configured ? '(enter only to replace)' : 'https://discord.com/api/webhooks/...'}
+            />
+          </label>
+          <label>
+            Downtime threshold (seconds, minimum 60)
+            <input
+              type="number"
+              min={60}
+              max={86400}
+              value={discordThreshold}
+              onChange={(event) => setDiscordThreshold(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={discordEnabled}
+              onChange={(event) => setDiscordEnabled(event.target.checked)}
+            /> Enable Discord notifications
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={discordRecovery}
+              onChange={(event) => setDiscordRecovery(event.target.checked)}
+            /> Notify when the service recovers
+          </label>
+          <div className="config-actions">
+            <button className="primary" disabled={busy !== null} onClick={() => void submitDiscord()}>
+              {busy === 'discord' ? 'Saving...' : 'Save Discord settings'}
+            </button>
+            <button
+              disabled={busy !== null || !discord?.configured || !discordEnabled}
+              onClick={() => void runDiscordTest()}
+            >
+              {busy === 'discord-test' ? 'Sending...' : 'Send test'}
+            </button>
+          </div>
+          {discordTest && (
+            <p className={`muted small ${discordTest.ok ? 'ok' : 'fail'}`}>
+              {discordTest.ok ? '✓' : '✗'} {discordTest.message}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>Infisical machine identity</h2>
+        <p className="muted">
+          Excubitor が secret を取得するための machine identity。
+          {id.configured ? (
+            <> 現在: <strong>設定済み</strong> ({id.siteUrl} / clientId {id.clientIdHint})</>
+          ) : (
+            <> 現在: <strong className="fail">未設定</strong> — 入力してください</>
+          )}
+        </p>
+        <p className="muted small">
+          保存先 (暗号化): <code>{id.storePath}</code> — リポジトリ外 (AppData) に salt 付き暗号化で保存。
+        </p>
+        <div className="config-form">
+          <label>Site URL<input value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} /></label>
+          <label>Environment<input value={environment} onChange={(e) => setEnvironment(e.target.value)} /></label>
+          <label>Client ID<input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder={id.configured ? '(変更時のみ入力)' : ''} /></label>
+          <label>Client Secret<input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={id.configured ? '(変更時のみ入力)' : ''} /></label>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null || !siteUrl || !clientId || !clientSecret}
+              onClick={() => void submitIdentity()}
+            >
+              {busy === 'identity' ? '保存中…' : '保存 (暗号化)'}
+            </button>
+            <button disabled={busy !== null || !id.configured} onClick={() => void runTest()}>
+              {busy === 'test' ? 'テスト中…' : '接続テスト'}
+            </button>
+          </div>
+          {testResult && (
+            <p className={`muted small ${testResult.ok ? 'ok' : 'fail'}`}>
+              {testResult.ok ? '✓' : '✗'} {testResult.message}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>サービス別 Infisical マッピング</h2>
+        <p className="muted">
+          各サービスがどの Infisical project から env を受け取るか。ここに入れた設定を catalog より優先。
+          service code は catalog 登録名から選択 (タイプミス防止)。
+        </p>
+        <table className="config-table">
+          <thead>
+            <tr><th>service code</th><th>project_id</th><th>environment</th><th>prefix</th><th>inject</th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td>
+                  <select value={r.code} onChange={(e) => updateRow(i, { code: e.target.value })}>
+                    <option value="">(選択)</option>
+                    {catalog.map((s) => (
+                      <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                    ))}
+                    {r.code && !catalog.some((s) => s.code === r.code) && (
+                      <option value={r.code}>{r.code} (catalog 外)</option>
+                    )}
+                  </select>
+                </td>
+                <td><input value={r.project_id} onChange={(e) => updateRow(i, { project_id: e.target.value })} placeholder="uuid" /></td>
+                <td><input value={r.environment} onChange={(e) => updateRow(i, { environment: e.target.value })} /></td>
+                <td><input value={r.prefix} onChange={(e) => updateRow(i, { prefix: e.target.value })} /></td>
+                <td style={{ textAlign: 'center' }}><input type="checkbox" checked={r.inject} onChange={(e) => updateRow(i, { inject: e.target.checked })} /></td>
+                <td><button className="link" onClick={() => removeRow(i)}>削除</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="config-actions">
+          <button onClick={addRow}>+ 行を追加</button>
+          <button className="primary" disabled={busy !== null} onClick={() => void submitServices()}>
+            {busy === 'services' ? '保存中…' : 'マッピングを保存'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}

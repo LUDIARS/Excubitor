@@ -2,73 +2,121 @@
 #
 # 本ファイルが source of truth。 起動時 / file watch で DB の services テーブルに
 # snapshot として格納する。
+#
+# tier (デプロイ/挙動クラス) — ローカルアプリ と SaaS で Excubitor の扱いを分ける軸:
+#   saas      : 多人数向けにデプロイするバックエンド Web サービス (SaaS ランチャーが管理)
+#   infra     : LUDIARS 共有インフラ (infra/ リポの DB / queue / object store 等)
+#   personal  : 本人の PC でのみ動く単独利用ツール (Memoria local / Concordia 等)
+#   local-app : ネイティブ/デスクトップ製品 (runtime=app)
+# SaaS ランチャーは tier: saas (+依存 infra) を既定対象にする。
+#
+# 命名: フロントエンドは Corpus 側へ統合するため catalog からは除外し (フロント統合=Corpus)、
+# バックエンド単独になった論理サービスは管理名から "-backend" 等の役割サフィックスを外して
+# 純粋なプロジェクト名 (code=プロジェクトコード / name=プロジェクト名) を採用する。
+
+global:
+  env:
+    # *.melpot.dev を全サービスの Vite dev server allowedHosts に一括許可。
+    # LUDIARS_ALLOWED_HOSTS を読む全サービス (Actio/Cernere/Nuntius/Schedula/Excubitor/
+    # Pagus/Signum/Praeforma/Peregrinatio/Quaestor) に自動注入される。
+    LUDIARS_ALLOWED_HOSTS: "${DOMAIN_ROOT}"
+
+project_versions:
+  # patch is derived at runtime from build number env or git commit count.
+  concordia:
+    major: 2
+    minor: 1
+  discutere:
+    major: 2
+    minor: 0
+  excubitor:
+    major: 1
+    minor: 4
+  peregrinatio:
+    major: 0
+    minor: 8
+  pagus:
+    major: 0
+    minor: 6
+  memoria:
+    major: 3
+    minor: 1
 
 services:
-  # ─────────────── LUDIARS 共有インフラ (monitor_only) ───────────────
+  # ─────────────── LUDIARS 共有インフラ (tier: infra / monitor_only) ───────────────
   - code: infra-postgres
     name: infra Postgres
+    tier: infra
     project_code: infra
     component: postgres
     port: 5432
     monitor_only: true
     repo: LUDIARS/infra
     runtime: docker-compose
-    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/infra/docker-compose.yaml
     services: [postgres]
     container_names: [infra-postgres-1]
     autostart: false
 
   - code: infra-redis
     name: infra Redis
+    tier: infra
     project_code: infra
     component: redis
     port: 6379
     monitor_only: true
     repo: LUDIARS/infra
     runtime: docker-compose
-    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/infra/docker-compose.yaml
     services: [redis]
     container_names: [infra-redis-1]
     autostart: false
 
   - code: infra-minio
     name: infra MinIO
+    tier: infra
     project_code: infra
     component: minio
     port: 9000
     monitor_only: true
     repo: LUDIARS/infra
     runtime: docker-compose
-    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/infra/docker-compose.yaml
     services: [minio]
     container_names: [infra-minio-1]
     autostart: false
 
   - code: infra-mailpit
     name: infra Mailpit
+    tier: infra
     project_code: infra
     component: mailpit
     port: 8025
     monitor_only: true
     repo: LUDIARS/infra
     runtime: docker-compose
-    compose_file: E:/Document/Ars/infra/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/infra/docker-compose.yaml
     services: [mailpit]
     container_names: [infra-mailpit-1]
     autostart: false
 
-  # ─────────────── Cernere (認証基盤) ───────────────
-  - code: cernere-backend-dev
-    name: Cernere backend
+  # ─────────────── SaaS バックエンド (tier: saas) ───────────────
+  # フロントエンドは Corpus 統合のため除外。 バックエンド単独なので code/name は純粋名。
+  - code: cernere
+    name: Cernere
+    tier: saas
     project_code: cernere
     component: backend
     port: 8080
     repo: LUDIARS/Cernere
-    runtime: docker-compose
-    compose_file: E:/Document/Ars/Cernere/docker-compose.yaml
-    services: [backend-dev]
-    container_names: [cernere-backend-dev]
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/server
+    command: npm run dev
+    allow_hot_reload: true
     autostart: false
+    env:
+      LISTEN_PORT: "8080"
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
     health:
       type: http
       url: http://localhost:8080/health
@@ -76,103 +124,52 @@ services:
     infisical:
       project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
       environment: dev
-      inject: false
+      inject: true
+    # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
+    provides:
+      CERNERE_URL: http://${host}:${port}
+      CERNERE_BASE_URL: http://${host}:${port}
+      CERNERE_WS_URL: ws://${host}:${port}
     auto_fix:
-      enabled: true
+      enabled: false  # pnpm v10 構成のハマりで暴走中、 手動で main を安定化させてから再有効化
       agent: claude-code
       max_auto_attempts: 3
-      working_dir: E:/Document/Ars/Cernere
+      working_dir: ${ARS_ROOT}/Cernere
       branch_prefix: excubitor/auto-fix/
       create_pr: true
       pr_draft: true
 
-  - code: cernere-frontend-dev
-    name: Cernere frontend
+  - code: cernere-frontend
+    name: Cernere login frontend
+    tier: saas
     project_code: cernere
     component: frontend
     port: 5173
     repo: LUDIARS/Cernere
-    runtime: docker-compose
-    compose_file: E:/Document/Ars/Cernere/docker-compose.yaml
-    services: [frontend-dev]
-    container_names: [cernere-frontend-dev]
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:5173
-      interval_sec: 30
-
-  # ─────────────── Custos (リモートテストランナー) ───────────────
-  - code: custos
-    name: Custos
-    project_code: custos
-    component: server
-    port: 8765
-    repo: LUDIARS/Custos
-    runtime: dev-process-md
-    cwd: E:/Document/Ars/Custos
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:8765/health
-      interval_sec: 30
-
-  # ─────────────── Memoria (Web ブクマ + RAG + 日記) ───────────────
-  # 個人ローカル開発用 server (runtime: node、 port 5180)。
-  - code: memoria-server
-    name: Memoria server (local)
-    project_code: memoria
-    component: server
-    port: 5180
-    repo: LUDIARS/Memoria
     runtime: node
-    cwd: E:/Document/Ars/Memoria/server
-    command: npm run dev
+    cwd: ${ARS_ROOT}/Cernere/frontend
+    command: npm run dev -- --host 0.0.0.0
+    allow_hot_reload: true
+    depends_on: [cernere]
     autostart: false
+    env:
+      VITE_BACKEND_URL: http://localhost:8080
     health:
       type: http
-      url: http://localhost:5180/api/health
+      url: http://localhost:5173/
       interval_sec: 30
+    provides:
+      CERNERE_FRONTEND_URL: http://${host}:${port}
 
-  # Memoria Hub (シェアサーバ) — server/multi/docker-compose.yml で
-  # Postgres + Hub コンテナを起動。 host port 5280。
-  - code: memoria-hub
-    name: Memoria Hub
-    project_code: memoria
-    component: hub
-    port: 5280
-    repo: LUDIARS/Memoria
-    runtime: docker-compose
-    compose_file: E:/Document/Ars/Memoria/server/multi/docker-compose.yml
-    services: [hub]
-    container_names: [multi-hub-1]
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:5280/healthz
-      interval_sec: 30
-
-  - code: memoria-hub-pg
-    name: Memoria Hub Postgres
-    project_code: memoria
-    component: hub-pg
-    monitor_only: true
-    repo: LUDIARS/Memoria
-    runtime: docker-compose
-    compose_file: E:/Document/Ars/Memoria/server/multi/docker-compose.yml
-    services: [postgres]
-    container_names: [multi-postgres-1]
-    autostart: false
-
-  # ─────────────── Actio (予定 + タスク プラットフォーム) ───────────────
-  - code: actio-backend
-    name: Actio backend
+  - code: actio
+    name: Actio
+    tier: saas
     project_code: actio
     component: backend
     port: 3000
     repo: LUDIARS/Actio
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Actio/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Actio/docker-compose.yaml
     services: [backend]
     container_names: [actio-backend-1]
     autostart: false
@@ -180,28 +177,19 @@ services:
       type: http
       url: http://localhost:3000/api/health
       interval_sec: 30
-
-  - code: actio-frontend
-    name: Actio frontend
-    project_code: actio
-    component: frontend
-    port: 8080
-    repo: LUDIARS/Actio
-    runtime: docker-compose
-    compose_file: E:/Document/Ars/Actio/docker-compose.yaml
-    services: [frontend]
-    container_names: [actio-frontend-1]
-    autostart: false
+    provides:
+      ACTIO_URL: http://${host}:${port}
 
   # ─────────────── Imperativus (音声コマンドルーター + Iv) ───────────────
   - code: imperativus-app
     name: Imperativus app
+    tier: saas
     project_code: imperativus
     component: app
     port: 5963
     repo: LUDIARS/Imperativus
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
     services: [app]
     container_names: [imperativus-app]
     autostart: false
@@ -209,28 +197,32 @@ services:
       type: http
       url: http://localhost:5963/health
       interval_sec: 30
+    provides:
+      IMPERATIVUS_URL: http://${host}:${port}
 
   - code: imperativus-stt
     name: Imperativus STT (faster-whisper)
+    tier: saas
     project_code: imperativus
     component: stt
     monitor_only: true  # 内部 gRPC、 source 自管理だが health endpoint なし
     repo: LUDIARS/Imperativus
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
     services: [stt]
     container_names: [imperativus-stt]
     autostart: false
 
   - code: imperativus-mosquitto
     name: Imperativus Mosquitto
+    tier: saas
     project_code: imperativus
     component: mosquitto
     port: 1883
     monitor_only: true
     repo: LUDIARS/Imperativus
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Imperativus/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
     services: [mosquitto]
     container_names: [imperativus-mosquitto]
     autostart: false
@@ -238,12 +230,13 @@ services:
   # ─────────────── Nuntius (統合通知・メッセージング基盤) ───────────────
   - code: nuntius-api
     name: Nuntius API
+    tier: saas
     project_code: nuntius
     component: api
     port: 3100
     repo: LUDIARS/Nuntius
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Nuntius/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Nuntius/docker-compose.yaml
     services: [api]
     container_names: [nuntius-api-1]
     autostart: false
@@ -251,14 +244,744 @@ services:
       type: http
       url: http://localhost:3100/api/health
       interval_sec: 30
+    provides:
+      NUNTIUS_URL: http://${host}:${port}
+      NUNTIUS_API_URL: http://${host}:${port}
 
   - code: nuntius-worker
     name: Nuntius Worker
+    tier: saas
     project_code: nuntius
     component: worker
     repo: LUDIARS/Nuntius
     runtime: docker-compose
-    compose_file: E:/Document/Ars/Nuntius/docker-compose.yaml
+    compose_file: ${ARS_ROOT}/Nuntius/docker-compose.yaml
     services: [worker]
     container_names: [nuntius-worker-1]
     autostart: false
+
+  # ─────────────── dev.ps1 ローカル開発サービス群 (設計書 §6.1) ───────────────
+  # dev.bat / dev.ps1 が `cd <repo> && npm run dev` で別ウィンドウ起動している
+  # 開発サーバを catalog に全登録する。Excubitor が dev.bat を置き換える布石。
+  # command は各リポ自身の `npm run dev` に委譲。 health は port への tcp probe。
+
+  - code: corpus
+    name: Corpus (Hub framework)
+    tier: saas
+    project_code: corpus
+    component: server
+    port: 5185
+    repo: LUDIARS/Corpus
+    runtime: node
+    cwd: ${ARS_ROOT}/Corpus
+    command: npm run dev
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      CORPUS_URL: http://${host}:${port}
+
+  - code: schedula
+    name: Schedula (予定基盤)
+    domain: sc${DOMAIN_ROOT}
+    tier: saas
+    project_code: schedula
+    subdomain: sc
+    component: backend
+    # Actio (3000) と port 競合するため 3300 へ移設。Schedula は BACKEND_PORT ?? PORT ?? 3000 を
+    # 読む (src/index.ts) ので env: で BACKEND_PORT=3300 を spawn env に注入して別ポートで bind させる。
+    port: 3300
+    repo: LUDIARS/Schedula
+    runtime: node
+    cwd: ${ARS_ROOT}/Schedula
+    command: npm run dev
+    allow_hot_reload: true
+    env:
+      BACKEND_PORT: "3300"
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      SCHEDULA_URL: http://${host}:${port}
+
+  - code: pagus
+    name: Pagus (AI 村シミュレーション)
+    domain: pagus${DOMAIN_ROOT}
+    tier: personal
+    project_code: pagus
+    subdomain: pagus
+    component: backend
+    # 権威サーバ (WS :4310)。client (:4320) は frontend のため catalog 対象外。
+    port: 4310
+    repo: LUDIARS/Pagus
+    runtime: node
+    cwd: ${ARS_ROOT}/Pagus
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PAGUS_WS_URL: ws://${host}:${port}
+
+  - code: peregrinatio
+    name: Peregrinatio
+    domain: pe${DOMAIN_ROOT}
+    tier: personal
+    project_code: peregrinatio
+    subdomain: pe
+    component: backend
+    port: 8090
+    repo: LUDIARS/Peregrinatio
+    runtime: node
+    cwd: ${ARS_ROOT}/Peregrinatio
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PEREGRINATIO_URL: http://${host}:${port}
+
+  - code: aedilis
+    name: Aedilis (施設予約)
+    tier: saas
+    project_code: aedilis
+    component: server
+    port: 17502
+    repo: LUDIARS/Aedilis
+    runtime: node
+    cwd: ${ARS_ROOT}/Aedilis
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      AEDILIS_URL: http://${host}:${port}
+      AEDILIS_BASE_URL: http://${host}:${port}
+    # Cernere (認証/ID) 発行のクライアント資格情報を Excubitor 経由で借りる (cross-service delegation)。
+    # AEDILIS_CERNERE_CLIENT_ID/SECRET が Cernere の Infisical project に無ければ preflight が fail closed する。
+    requires_secret:
+      - service: cernere
+        keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
+
+  - code: bibliotheca
+    name: Bibliotheca (貸出台帳)
+    tier: saas
+    project_code: bibliotheca
+    component: server
+    port: 17501
+    repo: LUDIARS/Bibliotheca
+    runtime: node
+    cwd: ${ARS_ROOT}/Bibliotheca
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      BIBLIOTHECA_URL: http://${host}:${port}
+
+  - code: quaestor
+    name: Quaestor (個人会計)
+    domain: qs${DOMAIN_ROOT}
+    tier: personal
+    project_code: quaestor
+    subdomain: qs
+    component: backend
+    port: 17400
+    repo: LUDIARS/Quaestor
+    runtime: node
+    cwd: ${ARS_ROOT}/Quaestor
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      QUAESTOR_URL: http://${host}:${port}
+
+  - code: praeforma
+    name: Praeforma (仕様↔実装)
+    tier: saas
+    project_code: praeforma
+    component: backend
+    port: 8889
+    repo: LUDIARS/Praeforma
+    runtime: node
+    cwd: ${ARS_ROOT}/Praeforma
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PRAEFORMA_URL: http://${host}:${port}
+      PRAEFORMA_API_URL: http://${host}:${port}
+
+  - code: praeforma-web
+    name: Praeforma Web (wireframe editor)
+    tier: saas
+    project_code: praeforma
+    component: frontend
+    port: 5177
+    repo: LUDIARS/Praeforma
+    runtime: node
+    cwd: ${ARS_ROOT}/Praeforma
+    command: npm run dev:web
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      PRAEFORMA_WEB_URL: http://${host}:${port}
+
+  - code: signum
+    name: Signum (コンテンツ署名)
+    tier: saas
+    project_code: signum
+    component: backend
+    port: 3200
+    repo: LUDIARS/Signum
+    runtime: node
+    cwd: ${ARS_ROOT}/Signum
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      SIGNUM_URL: http://${host}:${port}
+
+  - code: ludellus
+    name: Ludellus server (知育)
+    tier: saas
+    project_code: ludellus
+    component: server
+    port: 5380
+    repo: LUDIARS/Ludellus-Server
+    runtime: node
+    cwd: ${ARS_ROOT}/Ludellus-Server
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      LUDELLUS_URL: http://${host}:${port}
+
+  - code: vantanhub
+    name: VantanHub (学校 hub)
+    tier: saas
+    project_code: vantanhub
+    component: server
+    port: 5186
+    repo: LUDIARS/VantanHub
+    runtime: node
+    cwd: ${ARS_ROOT}/VantanHub
+    command: npm run dev
+    allow_hot_reload: true
+    # 学校生活 hub はフロントを Corpus 経由で統合する → 起動セットに含めると Corpus も自動起動。
+    uses_corpus: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      VANTANHUB_URL: http://${host}:${port}
+
+  - code: glab
+    name: GLAB (学校運営 hub)
+    tier: saas
+    project_code: glab
+    component: server
+    port: 5187
+    repo: VGA-GLAB/GLAB-Hub
+    runtime: node
+    cwd: ${ARS_ROOT}/GLAB
+    command: npm run dev
+    allow_hot_reload: true
+    uses_corpus: true
+    depends_on: [cernere, cernere-frontend]
+    autostart: false
+    env:
+      CORPUS_PUBLIC_URL: http://localhost:5187
+      CORPUS_TOKEN_MODE: cernere-project-token
+    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
+    # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
+    # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
+    requires_secret:
+      - service: cernere
+        keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]
+    cernere_launch_credentials:
+      target_project: glab
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      GLAB_URL: http://${host}:${port}
+
+  # ─────────────── Tirocinium (面接練習) ───────────────
+  - code: tirocinium
+    name: Tirocinium server (面接練習)
+    tier: saas
+    project_code: tirocinium
+    component: server
+    port: 8084
+    repo: LUDIARS/Tirocinium
+    runtime: node
+    cwd: ${ARS_ROOT}/Tirocinium
+    command: npm run dev:server
+    allow_hot_reload: true
+    # server(8084) のみ起動する。 desktop(5178) は Tirocinium 側の start-tirocinium.command から。
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8084/health
+      interval_sec: 30
+    # secret-agent が tirocinium サービスの secret を解決するための Infisical マッピング。
+    # 値の実体は Infisical (infisical.vtn-game.com) の本プロジェクトに置く。 dev は
+    # claude CLI バックエンド (TIROCINIUM_LLM_BACKEND=cli) で API キー不要。
+    # inject: false — サービス側は secret を env から一切読まない (required_env も空) ため
+    # 注入しても供給するものが無い。 加えて上記 project_id は fetch が 403 になり (実 ID 未確認)、
+    # inject: true のままだと secret fetch の throw で起動自体が落ちる。 実 ID 入手後に true へ戻す。
+    infisical:
+      project_id: 798d69f4-18a1-4a8a-8e53-4e663748caa6
+      environment: dev
+      inject: false
+    provides:
+      TIROCINIUM_URL: http://${host}:${port}
+
+  # ─────────────── Discutere (Discord 自走議論) ───────────────
+  # port は Nuntius (3100) と競合するため 3110 へ退避。 サービス側は BACKEND_PORT を
+  # 読むので、 Excubitor が起動時に env: BACKEND_PORT=3110 を注入して整合させる。
+  - code: discutere
+    name: Discutere (Discord 議論)
+    domain: di${DOMAIN_ROOT}
+    tier: saas
+    project_code: discutere
+    subdomain: di
+    component: backend
+    port: 3110
+    repo: LUDIARS/Discutere
+    runtime: node
+    cwd: ${ARS_ROOT}/Discutere
+    command: npm run dev:server
+    allow_hot_reload: true
+    # BACKEND_PORT=3110 は env: で spawn env に注入され、 npm → node が継承する
+    # (Nuntius(3100) との port 競合回避)。
+    autostart: false
+    env:
+      BACKEND_PORT: "3110"
+    health:
+      type: http
+      url: http://localhost:3110/health
+      interval_sec: 30
+    provides:
+      DISCUTERE_URL: http://${host}:${port}
+
+  # ─────────────── personal (本人 PC 専用ツール / tier: personal) ───────────────
+  # 個人ローカル開発用 server (個人ログ専用、 port 5180)。 シェアサーバ (Hub) とは別。
+  - code: memoria-server
+    name: Memoria server (local)
+    domain: memoria${DOMAIN_ROOT}
+    tier: personal
+    project_code: memoria
+    subdomain: memoria
+    component: server
+    port: 5180
+    repo: LUDIARS/Memoria
+    runtime: node
+    cwd: ${ARS_ROOT}/Memoria/server
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:5180/api/health
+      interval_sec: 30
+    provides:
+      MEMORIA_URL: http://${host}:${port}
+    # Tier2: Memoria server が /api/metrics/memory で process.memoryUsage() を晒すので、
+    # heap/external 内訳を取得する (Memoria PR #217)。 外形 RSS と併せて leak の真因切り分けに使う。
+    memory:
+      metrics_url: http://localhost:5180/api/metrics/memory
+
+  - code: anatomia
+    name: Anatomia (建築規約オラクル)
+    domain: anatomia${DOMAIN_ROOT}
+    tier: personal
+    project_code: anatomia
+    subdomain: anatomia
+    component: backend
+    port: 4200
+    repo: LUDIARS/Anatomia
+    runtime: node
+    cwd: ${ARS_ROOT}/Anatomia
+    command: node bin/anatomia.mjs web
+    # warm サーバは通常 anatomia hook が必要時に spawn し idle 自動終了する。 Excubitor からは
+    # ログ tail と任意の手動起動のために登録する (autostart はしない)。
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:4200/api/projects
+      interval_sec: 30
+    # Vestigium JSONL ログ (cache hit/miss・supply/verify)。 Excubitor が spawn 時に
+    # VESTIGIUM_LOGS_DIR=${ARS_ROOT}/logs を注入し、 Anatomia が <root>/anatomia/ に書く。
+    log_path: ${ARS_ROOT}/logs/anatomia
+
+  - code: augur
+    name: Augur (test planning)
+    tier: personal
+    project_code: augur
+    component: backend
+    port: 4210
+    repo: LUDIARS/Augur
+    runtime: node
+    cwd: ${ARS_ROOT}/Augur
+    command: npm run start
+    autostart: false
+    env:
+      AUGUR_PORT: "4210"
+    health:
+      type: http
+      url: http://localhost:4210/v1/health
+      interval_sec: 30
+    provides:
+      AUGUR_URL: http://${host}:${port}
+
+  - code: fundamentum-datahub
+    name: Fundamentum datahub (共有データ hub)
+    tier: personal
+    project_code: fundamentum
+    component: backend
+    port: 4220
+    repo: LUDIARS/Fundamentum
+    runtime: node
+    cwd: ${ARS_ROOT}/Fundamentum/datahub
+    # serve は build → 起動 (stale dist 事故防止)。LLM (claude -p) は PATH の claude CLI を使う
+    command: npm run serve
+    autostart: false
+    env:
+      FUNDAMENTUM_DATAHUB_PORT: "4220"
+    health:
+      type: http
+      url: http://localhost:4220/v1/health
+      interval_sec: 30
+    provides:
+      FUNDAMENTUM_DATAHUB_URL: http://${host}:${port}
+    # Vestigium JSONL (serviceCode=fundamentum-datahub)。spawn 時に VESTIGIUM_LOGS_DIR 注入
+    log_path: ${ARS_ROOT}/logs/fundamentum-datahub
+
+  - code: thaleia
+    name: Thaleia (unified spec/domain view)
+    tier: personal
+    project_code: thaleia
+    component: backend
+    port: 8890
+    depends_on:
+      - anatomia
+      - praeforma
+    repo: LUDIARS/Thaleia
+    runtime: node
+    cwd: ${ARS_ROOT}/Thaleia
+    command: npm run start
+    env:
+      THALEIA_PORT: "8890"
+      ANATOMIA_BASE_URL: http://127.0.0.1:4200
+      ANATOMIA_WEB_URL: http://127.0.0.1:4200
+      PRAEFORMA_BASE_URL: http://127.0.0.1:8889
+      PRAEFORMA_API_URL: http://127.0.0.1:8889
+      PRAEFORMA_WEB_URL: http://127.0.0.1:5177
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8890/health
+      interval_sec: 30
+    provides:
+      THALEIA_URL: http://${host}:${port}
+
+  - code: calliope
+    name: Calliope (planning orchestrator)
+    tier: personal
+    project_code: calliope
+    component: backend
+    port: 8891
+    depends_on:
+      - actio
+      - schedula
+      - memoria-server
+    repo: LUDIARS/Calliope
+    runtime: node
+    cwd: ${ARS_ROOT}/Calliope
+    command: npm run start
+    env:
+      CALLIOPE_PORT: "8891"
+      ACTIO_BASE_URL: http://127.0.0.1:3000
+      SCHEDULA_BASE_URL: http://127.0.0.1:3300
+      MEMORIA_BASE_URL: http://127.0.0.1:5180
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8891/health
+      interval_sec: 30
+    provides:
+      CALLIOPE_URL: http://${host}:${port}
+
+  - code: concordia
+    name: Concordia (AI 協調)
+    tier: personal
+    project_code: concordia
+    component: backend
+    # backend は concordia.config.json server.port = 11111 を bind する (loopback)。
+    # 旧値 17330 は実体と不一致で health probe が常に落ちていた。
+    port: 11111
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: ${ARS_ROOT}/Concordia
+    command: node dist/server.js
+    allow_hot_reload: false
+    env:
+      # Cost サンプリング (全ログ JSONL 走査) が event loop を重くするため cost だけを
+      # concordia-cost worker へ分離する。chat (Discord/Slack) relay は backend embedded で
+      # 動かす — worker 分離 (concordia-discord) は WS bridge 越しの interaction 遅延で
+      # autocomplete が 3s ACK 窓を超え不安定だったため撤去した。
+      NODE_ENV: production
+      CONCORDIA_COST_MODE: worker
+      CONCORDIA_DISCORD_COST_REFRESH_MIN: "10"
+      CONCORDIA_LOG_FILE: "1"
+      CONCORDIA_LOG_FILE_PATH: ${ARS_ROOT}/logs/concordia/cc-live.jsonl
+      CONCORDIA_LOG_LEVEL: info
+      CONCORDIA_HTTP_CACHE_ENABLED: "1"
+      CONCORDIA_HTTP_CACHE_REDIS_READ: "0"
+      # transcript-frame 等の高頻度 POST が 1 リクエスト 1 info 行で stdout 86MB/3日 に
+      # 肥大し、 それを Excubitor が tail → DB 取り込みする増幅ループになっていたため停止。
+      # 低速リクエストは CONCORDIA_HTTP_PERF_LOG_MS / CONCORDIA_HTTP_SLOW_MS で引き続き出る。
+      CONCORDIA_HTTP_LOG_ALL: "0"
+      # discord イベントキューの per-task ログ (enqueued/start/done) を止める
+      # (verbose-logging-bootstrap の撤収)。 失敗 / 溢れ / depth 節目は引き続き出る。
+      CONCORDIA_QUEUE_VERBOSE: "0"
+      CONCORDIA_HTTP_LOG_QUERY: "1"
+      CONCORDIA_HTTP_PERF_LOG_MS: "20"
+      CONCORDIA_HTTP_SLOW_MS: "60"
+      CONCORDIA_HTTP_CACHE_STAT_TTL_MS: "3000"
+      CONCORDIA_HTTP_CACHE_COST_ONE_SHOTS_TTL_MS: "10000"
+      CONCORDIA_HTTP_CACHE_REPORTS_TTL_MS: "10000"
+      CONCORDIA_HTTP_CACHE_HARNESS_AUDIT_TTL_MS: "5000"
+      CONCORDIA_REDIS_URL: redis://127.0.0.1:6379
+      CONCORDIA_REDIS_TIMEOUT_MS: "8"
+      CONCORDIA_REDIS_READ_TIMEOUT_MS: "8"
+      CONCORDIA_REDIS_WRITE_TIMEOUT_MS: "500"
+      CONCORDIA_DISCORD_BOOT_SYNC_DELAY_MS: "60000"
+      CONCORDIA_POST_LISTEN_STARTUP_DELAY_MS: "1000"
+      CONCORDIA_METRICS_START_DELAY_MS: "30000"
+      CONCORDIA_REPO_SCAN_CONCURRENCY: "4"
+      CONCORDIA_REPO_SCAN_GIT_TIMEOUT_MS: "1500"
+      CONCORDIA_WORK_REPOS_CACHE_REDIS_READ: "0"
+      CONCORDIA_WORK_REPOS_CACHE_INITIAL_WAIT_MS: "0"
+      CONCORDIA_WORK_REPOS_CACHE_REFRESH_DELAY_MS: "1000"
+      CONCORDIA_WORK_CONVERSATIONS_DEFAULT_LIMIT_PER_SESSION: "40"
+      CONCORDIA_WORK_CONVERSATIONS_DEFAULT_MAX_SESSIONS: "20"
+      CONCORDIA_SLACK_ENABLED: "0"
+      CONCORDIA_PR_RECONCILE_ENABLED: "0"
+      CONCORDIA_PR_FULL_SYNC_ENABLED: "0"
+    autostart: false
+    # Vestigium JSONL ログ (harness gate/supply/intent 等)。 Excubitor は spawn 時に
+    # VESTIGIUM_LOGS_DIR=dirname(log_path)=${ARS_ROOT}/logs を注入し、 Concordia の Vestigium が
+    # <root>/concordia/ に書く → ここを file-tail する。
+    log_path: ${ARS_ROOT}/logs/concordia
+    # backend は /health (JSON) を持つので tcp probe ではなく http health で死活判定する。
+    # root (/) は build 済み web UI (web/dist) を配信するため、 開いても 404 にならない。
+    health:
+      type: http
+      url: http://localhost:11111/health
+      interval_sec: 30
+    provides:
+      CONCORDIA_URL: http://${host}:${port}
+
+  - code: concordia-cost
+    name: Concordia Cost Worker
+    tier: personal
+    project_code: concordia
+    component: worker
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: ${ARS_ROOT}/Concordia
+    # tsx ランタイム常駐 (≈100MB) を避け、 build 済み dist を素の node で動かす。
+    # dist は concordia backend と同じ build (`npm run build`) が生成する。
+    command: node --env-file-if-exists=.env dist/cost-worker.js
+    autostart: true
+    restart_policy: on-failure
+    max_restart: 5
+    log_path: ${ARS_ROOT}/logs/concordia-cost
+    health:
+      type: process
+      interval_sec: 30
+
+  - code: concordia-web
+    name: Concordia Web
+    domain: cc${DOMAIN_ROOT}
+    tier: personal
+    project_code: concordia
+    subdomain: cc
+    component: frontend
+    port: 10101
+    repo: LUDIARS/Concordia
+    runtime: node
+    cwd: ${ARS_ROOT}/Concordia/web
+    # vite dev サーバ常駐 (HMR watcher, 実測 +27MB/h の leak suspect) をやめ、
+    # build 済み web/dist を vite preview (静的配信のみ) で出す。
+    # dist は concordia backend の build (`npm run build`) が生成・更新する。
+    command: npm run preview -- --host --port 10101 --strictPort
+    allow_hot_reload: false
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      CONCORDIA_WEB_URL: http://${host}:${port}
+
+  - code: conciliator
+    name: Conciliator (衝突検知)
+    tier: personal
+    project_code: conciliator
+    component: backend
+    port: 17340
+    repo: LUDIARS/Conciliator
+    runtime: node
+    cwd: ${ARS_ROOT}/Conciliator
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    health:
+      type: tcp
+      interval_sec: 30
+    provides:
+      CONCILIATOR_URL: http://${host}:${port}
+
+  - code: custos
+    name: Custos (リモートテストランナー)
+    tier: personal
+    project_code: custos
+    component: server
+    port: 8765
+    repo: LUDIARS/Custos
+    runtime: dev-process-md
+    cwd: ${ARS_ROOT}/Custos
+    autostart: false
+    health:
+      type: http
+      url: http://localhost:8765/health
+      interval_sec: 30
+    provides:
+      CUSTOS_URL: http://${host}:${port}
+
+  # ─────────────── ローカルアプリ (tier: local-app / runtime=app) ───────────────
+  # port を持たないネイティブ/デスクトップ製品。 Excubitor は exec を detached spawn
+  # して死活 (プロセス生存) を監視し、 Corpus は /api/hub/apps で集約 + 起動する。
+  # GUI を勝手に再起動しないよう autostart=false / restart_policy=no が既定。
+  # process_match は host プロセススキャンで「Excubitor 外から起動した実体」を検知する image 名。
+  - code: hora-app
+    name: Hora (デスクトップおじさん)
+    tier: local-app
+    project_code: hora
+    component: app
+    repo: LUDIARS/Hora
+    runtime: app
+    app_kind: tauri
+    exec: ${ARS_ROOT}/Hora/src-tauri/target/release/hora.exe
+    cwd: ${ARS_ROOT}/Hora
+    build_command: npm run tauri build
+    process_match: hora.exe
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30
+
+  - code: quaestor-app
+    name: Quaestor (個人会計)
+    tier: local-app
+    project_code: quaestor
+    component: app
+    repo: LUDIARS/Quaestor
+    runtime: app
+    app_kind: tauri
+    # src-tauri/Cargo.toml [[bin]] name = "quaestor" → release binary は quaestor.exe
+    exec: ${ARS_ROOT}/Quaestor/src-tauri/target/release/quaestor.exe
+    cwd: ${ARS_ROOT}/Quaestor
+    build_command: npm run tauri build
+    process_match: quaestor.exe
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30
+    # Tier2 (heap 内訳) を取りたいサービスは memory.metrics_url を設定する。
+    # サービス側は GET <url> → { rss, heapUsed, heapTotal, external, arrayBuffers } (各バイト) を返す。
+    # memory:
+    #   metrics_url: http://localhost:17400/api/metrics/memory
+    #   leak_window_min: 60
+    #   leak_threshold_mb_per_hr: 50
+
+  - code: legatus-app
+    name: Legatus (PC 代理人)
+    tier: local-app
+    project_code: legatus
+    component: app
+    repo: LUDIARS/Legatus
+    runtime: app
+    app_kind: electron
+    # package.json "start": "electron dist/electron/main.js"
+    # build:electron → dist/electron/main.js (tsconfig.electron.json)
+    exec: ${ARS_ROOT}/Legatus/node_modules/electron/dist/electron.exe
+    exec_args:
+      - dist/electron/main.js
+    cwd: ${ARS_ROOT}/Legatus
+    build_command: npm run build
+    # process_match は省略 — electron.exe は汎用名のため Excubitor spawn 追跡のみ
+    autostart: false
+    health:
+      type: process
+      interval_sec: 30
+
+# ─────────────── メモリ監視 (memory_monitor) ───────────────
+# 各サービスの RSS (プロセスツリー合算 / docker stats) を時系列で採取し、 単調増加トレンドを
+# leak として error_tasks に起票する。 WSL2 バックエンドは distro 内部 + Windows 側 vmmem を別軸で監視。
+# per-service の閾値は各サービスの memory: ブロックで上書きできる (既定 60 分窓 / 50MB/h)。
+# memory.rss_budget_mb / memory.cpu_budget_pct でサービスごとの予算を上書きできる。
+memory_monitor:
+  enabled: true
+  interval_sec: 60        # サンプリング間隔
+  retention_hours: 48     # memory_samples の保持期間 (これより古い行は剪定)
+  default_service_rss_budget_mb: 1024
+  default_service_cpu_budget_pct: 80
+  wsl:
+    enabled: true
+    distros: []           # 空 = `wsl -l -q` で自動検出 (docker-desktop 系は除外)
+    leak_window_min: 120
+    leak_threshold_mb_per_hr: 200
+
+# 構造化履歴と圧縮済みログの保持期間。
+retention:
+  enabled: true
+  logs_hours: 72          # Phase 4 で削除予定 (Phase 1 以降は no-op)
+  liveness_hours: 168     # liveness_history (死活履歴)
+  parquet_days: 90        # Vestigium JSONL から圧縮した Parquet
+  interval_min: 60        # 剪定周期
+  batch_rows: 50000       # 1 バッチの削除行数上限 (長時間ロック回避)
+
+log_store:
+  ring_lines_per_service: 2000
+  ring_lines_global: 20000
+  compact_hour_utc: 18
