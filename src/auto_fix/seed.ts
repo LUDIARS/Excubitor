@@ -1,22 +1,25 @@
 /**
- * 起動時にデフォルトの error_rules を seed する。
+ * Seed default error_rules at startup.
  *
- * 既に同名の rule があれば DO NOTHING (ON CONFLICT (name))。
+ * Existing rule names are left untouched.
  */
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 
-const logger = pino({ name: 'excubitor.auto_fix.seed' });
+const logger = createNamedLogger('excubitor.auto_fix.seed');
 
 interface DefaultRule {
   name: string;
   pattern: string;
   pattern_type: 'regex' | 'keyword';
   severity: 'info' | 'warn' | 'error' | 'fatal';
+  service_codes?: string[];
 }
 
 const DEFAULTS: DefaultRule[] = [
+  { name: 'Anatomia fatal crash', pattern: '\\[anatomia-crash\\]', pattern_type: 'regex', severity: 'fatal', service_codes: ['anatomia'] },
   { name: 'pnpm ignored builds', pattern: 'ERR_PNPM_IGNORED_BUILDS', pattern_type: 'keyword', severity: 'error' },
   { name: 'pnpm lockfile mismatch', pattern: 'ERR_PNPM_LOCKFILE_CONFIG_MISMATCH', pattern_type: 'keyword', severity: 'error' },
   { name: 'Node module not found', pattern: 'ERR_MODULE_NOT_FOUND', pattern_type: 'keyword', severity: 'error' },
@@ -27,11 +30,14 @@ const DEFAULTS: DefaultRule[] = [
 ];
 
 export async function seedDefaultRules(): Promise<void> {
-  // error_rules.name に unique 制約は無いが、 重複避けるため name で先に絞る
+  // Remove rows left by older id-generation bugs.
+  db().run(sql`DELETE FROM error_rules WHERE id IS NULL`);
+  // Avoid duplicate defaults even when the DB has no unique constraint on name.
   for (const r of DEFAULTS) {
-    await db.execute(sql`
-      INSERT INTO error_rules (name, pattern, pattern_type, severity)
-      SELECT ${r.name}, ${r.pattern}, ${r.pattern_type}, ${r.severity}
+    const serviceCodes = r.service_codes ? JSON.stringify(r.service_codes) : null;
+    db().run(sql`
+      INSERT INTO error_rules (id, name, pattern, pattern_type, severity, service_codes)
+      SELECT ${randomUUID()}, ${r.name}, ${r.pattern}, ${r.pattern_type}, ${r.severity}, ${serviceCodes}
       WHERE NOT EXISTS (SELECT 1 FROM error_rules WHERE name = ${r.name})
     `);
   }

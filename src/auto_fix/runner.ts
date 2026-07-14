@@ -1,27 +1,18 @@
 /**
- * Auto-fix runner — Claude Code CLI 子プロセスを起動して service の cwd で
- * 修正を試みる。 完了後 service を restart して health probe で verify する。
- *
- * 流れ:
- *   1. auto_fix_runs に行を作成 (state=pending)
- *   2. branch 切る (git switch -c <branch>)
- *   3. claude -p に prompt を stdin で渡して spawn
- *   4. 終了後、 git diff を確認
- *   5. git add + commit + push + (optional) gh pr create
- *   6. service を Excubitor の控え API 経由で restart
- *   7. health endpoint を probe して verify
- *   8. error_task / auto_fix_runs を更新
+ * Runs the configured repair CLI, publishes its branch, then verifies the
+ * service through the local-control supervisor before probing health.
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { sql } from 'drizzle-orm';
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
-import { controlService } from '../control/manager.js';
+import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { autoFixConfig } from './config.js';
 
-const logger = pino({ name: 'excubitor.auto_fix' });
+const logger = createNamedLogger('excubitor.auto_fix');
 
 export interface AutoFixContext {
   errorTaskId: string;
@@ -32,7 +23,7 @@ export interface AutoFixContext {
 }
 
 /**
- * 起動 + 直列実行ガード (同一 service に対して同時に 1 つだけ)。
+ * 起勁E+ 直列実行ガーチE(同一 service に対して同時に 1 つだぁE、E
  */
 const inFlight = new Set<string>();
 
@@ -58,48 +49,66 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
     throw new Error(`no working_dir resolvable for ${code}`);
   }
 
-  // run row 作成
-  const rows = await db.execute(sql`
-    INSERT INTO auto_fix_runs (error_task_id, service_code, agent, state, triggered_by, started_at)
-    VALUES (${ctx.errorTaskId}::uuid, ${code}, 'claude-code', 'running', ${ctx.triggeredBy}, now())
-    RETURNING id
+  // Persist the explicit fix action before starting external side effects.
+  const runId = randomUUID();
+  db().run(sql`
+    INSERT INTO auto_fix_runs (id, error_task_id, service_code, agent, state, action_type, triggered_by, started_at)
+    VALUES (${runId}, ${ctx.errorTaskId}, ${code}, 'claude-code', 'running', 'fix', ${ctx.triggeredBy}, unixepoch() * 1000)
   `);
-  const runId = (rows as unknown as Array<{ id: string }>)[0]!.id;
   await markError(ctx.errorTaskId, 'running', runId);
 
   try {
     const branch = `${af.branch_prefix}${runId.slice(0, 8)}`;
     const prompt = buildPrompt(ctx, branch, af);
 
-    await db.execute(sql`UPDATE auto_fix_runs SET branch = ${branch}, prompt = ${prompt} WHERE id = ${runId}::uuid`);
+    db().run(sql`UPDATE auto_fix_runs SET branch = ${branch}, prompt = ${prompt} WHERE id = ${runId}`);
 
-    // 1) branch 切る (失敗しても続行 — claude 側に任せる選択もあり)
+    // Create an isolated repair branch; the agent can recover if it already exists.
     await execCapture('git', ['switch', '-c', branch], workingDir).catch(() => {
       logger.warn({ code, branch }, 'git switch failed (maybe branch already exists), continuing');
     });
 
-    // 2) Claude Code CLI 起動
+    // 2) Claude Code CLI 起勁E
     const cli = await runClaudeCli(workingDir, prompt);
-    await db.execute(sql`
+    db().run(sql`
       UPDATE auto_fix_runs
       SET exit_code = ${cli.exitCode},
           stdout_tail = ${cli.stdout.slice(-4000)},
           stderr_tail = ${cli.stderr.slice(-4000)},
           state = 'fixed'
-      WHERE id = ${runId}::uuid
+      WHERE id = ${runId}
     `);
 
     if (cli.exitCode !== 0) {
       throw new Error(`claude CLI exit ${cli.exitCode}: ${cli.stderr.slice(-500)}`);
     }
 
-    // 3) diff 確認 + commit + push + PR (claude が既にやってる場合もあるが、 補完で実施)
+    // Refuse to publish secret-bearing or backup files created by the repair agent.
+    const allChanged = await collectChangedFiles(workingDir);
+    const unsafe = pickUnsafeFiles(allChanged);
+    if (unsafe.length > 0) {
+      const reason = `unsafe files in branch (refuse push, escalating to human): ${unsafe.slice(0, 10).join(', ')}`;
+      logger.warn({ code, runId, unsafe }, reason);
+      db().run(sql`
+        UPDATE auto_fix_runs
+        SET state = 'failed', error_message = ${reason}, finished_at = unixepoch() * 1000
+        WHERE id = ${runId}
+      `);
+      db().run(sql`
+        UPDATE error_tasks
+        SET auto_fix_state = 'awaiting_human', auto_fix_run_id = ${runId}, updated_at = unixepoch() * 1000
+        WHERE id = ${ctx.errorTaskId}
+      `);
+      return { runId, state: 'failed' };
+    }
+
+    // Commit and publish any changes the repair agent left in the worktree.
     const diff = await execCapture('git', ['status', '--porcelain'], workingDir);
     if (diff.stdout.trim().length === 0) {
-      // claude が commit していて working tree がきれいなら、 既に push 済みか確認
+      // A clean worktree may mean the repair agent already committed its change.
       const lastCommit = await execCapture('git', ['log', '-1', '--pretty=%H'], workingDir);
-      await db.execute(sql`
-        UPDATE auto_fix_runs SET commit_hash = ${lastCommit.stdout.trim()} WHERE id = ${runId}::uuid
+      db().run(sql`
+        UPDATE auto_fix_runs SET commit_hash = ${lastCommit.stdout.trim()} WHERE id = ${runId}
       `);
     } else {
       await execCapture('git', ['add', '-A'], workingDir);
@@ -110,10 +119,10 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
       );
       logger.info({ code, runId, stdout: commit.stdout.slice(-200) }, 'auto-fix committed');
       const hash = await execCapture('git', ['rev-parse', 'HEAD'], workingDir);
-      await db.execute(sql`UPDATE auto_fix_runs SET commit_hash = ${hash.stdout.trim()} WHERE id = ${runId}::uuid`);
+      db().run(sql`UPDATE auto_fix_runs SET commit_hash = ${hash.stdout.trim()} WHERE id = ${runId}`);
     }
 
-    // push (失敗しても verify は続行)
+    // push (失敗してめEverify は続衁E
     let prUrl: string | null = null;
     try {
       await execCapture('git', ['push', '-u', 'origin', branch], workingDir);
@@ -127,7 +136,7 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
         const pr = await execCapture('gh', prArgs, workingDir);
         prUrl = pr.stdout.trim().split('\n').find((l) => l.startsWith('http')) ?? null;
         if (prUrl) {
-          await db.execute(sql`UPDATE auto_fix_runs SET pr_url = ${prUrl} WHERE id = ${runId}::uuid`);
+          db().run(sql`UPDATE auto_fix_runs SET pr_url = ${prUrl} WHERE id = ${runId}`);
         }
       }
     } catch (err) {
@@ -135,21 +144,21 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
     }
 
     // 4) verify: service restart + health probe
-    await db.execute(sql`UPDATE auto_fix_runs SET state = 'verifying' WHERE id = ${runId}::uuid`);
+    db().run(sql`UPDATE auto_fix_runs SET state = 'verifying' WHERE id = ${runId}`);
     const verify = await verifyService(ctx.service);
-    await db.execute(sql`
+    db().run(sql`
       UPDATE auto_fix_runs
       SET state = ${verify === 'ok' ? 'succeeded' : 'failed'},
           verify_result = ${verify},
-          finished_at = now()
-      WHERE id = ${runId}::uuid
+          finished_at = unixepoch() * 1000
+      WHERE id = ${runId}
     `);
     await markError(ctx.errorTaskId, verify === 'ok' ? 'succeeded' : 'failed', runId);
 
     if (verify === 'ok') {
-      await db.execute(sql`
-        UPDATE error_tasks SET state = 'resolved', triaged_by = ${'auto-fix:' + runId}, triaged_at = now()
-        WHERE id = ${ctx.errorTaskId}::uuid
+      db().run(sql`
+        UPDATE error_tasks SET state = 'resolved', triaged_by = ${'auto-fix:' + runId}, triaged_at = unixepoch() * 1000
+        WHERE id = ${ctx.errorTaskId}
       `);
     }
 
@@ -157,10 +166,10 @@ export async function runAutoFix(ctx: AutoFixContext): Promise<{ runId: string; 
   } catch (err) {
     const msg = (err as Error).message;
     logger.error({ code, runId, err: msg }, 'auto-fix failed');
-    await db.execute(sql`
+    db().run(sql`
       UPDATE auto_fix_runs
-      SET state = 'failed', error_message = ${msg}, finished_at = now()
-      WHERE id = ${runId}::uuid
+      SET state = 'failed', error_message = ${msg}, finished_at = unixepoch() * 1000
+      WHERE id = ${runId}
     `);
     await markError(ctx.errorTaskId, 'failed', runId);
     return { runId, state: 'failed' };
@@ -189,10 +198,19 @@ function buildPrompt(ctx: AutoFixContext, branch: string, af: NonNullable<Servic
     `## Task`,
     ``,
     `1. Diagnose the root cause from the log.`,
-    `2. Apply a minimal fix in this directory (do not refactor beyond what is needed).`,
+    `2. Apply the SMALLEST possible fix in this directory (do not refactor beyond what is needed).`,
     `3. Commit the change with a clear message.`,
     `4. Push to origin and${af.create_pr ? ` open a${af.pr_draft ? ' draft' : ''} PR with title "auto-fix(${ctx.service.code}): <summary>".` : ' do NOT open a PR.'}`,
     `5. Print a short summary of what you changed and why.`,
+    ``,
+    `## Hard rules (must obey strictly)`,
+    ``,
+    `- Make the SMALLEST possible diff. Touch only files directly required to fix the error.`,
+    `- DO NOT create backup files. Forbidden patterns (case-insensitive): \`*.bak\`, \`*.bak.*\`, \`*.orig\`, \`*.before-*\`, \`*.backup\`, \`*~\`.`,
+    `- DO NOT touch \`.env\`, \`.env.*\`, or any file containing secrets, tokens, passwords, OAuth client secrets, API keys, certificates, or private keys (\`*.pem\`, \`*.key\`, \`*.p12\`).`,
+    `- DO NOT include secret values in any commit. GitHub secret-scanning will block the push and the fix will fail.`,
+    `- If you have already created any such file in this branch, REMOVE it with \`git rm\` and \`rm\` before committing.`,
+    `- If the only viable fix requires editing \`.env\` or committing secrets, STOP. Do not commit. Print "REQUIRES_HUMAN: <reason>" and exit non-zero so a human can take over.`,
     `Do NOT delete or rewrite unrelated files. Stay strictly within the scope of fixing the reported error.${extra}`,
   ].join('\n');
 }
@@ -233,6 +251,49 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
   });
 }
 
+// branch に含まれる変更ファイル (未 commit + commit 済み) を集める
+async function collectChangedFiles(cwd: string): Promise<string[]> {
+  const out = new Set<string>();
+  // 未 commit (staged / unstaged / untracked)
+  try {
+    const r = await execCapture('git', ['status', '--porcelain'], cwd);
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const path = line.slice(3).trim();
+      if (path) out.add(path);
+    }
+  } catch { /* noop */ }
+  // 現 branch と main の diff (commit 済みの変更)
+  for (const base of ['main', 'master']) {
+    try {
+      const r = await execCapture('git', ['diff', '--name-only', `${base}...HEAD`], cwd);
+      for (const f of r.stdout.split(/\r?\n/)) {
+        const t = f.trim();
+        if (t) out.add(t);
+      }
+      break;
+    } catch { /* try next base */ }
+  }
+  return Array.from(out);
+}
+
+const UNSAFE_PATTERNS: RegExp[] = [
+  /(^|\/)\.env(\..+)?$/i,                  // .env, .env.local, .env.production etc.
+  /\.bak(\..*)?$/i,                        // .bak, .bak.something
+  /\.orig$/i,
+  /\.backup$/i,
+  /\.before-.+/i,                          // .env.bak.before-smoke 筁E
+  /(^|\/)[^/]+~$/,                         // editor backups
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /(^|\/)credentials?(\.json|\.yaml|\.yml)?$/i,
+  /(^|\/)secrets?(\.json|\.yaml|\.yml)?$/i,
+];
+
+function pickUnsafeFiles(files: string[]): string[] {
+  return files.filter((f) => UNSAFE_PATTERNS.some((re) => re.test(f)));
+}
+
 async function execCapture(
   cmd: string,
   args: string[],
@@ -252,9 +313,16 @@ async function execCapture(
   });
 }
 
-async function verifyService(svc: Service): Promise<'ok' | 'health_failed' | 'still_crashing' | 'not_attempted'> {
+export async function verifyService(svc: Service): Promise<'ok' | 'health_failed' | 'still_crashing' | 'not_attempted'> {
   try {
-    await controlService(svc, 'restart', 'auto-fix');
+    const restart = await controlServiceViaLocalTool(svc, 'restart', 'auto-fix');
+    if (!restart.ok) {
+      logger.warn(
+        { code: svc.code, command: restart.command, stderr: restart.stderr },
+        'verify restart failed',
+      );
+      return 'still_crashing';
+    }
   } catch (err) {
     logger.warn({ code: svc.code, err: (err as Error).message }, 'verify restart failed');
     return 'still_crashing';
@@ -274,11 +342,12 @@ async function verifyService(svc: Service): Promise<'ok' | 'health_failed' | 'st
 }
 
 async function markError(taskId: string, state: string, runId: string | null): Promise<void> {
-  await db.execute(sql`
+  db().run(sql`
     UPDATE error_tasks
     SET auto_fix_state = ${state},
-        auto_fix_run_id = ${runId}::uuid,
-        updated_at = now()
-    WHERE id = ${taskId}::uuid
+        auto_fix_run_id = ${runId},
+        updated_at = unixepoch() * 1000
+    WHERE id = ${taskId}
   `);
 }
+

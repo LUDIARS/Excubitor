@@ -2,28 +2,43 @@
   "name": "@ludiars/excubitor",
   "version": "0.1.0",
   "private": true,
-  "description": "LUDIARS service liveness, log aggregation, error triage, and centralized config (Infisical) — central monitor server.",
+  "description": "LUDIARS service liveness, log aggregation, and error triage monitor server.",
   "type": "module",
+  "bin": {
+    "excubitorctl": "dist/local-control/cli.js"
+  },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "npm install --include=dev && npm run build && npm run start",
+    "dev:safe": "npm install --include=dev && npm run build && npm run start:safe",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "start": "node dist/server.js",
+    "service": "node dist/service-runner.js",
+    "ctl": "node dist/local-control/cli.js",
+    "start:service": "node dist/server.js --service",
+    "start:safe": "node dist/server.js --safe",
+    "typecheck": "tsc --noEmit",
+    "release": "tsx src/release/cli.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
+    "@duckdb/node-api": "^1.5.4-r.1",
     "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "better-sqlite3": "^11.8.1",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.6.14",
     "js-yaml": "^4.1.0",
     "pino": "^9.5.0",
-    "postgres": "^3.4.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   },
   "engines": {
     "node": ">=22"

@@ -1,19 +1,24 @@
 /**
- * error_rules テーブルを読み込んで log line と照合する。
+ * error_rules チE�Eブルを読み込んで log line と照合する、E
  *
  * - regex (pattern_type='regex') / keyword (pattern_type='keyword')
- * - service_codes が指定されてれば対象を絞る
- * - 同一 (rule_id, service_instance_id, summary) を 60 秒以内なら occurrence_count++ で dedup
- * - 新規 / 復活時は error_tasks に行を作る (state='open')
+ * - service_codes が指定されてれ�E対象を絞る
+ * - 同一 (rule_id, service_instance_id) の未解決 task は occurrence_count++ で集約
+ * - 新要E/ 復活時�E error_tasks に行を作る (state='open')
  */
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import pino from 'pino';
+import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import { subscribe, type LogLine } from './bus.js';
 import type { Service } from '../catalog/loader.js';
-import { maybeTriggerAutoFix } from '../auto_fix/trigger.js';
+import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
+// 自勁Etrigger は v0.2 で廁E��、Eerror_task は記録するだけ、E「調査、E「修正、Eは
+// ユーザぁEUI 上�Eボタンから手動で叩く、EmaybeTriggerAutoFix は封E��戻す可能性
+// がある�Eで関数自体�E残してある (現在は呼ばれなぁE、E
+// import { maybeTriggerAutoFix } from '../auto_fix/trigger.js';
 
-const logger = pino({ name: 'excubitor.errors' });
+const logger = createNamedLogger('excubitor.errors');
 
 interface Rule {
   id: string;
@@ -29,17 +34,17 @@ let rules: Rule[] = [];
 let lastReload = 0;
 const RELOAD_INTERVAL_MS = 30_000;
 
-// catalog 参照を遅延で受け取る (cycle 回避)
+// catalog 参�Eを遅延で受け取る (cycle 回避)
 let catalogProvider: (() => { services: Service[] }) | null = null;
 export function setCatalogProvider(fn: () => { services: Service[] }): void {
   catalogProvider = fn;
 }
 
 async function reloadRules(): Promise<void> {
-  const rows = await db.execute(sql`
+  const rows = db().all(sql`
     SELECT id, name, pattern, pattern_type, severity, service_codes
     FROM error_rules
-    WHERE is_active = TRUE
+    WHERE is_active = 1
   `);
   const list: Rule[] = [];
   for (const raw of rows as unknown as Array<Record<string, unknown>>) {
@@ -50,13 +55,24 @@ async function reloadRules(): Promise<void> {
         type === 'keyword'
           ? new RegExp(escapeRegex(pattern), 'i')
           : new RegExp(pattern, 'i');
+      // service_codes は SQLite では JSON 斁E���Eで持ってぁE�� (允ETEXT[])、E
+      // raw SQL 経由で取得してぁE��ので自前で JSON.parse する、E
+      const rawCodes = raw.service_codes;
+      let serviceCodes: string[] | null = null;
+      if (rawCodes != null) {
+        if (typeof rawCodes === 'string') {
+          try { serviceCodes = JSON.parse(rawCodes) as string[]; } catch { serviceCodes = null; }
+        } else if (Array.isArray(rawCodes)) {
+          serviceCodes = rawCodes as string[];
+        }
+      }
       list.push({
         id: raw.id as string,
         name: raw.name as string,
         pattern,
         pattern_type: type as 'regex' | 'keyword',
         severity: raw.severity as string,
-        service_codes: (raw.service_codes as string[] | null) ?? null,
+        service_codes: serviceCodes,
         compiled,
       });
     } catch (err) {
@@ -93,55 +109,70 @@ async function onLine(line: LogLine): Promise<void> {
 
 async function recordHit(rule: Rule, line: LogLine): Promise<void> {
   const summary = `[${rule.name}] ${line.line.slice(0, 160)}`;
-  // 新規 INSERT 時の id を取得して auto-fix trigger 用にも返す
-  const rows = await db.execute(sql`
-    WITH si AS (
-      SELECT si.id
-      FROM service_instances si
-      JOIN services s ON s.id = si.service_id
-      WHERE s.code = ${line.service_code}
-      LIMIT 1
-    ),
-    existing AS (
-      UPDATE error_tasks et
-      SET occurrence_count = et.occurrence_count + 1,
-          last_seen_at = now(),
-          updated_at = now()
-      FROM si
-      WHERE et.rule_id = ${rule.id}
-        AND et.service_instance_id = si.id
-        AND et.state IN ('open','ack','snoozed')
-        AND et.last_seen_at > now() - INTERVAL '60 seconds'
-      RETURNING et.id, FALSE AS is_new
-    ),
-    inserted AS (
-      INSERT INTO error_tasks (rule_id, service_instance_id, severity, summary, log_excerpt)
-      SELECT ${rule.id}, si.id, ${rule.severity}, ${summary}, ${line.line}
-      FROM si
-      WHERE NOT EXISTS (SELECT 1 FROM existing)
-      RETURNING id, TRUE AS is_new
-    )
-    SELECT id, is_new FROM inserted
-    UNION ALL
-    SELECT id, is_new FROM existing
+  // SQLite では PG の data-modifying CTE (WITH ... UPDATE ... FROM si) めE
+  // 直接書けなぁE�Eで、E同一トランザクションで以下�E手頁E��刁E��する:
+  //   1) service_instance_id めEresolve
+  //   2) 吁Erule ÁEinstance ÁEopen 系 task めEUPDATE ... RETURNING
+  //   3) ヒッチE0 件なめEINSERT
+  const siRow = db().get(sql`
+    SELECT si.id AS id
+    FROM service_instances si
+    JOIN services s ON s.id = si.service_id
+    WHERE s.code = ${line.service_code}
     LIMIT 1
-  `);
-  const arr = rows as unknown as Array<{ id: string; is_new: boolean }>;
-  const hit = arr[0];
-  if (!hit?.is_new || !catalogProvider) return;
-
-  const svc = catalogProvider().services.find((s) => s.code === line.service_code);
-  if (!svc) return;
-  await maybeTriggerAutoFix({
-    errorTaskId: hit.id,
-    service: svc,
-    summary,
-    logExcerpt: line.line,
-  });
+  `) as { id: string } | undefined;
+  if (!siRow) return;
+  const existing = db().all(sql`
+    UPDATE error_tasks
+    SET occurrence_count = occurrence_count + 1,
+        last_seen_at = unixepoch() * 1000,
+        updated_at = unixepoch() * 1000
+    WHERE id = (
+      SELECT id
+      FROM error_tasks
+      WHERE rule_id = ${rule.id}
+        AND service_instance_id = ${siRow.id}
+        AND state IN ('open','ack','snoozed')
+      ORDER BY last_seen_at DESC, created_at DESC
+      LIMIT 1
+    )
+    RETURNING id
+  `) as Array<{ id: string }>;
+  if (existing.length === 0) {
+    const newId = randomUUID();
+    // first_seen_at / last_seen_at は NOT NULL かつ SQL default 無し → 明示指定しないと
+    // INSERT が NOT NULL 制約で失敗する (この catch 経由で握り潰され task が作られない)。
+    db().run(sql`
+      INSERT INTO error_tasks (id, rule_id, service_instance_id, severity, summary, log_excerpt, first_seen_at, last_seen_at)
+      VALUES (${newId}, ${rule.id}, ${siRow.id}, ${rule.severity}, ${summary}, ${line.line}, unixepoch() * 1000, unixepoch() * 1000)
+    `);
+    const service = catalogProvider?.().services.find((s) => s.code === line.service_code);
+    if (service) {
+      void maybeDispatchCrashFixToConcordia({
+        errorTaskId: newId,
+        service,
+        severity: rule.severity,
+        summary,
+        logExcerpt: line.line,
+        source: 'log',
+      }).catch((err: unknown) =>
+        logger.warn({ err: (err as Error).message, errorTaskId: newId }, 'Concordia dispatch failed'),
+      );
+    }
+  }
+  // error_task は記録するだけ、E「調査、E「修正、EはユーザぁEUI から手動で
+  // 起動すめE(= POST /api/v1/error-tasks/:id/investigate or /auto-fix)、E
 }
 
-export async function startErrorDetector(): Promise<void> {
+export interface ErrorDetectorHandle {
+  stop(): void;
+}
+
+export async function startErrorDetector(): Promise<ErrorDetectorHandle> {
   await reloadRules();
-  subscribe((l) => void onLine(l));
+  const unsubscribe = subscribe((l) => void onLine(l));
   logger.info('error detector subscribed');
+  return { stop: unsubscribe };
 }
+
+

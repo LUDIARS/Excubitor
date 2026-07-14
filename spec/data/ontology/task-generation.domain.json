@@ -1,0 +1,16 @@
+{
+  "name": "task-generation",
+  "description": "Generated operational work: auto-fix, investigation, review surfaces, update application, release build orchestration, and service discovery.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/auto_fix/[^/]+$" },
+    { "pathPattern": "(^|/)src/reviews/[^/]+$" },
+    { "pathPattern": "(^|/)src/update/[^/]+$" },
+    { "pathPattern": "(^|/)src/release/[^/]+$" },
+    { "pathPattern": "(^|/)src/discovery/[^/]+$" },
+    { "pathPattern": "(^|/)frontend/src/pages/Reviews\\.tsx$" },
+    { "pathPattern": "(^|/)src/index\\.ts$", "namePattern": "resolveTaskAndService" }
+  ],
+  "cardTemplate": "Summarise the task-generation domain: generated remediation, investigation, review/update/release work, and discovery outputs."
+}
