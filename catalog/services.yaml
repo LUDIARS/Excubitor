@@ -514,12 +514,12 @@ services:
     command: npm run dev
     allow_hot_reload: true
     uses_corpus: true
-    depends_on: [cernere, cernere-frontend]
+    depends_on: [cernere, discutere, tirocinium, volputas]
     autostart: false
     env:
       CORPUS_PUBLIC_URL: http://localhost:5187
       CORPUS_TOKEN_MODE: cernere-project-token
-    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
+    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE, DISCUTERE_URL, TIROCINIUM_URL, VOLPUTAS_URL]
     # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
     # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
     requires_secret:
