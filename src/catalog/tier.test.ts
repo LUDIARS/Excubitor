@@ -105,7 +105,7 @@ describe('catalog (services.yaml)', () => {
     const glab = catalog.services.find((s) => s.code === 'glab');
     expect(glab).toMatchObject({
       port: 5187,
-      depends_on: ['cernere', 'cernere-frontend'],
+      depends_on: ['cernere', 'discutere', 'tirocinium', 'volputas'],
       uses_corpus: true,
       cernere_launch_credentials: { target_project: 'glab' },
     });
