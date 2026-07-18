@@ -24,7 +24,8 @@ import { db } from './db/client.js';
 import { currentDb } from './db/index.js';
 import { loadCatalog, type Catalog, type Service } from './catalog/loader.js';
 import { syncCatalog } from './catalog/sync.js';
-import { watchCatalog } from './catalog/watcher.js';
+import { watchCatalog, watchFragments, type CatalogWatcherHandle } from './catalog/watcher.js';
+import { fragmentFiles } from './catalog/fragments.js';
 import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
 import {
@@ -433,6 +434,15 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     ?? downtimeWorker?.read
     ?? readDowntimeSummariesInProcess;
   // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
+  // 各サービスリポの断片 (excubitor.catalog.yaml) を監視するハンドル。
+  // reload のたびに張り直し、 新規に現れた断片ファイルも監視対象へ取り込む。
+  let fragmentWatcherHandle: CatalogWatcherHandle | null = null;
+  const rewatchFragments = () => {
+    fragmentWatcherHandle?.stop();
+    fragmentWatcherHandle = watchFragments(fragmentFiles(), async () => {
+      await reloadCatalog('fragment change');
+    });
+  };
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
@@ -452,11 +462,13 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       { upserted: result.upserted, deactivated: result.deactivated, total: fresh.services.length, reason },
       'catalog reloaded',
     );
+    rewatchFragments();
     return fresh.services.length;
   };
   const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
     await reloadCatalog('file change');
   });
+  rewatchFragments();
   // The backend never owns service lifecycle. Safe mode remains visible for
   // compatibility, while autostart/launch decisions are made by the supervisor.
   const safeMode = detectSafeMode();
@@ -998,6 +1010,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。
       // 明示停止は stop API / launcher stop からのみ行う。
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
+      try { fragmentWatcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
       try { dispatchHandle.stop(); } catch { /* best-effort shutdown */ }
       try { errorDetectorHandle.stop(); } catch { /* best-effort shutdown */ }
