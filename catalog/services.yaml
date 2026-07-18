@@ -180,53 +180,6 @@ services:
     provides:
       ACTIO_URL: http://${host}:${port}
 
-  # ─────────────── Imperativus (音声コマンドルーター + Iv) ───────────────
-  - code: imperativus-app
-    name: Imperativus app
-    tier: saas
-    project_code: imperativus
-    component: app
-    port: 5963
-    repo: LUDIARS/Imperativus
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
-    services: [app]
-    container_names: [imperativus-app]
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:5963/health
-      interval_sec: 30
-    provides:
-      IMPERATIVUS_URL: http://${host}:${port}
-
-  - code: imperativus-stt
-    name: Imperativus STT (faster-whisper)
-    tier: saas
-    project_code: imperativus
-    component: stt
-    monitor_only: true  # 内部 gRPC、 source 自管理だが health endpoint なし
-    repo: LUDIARS/Imperativus
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
-    services: [stt]
-    container_names: [imperativus-stt]
-    autostart: false
-
-  - code: imperativus-mosquitto
-    name: Imperativus Mosquitto
-    tier: saas
-    project_code: imperativus
-    component: mosquitto
-    port: 1883
-    monitor_only: true
-    repo: LUDIARS/Imperativus
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Imperativus/docker-compose.yaml
-    services: [mosquitto]
-    container_names: [imperativus-mosquitto]
-    autostart: false
-
   # ─────────────── Nuntius (統合通知・メッセージング基盤) ───────────────
   - code: nuntius-api
     name: Nuntius API
@@ -305,27 +258,6 @@ services:
       interval_sec: 30
     provides:
       SCHEDULA_URL: http://${host}:${port}
-
-  - code: pagus
-    name: Pagus (AI 村シミュレーション)
-    domain: pagus${DOMAIN_ROOT}
-    tier: personal
-    project_code: pagus
-    subdomain: pagus
-    component: backend
-    # 権威サーバ (WS :4310)。client (:4320) は frontend のため catalog 対象外。
-    port: 4310
-    repo: LUDIARS/Pagus
-    runtime: node
-    cwd: ${ARS_ROOT}/Pagus
-    command: npm run dev
-    allow_hot_reload: true
-    autostart: false
-    health:
-      type: tcp
-      interval_sec: 30
-    provides:
-      PAGUS_WS_URL: ws://${host}:${port}
 
   - code: peregrinatio
     name: Peregrinatio
@@ -481,26 +413,6 @@ services:
       interval_sec: 30
     provides:
       LUDELLUS_URL: http://${host}:${port}
-
-  - code: vantanhub
-    name: VantanHub (学校 hub)
-    tier: saas
-    project_code: vantanhub
-    component: server
-    port: 5186
-    repo: LUDIARS/VantanHub
-    runtime: node
-    cwd: ${ARS_ROOT}/VantanHub
-    command: npm run dev
-    allow_hot_reload: true
-    # 学校生活 hub はフロントを Corpus 経由で統合する → 起動セットに含めると Corpus も自動起動。
-    uses_corpus: true
-    autostart: false
-    health:
-      type: tcp
-      interval_sec: 30
-    provides:
-      VANTANHUB_URL: http://${host}:${port}
 
   - code: glab
     name: GLAB (学校運営 hub)
@@ -713,33 +625,6 @@ services:
     provides:
       THALEIA_URL: http://${host}:${port}
 
-  - code: calliope
-    name: Calliope (planning orchestrator)
-    tier: personal
-    project_code: calliope
-    component: backend
-    port: 8891
-    depends_on:
-      - actio
-      - schedula
-      - memoria-server
-    repo: LUDIARS/Calliope
-    runtime: node
-    cwd: ${ARS_ROOT}/Calliope
-    command: npm run start
-    env:
-      CALLIOPE_PORT: "8891"
-      ACTIO_BASE_URL: http://127.0.0.1:3000
-      SCHEDULA_BASE_URL: http://127.0.0.1:3300
-      MEMORIA_BASE_URL: http://127.0.0.1:5180
-    autostart: false
-    health:
-      type: http
-      url: http://localhost:8891/health
-      interval_sec: 30
-    provides:
-      CALLIOPE_URL: http://${host}:${port}
-
   - code: concordia
     name: Concordia (AI 協調)
     tier: personal
@@ -893,23 +778,6 @@ services:
   # して死活 (プロセス生存) を監視し、 Corpus は /api/hub/apps で集約 + 起動する。
   # GUI を勝手に再起動しないよう autostart=false / restart_policy=no が既定。
   # process_match は host プロセススキャンで「Excubitor 外から起動した実体」を検知する image 名。
-  - code: hora-app
-    name: Hora (デスクトップおじさん)
-    tier: local-app
-    project_code: hora
-    component: app
-    repo: LUDIARS/Hora
-    runtime: app
-    app_kind: tauri
-    exec: ${ARS_ROOT}/Hora/src-tauri/target/release/hora.exe
-    cwd: ${ARS_ROOT}/Hora
-    build_command: npm run tauri build
-    process_match: hora.exe
-    autostart: false
-    health:
-      type: process
-      interval_sec: 30
-
   - code: quaestor-app
     name: Quaestor (個人会計)
     tier: local-app
@@ -933,27 +801,6 @@ services:
     #   metrics_url: http://localhost:17400/api/metrics/memory
     #   leak_window_min: 60
     #   leak_threshold_mb_per_hr: 50
-
-  - code: legatus-app
-    name: Legatus (PC 代理人)
-    tier: local-app
-    project_code: legatus
-    component: app
-    repo: LUDIARS/Legatus
-    runtime: app
-    app_kind: electron
-    # package.json "start": "electron dist/electron/main.js"
-    # build:electron → dist/electron/main.js (tsconfig.electron.json)
-    exec: ${ARS_ROOT}/Legatus/node_modules/electron/dist/electron.exe
-    exec_args:
-      - dist/electron/main.js
-    cwd: ${ARS_ROOT}/Legatus
-    build_command: npm run build
-    # process_match は省略 — electron.exe は汎用名のため Excubitor spawn 追跡のみ
-    autostart: false
-    health:
-      type: process
-      interval_sec: 30
 
 # ─────────────── メモリ監視 (memory_monitor) ───────────────
 # 各サービスの RSS (プロセスツリー合算 / docker stats) を時系列で採取し、 単調増加トレンドを
