@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
 import { readAutoServicesRaw } from './auto-catalog-file.js';
-import { arsRoot, domainRoot } from '../shared/roots.js';
+import { readFragmentServicesRaw } from './fragments.js';
+import { interpolateRoots } from './interpolate.js';
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -355,25 +356,41 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const raw = readFileSync(absPath, 'utf8');
   // ${ARS_ROOT} / ${DOMAIN_ROOT} をマシン依存の実値に補間してから parse する
   // (catalog にドライブ/ドメインを焼き込まず、 env or cwd の親から解決する)。
-  const interpolated = raw
-    .replaceAll('${ARS_ROOT}', arsRoot())
-    .replaceAll('${DOMAIN_ROOT}', domainRoot());
-  const parsed = (load(interpolated) ?? {}) as { services?: unknown[]; [k: string]: unknown };
+  const parsed = (load(interpolateRoots(raw)) ?? {}) as { services?: unknown[]; [k: string]: unknown };
   const baseServices = Array.isArray(parsed.services) ? parsed.services : [];
 
-  // スキャンが生成した自動カタログをマージする。 手書き services.yaml に同 code が
-  // あれば手書きを優先 (auto を捨てる)。 不正な auto エントリは個別に弾く (全体を壊さない)。
+  // ソースの優先順位: services.yaml (手書き base) > 各リポの断片 (fragment) > scan (auto)。
+  // 同 code は上位ソースが勝ち、 下位は捨てる。 不正エントリは個別に弾く (全体を壊さない)。
   const baseCodes = new Set(
     baseServices.map((s) => (s as { code?: unknown }).code).filter((c): c is string => typeof c === 'string'),
   );
+
+  // 各サービスリポの断片 (${ARS_ROOT}/<repo>/excubitor.catalog.yaml) を集積してマージする。
+  // private リポの定義を公開 services.yaml に焼き込まないための主経路。
+  const fragmentCodes = new Set<string>();
+  const fragmentServices: unknown[] = [];
+  for (const entry of readFragmentServicesRaw().services) {
+    const code = (entry as { code?: unknown }).code;
+    if (typeof code !== 'string' || baseCodes.has(code) || fragmentCodes.has(code)) continue;
+    if (ServiceSchema.safeParse(entry).success) {
+      fragmentCodes.add(code);
+      fragmentServices.push(entry);
+    }
+  }
+
+  // スキャンが生成した自動カタログ: base / fragment のどちらにも無い code のみ補完する。
+  const knownCodes = new Set([...baseCodes, ...fragmentCodes]);
   const autoServices: unknown[] = [];
   for (const entry of readAutoServicesRaw()) {
     const code = (entry as { code?: unknown }).code;
-    if (typeof code !== 'string' || baseCodes.has(code)) continue;
+    if (typeof code !== 'string' || knownCodes.has(code)) continue;
     if (ServiceSchema.safeParse(entry).success) autoServices.push(entry);
   }
 
-  return CatalogSchema.parse({ ...parsed, services: [...baseServices, ...autoServices] });
+  return CatalogSchema.parse({
+    ...parsed,
+    services: [...baseServices, ...fragmentServices, ...autoServices],
+  });
 }
 
 
