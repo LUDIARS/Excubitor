@@ -25,6 +25,7 @@ export async function runServiceBuild(svc: Service, reason: string): Promise<Ser
 function buildCwd(svc: Service): string {
   if (svc.cwd) return svc.cwd;
   if (svc.start_script) return dirname(svc.start_script);
+  if (svc.compose_file) return dirname(svc.compose_file);
   if (svc.exec) return dirname(svc.exec);
   return process.cwd();
 }

@@ -109,11 +109,14 @@ services:
     component: backend
     port: 8080
     repo: LUDIARS/Cernere
-    runtime: docker-compose
-    compose_file: ${ARS_ROOT}/Cernere/docker-compose.yaml
-    services: [backend-dev]
-    container_names: [cernere-backend-dev]
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/server
+    command: npm run dev
+    allow_hot_reload: true
     autostart: false
+    env:
+      LISTEN_PORT: "8080"
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
     health:
       type: http
       url: http://localhost:8080/health
@@ -135,6 +138,68 @@ services:
       branch_prefix: excubitor/auto-fix/
       create_pr: true
       pr_draft: true
+
+  - code: cernere-frontend
+    name: Cernere login frontend
+    tier: saas
+    project_code: cernere
+    component: frontend
+    port: 5173
+    repo: LUDIARS/Cernere
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/frontend
+    command: npm run dev -- --host 0.0.0.0
+    allow_hot_reload: true
+    depends_on: [cernere]
+    autostart: false
+    env:
+      VITE_BACKEND_URL: http://localhost:8080
+    health:
+      type: http
+      url: http://localhost:5173/
+      interval_sec: 30
+    provides:
+      CERNERE_FRONTEND_URL: http://${host}:${port}
+
+  - code: volputas
+    name: Volputas
+    domain: vo-m${DOMAIN_ROOT}
+    tier: saas
+    project_code: volputas
+    subdomain: vo-m
+    component: backend
+    port: 8892
+    repo: LUDIARS/Voluptas
+    runtime: node
+    cwd: ${ARS_ROOT}/Voluptas/player-profile-server
+    command: npm run dev
+    build_command: npm --prefix frontend run build
+    allow_hot_reload: true
+    depends_on: [infra-postgres, cernere]
+    autostart: false
+    env:
+      PORT: "8892"
+      JWT_ISSUER: http://localhost:8892
+      VOLPUTAS_AUDIENCE: http://${host}:${port}
+      GOOGLE_CALLBACK_URL: http://localhost:8892/auth/callback
+      DISCORD_CALLBACK_URL: http://localhost:8892/auth/callback
+    required_env: [CERNERE_BASE_URL, VOLPUTAS_AUDIENCE, VOLPUTAS_DATABASE_URL]
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: true
+      include: [VOLPUTAS_DATABASE_URL]
+    requires_secret:
+      - service: cernere
+        keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]
+    cernere_launch_credentials:
+      target_project: volputas
+    health:
+      type: http
+      url: http://localhost:8892/health
+      interval_sec: 30
+    provides:
+      VOLPUTAS_URL: http://${host}:${port}
 
   - code: actio
     name: Actio
@@ -316,6 +381,7 @@ services:
     runtime: node
     cwd: ${ARS_ROOT}/Peregrinatio
     command: npm run dev
+    build_command: npm run build:web
     allow_hot_reload: true
     # start-peregrinatio.bat: stale :8090 を解放 → web を single-origin dist にビルドして :8090 で配信。
     start_script: ${ARS_ROOT}/start-peregrinatio.bat
@@ -349,6 +415,47 @@ services:
     requires_secret:
       - service: cernere
         keys: [AEDILIS_CERNERE_CLIENT_ID, AEDILIS_CERNERE_CLIENT_SECRET]
+
+  - code: ostiarius
+    name: Ostiarius (Wi-Fi内出席ゲートウェイ)
+    # LAN-only。Cloudflare Tunnel / public domain / subdomain は割り当てない。
+    tier: saas
+    project_code: ostiarius
+    component: server
+    port: 17590
+    repo: LUDIARS/Ostiarius
+    runtime: node
+    cwd: ${ARS_ROOT}/Ostiarius
+    command: npm run dev
+    allow_hot_reload: true
+    depends_on: [cernere]
+    autostart: false
+    env:
+      OSTIARIUS_PORT: "17590"
+    required_env:
+      - OSTIARIUS_LAN_ID
+      - OSTIARIUS_FACILITY_ID
+      - CERNERE_BASE_URL
+      - OSTIARIUS_RP_ID
+      - OSTIARIUS_PWA_ORIGIN
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: true
+      # TLS_MODEは未設定時off。証明書3値と同時にrequiredをInfisicalへ投入して切り替える。
+      include: [OSTIARIUS_LAN_ID, OSTIARIUS_FACILITY_ID, OSTIARIUS_RP_ID, OSTIARIUS_PWA_ORIGIN, OSTIARIUS_LABEL, OSTIARIUS_TLS_MODE, OSTIARIUS_LAN_HOSTNAME, OSTIARIUS_TLS_CERTIFICATE_PEM, OSTIARIUS_TLS_PRIVATE_KEY_PEM]
+    requires_secret:
+      - service: cernere
+        keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]
+    cernere_launch_credentials:
+      target_project: ostiarius
+    health:
+      type: http
+      url: http://localhost:17590/api/health
+      interval_sec: 30
+    provides:
+      OSTIARIUS_URL: http://${host}:${port}
+      OSTIARIUS_BASE_URL: http://${host}:${port}
 
   - code: bibliotheca
     name: Bibliotheca (貸出台帳)
@@ -495,11 +602,12 @@ services:
     command: npm run dev
     allow_hot_reload: true
     uses_corpus: true
-    depends_on: [cernere]
+    depends_on: [infra-postgres, cernere, volputas]
     autostart: false
     env:
       CORPUS_PUBLIC_URL: http://localhost:5187
-    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL]
+      CORPUS_TOKEN_MODE: cernere-project-token
+    required_env: [CERNERE_BASE_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE, VOLPUTAS_URL, GLAB_DATABASE_URL]
     # Ex自身の固定project credentialだけをCernereのInfisical projectから取得する。
     # これはGLABへ渡さず、spawn直前の動的credential発行APIにのみ使用する。
     requires_secret:

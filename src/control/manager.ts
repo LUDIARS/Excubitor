@@ -36,7 +36,12 @@ export async function controlService(
     } catch (err) {
       return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
     }
+    const build = await runControlBuild(svc, action);
+    if (build?.ok === false) return build;
     result = await controlDockerCompose(svc, action, composeEnv);
+    if (build && result.ok) {
+      result = { ...result, stdout: `build ok\n${result.stdout}`.trim() };
+    }
     if (result.ok && (action === 'start' || action === 'restart')) {
       const primary = svc.container_names?.[0];
       if (primary) ensureTail(svc.code, primary);
@@ -72,6 +77,17 @@ export async function controlService(
   return result;
 }
 
+async function runControlBuild(svc: Service, action: ControlAction): Promise<ControlResult | null> {
+  if (action !== 'start' && action !== 'restart') return null;
+  const build = await runServiceBuild(svc, `manual-${action}`);
+  if (!build.ok) {
+    return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
+  }
+  return build.skipped
+    ? null
+    : { ok: true, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? 0, command: build.command };
+}
+
 async function controlProcess(
   svc: Service,
   action: ControlAction,
@@ -90,10 +106,8 @@ async function controlProcess(
       } catch (err) {
         return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
       }
-      const build = await runServiceBuild(svc, 'manual-start');
-      if (!build.ok) {
-        return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
-      }
+      const build = await runControlBuild(svc, action);
+      if (build?.ok === false) return build;
       let spawnError: string | null = null;
       const p = await spawnService(svc, { env }).catch((err: unknown) => {
         spawnError = err instanceof Error ? err.message : String(err);
@@ -102,7 +116,7 @@ async function controlProcess(
       if (!p) {
         return { ok: false, stdout: '', stderr: spawnError ?? 'start failed', exit_code: -1, command: `spawn ${svc.runtime}:${svc.code}` };
       }
-      const buildPrefix = build.skipped ? '' : 'build ok\n';
+      const buildPrefix = build ? 'build ok\n' : '';
       return {
         ok: true,
         stdout: `${buildPrefix}spawned pid=${p.child.pid ?? '?'}`,
@@ -131,10 +145,8 @@ async function controlProcess(
       } catch (err) {
         return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
       }
-      const build = await runServiceBuild(svc, 'manual-restart');
-      if (!build.ok) {
-        return { ok: false, stdout: build.stdout, stderr: build.stderr, exit_code: build.code ?? -1, command: build.command };
-      }
+      const build = await runControlBuild(svc, action);
+      if (build?.ok === false) return build;
       let spawnError: string | null = null;
       const p = await spawnService(svc, { env }).catch((err: unknown) => {
         spawnError = err instanceof Error ? err.message : String(err);
@@ -143,7 +155,7 @@ async function controlProcess(
       if (!p) {
         return { ok: false, stdout: '', stderr: spawnError ?? 'restart failed', exit_code: -1, command: `restart ${svc.code}` };
       }
-      const buildPrefix = build.skipped ? '' : 'build ok\n';
+      const buildPrefix = build ? 'build ok\n' : '';
       return {
         ok: true,
         stdout: `${buildPrefix}restarted pid=${p.child.pid ?? '?'}`,

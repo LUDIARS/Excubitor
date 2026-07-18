@@ -71,7 +71,11 @@ describe('catalog (services.yaml)', () => {
 
   it('フロントエンドは catalog から除外されている', () => {
     const frontends = catalog.services.filter((s) => s.component === 'frontend');
-    expect(frontends.map((s) => s.code).sort()).toEqual(['concordia-web', 'praeforma-web']);
+    expect(frontends.map((s) => s.code).sort()).toEqual([
+      'cernere-frontend',
+      'concordia-web',
+      'praeforma-web',
+    ]);
     expect(catalog.services.find((s) => s.code === 'cernere-frontend-dev')).toBeUndefined();
     expect(catalog.services.find((s) => s.code === 'actio-frontend')).toBeUndefined();
   });
@@ -97,11 +101,75 @@ describe('catalog (services.yaml)', () => {
     expect(di?.env?.BACKEND_PORT).toBe('3110');
   });
 
-  it('GLABはCernere依存で、起動ごとにcredentialを受け取る', () => {
+  it('Volputasを正規project codeと専用portで登録する', () => {
+    const volputas = catalog.services.find((s) => s.code === 'volputas');
+    expect(volputas).toMatchObject({
+      project_code: 'volputas',
+      tier: 'saas',
+      port: 8892,
+      runtime: 'node',
+      depends_on: ['infra-postgres', 'cernere'],
+      cernere_launch_credentials: { target_project: 'volputas' },
+      infisical: {
+        project_id: '19c9e77d-646c-4a0e-a091-b494234953ea',
+        environment: 'dev',
+        inject: true,
+        include: ['VOLPUTAS_DATABASE_URL'],
+      },
+      health: { type: 'http', url: 'http://localhost:8892/health' },
+    });
+    expect(volputas?.env?.PORT).toBe('8892');
+    expect(volputas?.env?.VOLPUTAS_AUDIENCE).toBe('http://${host}:${port}');
+    expect(volputas?.required_env).toContain('VOLPUTAS_DATABASE_URL');
+    expect(volputas?.provides?.VOLPUTAS_URL).toBe('http://${host}:${port}');
+  });
+
+  it('OstiariusをWi-Fi内出席ゲートウェイとして登録する', () => {
+    const ostiarius = catalog.services.find((s) => s.code === 'ostiarius');
+    expect(ostiarius).toMatchObject({
+      project_code: 'ostiarius',
+      tier: 'saas',
+      component: 'server',
+      port: 17590,
+      runtime: 'node',
+      command: 'npm run dev',
+      allow_hot_reload: true,
+      depends_on: ['cernere'],
+      cernere_launch_credentials: { target_project: 'ostiarius' },
+      health: { type: 'http', url: 'http://localhost:17590/api/health' },
+    });
+    expect(ostiarius?.cwd?.replaceAll('\\', '/')).toMatch(/\/Ostiarius$/);
+    expect(ostiarius?.env?.OSTIARIUS_PORT).toBe('17590');
+    expect(ostiarius?.required_env).toEqual([
+      'OSTIARIUS_LAN_ID',
+      'OSTIARIUS_FACILITY_ID',
+      'CERNERE_BASE_URL',
+      'OSTIARIUS_RP_ID',
+      'OSTIARIUS_PWA_ORIGIN',
+    ]);
+    expect(ostiarius?.infisical).toMatchObject({
+      project_id: '19c9e77d-646c-4a0e-a091-b494234953ea',
+      environment: 'dev',
+      inject: true,
+    });
+    expect(ostiarius?.infisical?.include).toEqual(expect.arrayContaining([
+      'OSTIARIUS_TLS_MODE',
+      'OSTIARIUS_LAN_HOSTNAME',
+      'OSTIARIUS_TLS_CERTIFICATE_PEM',
+      'OSTIARIUS_TLS_PRIVATE_KEY_PEM',
+    ]));
+    expect(ostiarius?.requires_secret?.[0]?.keys).toEqual([
+      'EXCUBITOR_CERNERE_CLIENT_ID',
+      'EXCUBITOR_CERNERE_CLIENT_SECRET',
+    ]);
+    expect(ostiarius?.provides?.OSTIARIUS_URL).toBe('http://${host}:${port}');
+  });
+
+  it('GLABはCernereとVolputasに依存し、起動ごとにcredentialを受け取る', () => {
     const glab = catalog.services.find((s) => s.code === 'glab');
     expect(glab).toMatchObject({
       port: 5187,
-      depends_on: ['cernere'],
+      depends_on: ['infra-postgres', 'cernere', 'volputas'],
       uses_corpus: true,
       cernere_launch_credentials: { target_project: 'glab' },
     });
