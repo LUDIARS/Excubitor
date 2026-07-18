@@ -1,4 +1,17 @@
-# Excubitor (再稼働 — 2026-05-31)
+<p align="center">
+  <img src="frontend/dist/favicon.svg" width="100" alt="Excubitor logo" />
+</p>
+
+# Excubitor — サービス監視・運用コアプラットフォーム
+
+LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラー検知 / 自動修正** を集約する、統合運用 UI。
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
+  <a href="https://github.com/LUDIARS/Excubitor/actions"><img src="https://github.com/LUDIARS/Excubitor/actions/workflows/harness.yml/badge.svg" alt="CI" /></a>
+</p>
+
+---
 
 > **2026-05-31 に「サービス監視・運用コア」専用サービスとして再稼働。**
 > 一度 Concordia へ吸収 (2026-05-17) したが、Concordia=AI 協調支援 / Excubitor=サービス監視
