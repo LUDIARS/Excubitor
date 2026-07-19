@@ -599,6 +599,27 @@ services:
     # Vestigium JSONL (serviceCode=fundamentum-datahub)。spawn 時に VESTIGIUM_LOGS_DIR 注入
     log_path: ${ARS_ROOT}/logs/fundamentum-datahub
 
+  - code: genius
+    name: Genius (判断カードDB)
+    tier: personal
+    project_code: genius
+    component: backend
+    port: 4230
+    repo: LUDIARS/Genius
+    runtime: node
+    cwd: ${ARS_ROOT}/Genius
+    # start は build 済み dist を素の node で動かす (README の Excubitor catalog 節を参照)。
+    command: npm run start
+    autostart: false
+    env:
+      GENIUS_PORT: "4230"
+    health:
+      type: http
+      url: http://localhost:4230/healthz
+      interval_sec: 30
+    provides:
+      GENIUS_URL: http://${host}:${port}
+
   - code: thaleia
     name: Thaleia (unified spec/domain view)
     tier: personal
