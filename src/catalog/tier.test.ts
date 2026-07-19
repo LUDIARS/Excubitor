@@ -101,14 +101,24 @@ describe('catalog (services.yaml)', () => {
     expect(di?.env?.BACKEND_PORT).toBe('3110');
   });
 
-  it('EducationLabはCernere依存で、起動ごとにcredentialを受け取る', () => {
+  it('EducationLabは各backendとOmnipotens Reviewへ接続し、起動ごとにcredentialを受け取る', () => {
     const EducationLab = catalog.services.find((s) => s.code === 'EducationLab');
     expect(EducationLab).toMatchObject({
       port: 5187,
-      depends_on: ['cernere', 'cernere-frontend'],
-      uses_corpus: true,
+      depends_on: [
+        'cernere',
+        'cernere-frontend',
+        'aedilis',
+        'tirocinium',
+        'discutere',
+        'volputas',
+        'ostiarius',
+      ],
       cernere_launch_credentials: { target_project: 'EducationLab' },
     });
+    expect(EducationLab?.uses_corpus).toBeUndefined();
+    expect(EducationLab?.env?.<private-reference-004>_OMNIPOTENS_REVIEW_ROOT).toMatch(/\/Omnipotents\/Review$/u);
+    expect(EducationLab?.required_env).toContain('<private-reference-004>_OMNIPOTENS_REVIEW_ROOT');
     expect(EducationLab?.requires_secret?.[0]?.keys).toEqual([
       'EXCUBITOR_CERNERE_CLIENT_ID',
       'EXCUBITOR_CERNERE_CLIENT_SECRET',
