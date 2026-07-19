@@ -435,7 +435,8 @@ services:
     env:
       CORPUS_PUBLIC_URL: http://localhost:5187
       CORPUS_TOKEN_MODE: cernere-project-token
-    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE]
+      GLAB_OMNIPOTENS_REVIEW_ROOT: ${ARS_ROOT}/Omnipotents/Review
+    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE, GLAB_OMNIPOTENS_REVIEW_ROOT]
     requires_secret:
       - service: cernere
         keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]

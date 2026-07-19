@@ -101,14 +101,24 @@ describe('catalog (services.yaml)', () => {
     expect(di?.env?.BACKEND_PORT).toBe('3110');
   });
 
-  it('GLABはCernere依存で、起動ごとにcredentialを受け取る', () => {
+  it('GLABは各backendとOmnipotens Reviewへ接続し、起動ごとにcredentialを受け取る', () => {
     const glab = catalog.services.find((s) => s.code === 'glab');
     expect(glab).toMatchObject({
       port: 5187,
-      depends_on: ['cernere', 'cernere-frontend'],
-      uses_corpus: true,
+      depends_on: [
+        'cernere',
+        'cernere-frontend',
+        'aedilis',
+        'tirocinium',
+        'discutere',
+        'volputas',
+        'ostiarius',
+      ],
       cernere_launch_credentials: { target_project: 'glab' },
     });
+    expect(glab?.uses_corpus).toBeUndefined();
+    expect(glab?.env?.GLAB_OMNIPOTENS_REVIEW_ROOT).toMatch(/\/Omnipotents\/Review$/u);
+    expect(glab?.required_env).toContain('GLAB_OMNIPOTENS_REVIEW_ROOT');
     expect(glab?.requires_secret?.[0]?.keys).toEqual([
       'EXCUBITOR_CERNERE_CLIENT_ID',
       'EXCUBITOR_CERNERE_CLIENT_SECRET',
