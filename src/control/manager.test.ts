@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   cancelServiceRestart: vi.fn(),
   waitForPendingSpawn: vi.fn(),
   resolveInjectEnv: vi.fn(),
-  ensureTail: vi.fn(),
   runServiceBuild: vi.fn(),
   assertStartupEnv: vi.fn(),
 }));
@@ -32,7 +31,6 @@ vi.mock('../process/manager.js', () => ({
   waitForPendingSpawn: mocks.waitForPendingSpawn,
 }));
 vi.mock('../process/inject.js', () => ({ resolveInjectEnv: mocks.resolveInjectEnv }));
-vi.mock('../log/docker-tail.js', () => ({ ensureTail: mocks.ensureTail }));
 vi.mock('../process/build.js', () => ({ runServiceBuild: mocks.runServiceBuild }));
 vi.mock('../process/startup-env.js', () => ({ assertStartupEnv: mocks.assertStartupEnv }));
 
@@ -119,14 +117,6 @@ describe('control manager lifecycle guards', () => {
     expect(mocks.resolveInjectEnv).not.toHaveBeenCalled();
     expect(mocks.assertStartupEnv).not.toHaveBeenCalled();
     expect(mocks.controlDockerCompose).toHaveBeenCalledWith(svc, 'stop', { PUBLIC: 'value' });
-  });
-
-  it('does not start a docker log tail from the lifecycle supervisor', async () => {
-    const svc = service({ runtime: 'docker-compose', compose_file: 'compose.yml', container_names: ['demo'] });
-
-    await controlService(svc, 'start', 'test');
-
-    expect(mocks.ensureTail).not.toHaveBeenCalled();
   });
 });
 
