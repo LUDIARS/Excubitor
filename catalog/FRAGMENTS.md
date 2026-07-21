@@ -42,10 +42,36 @@ services:
 - 1 リポが複数の論理サービス (backend / worker 等) を持つなら、 配列に複数エントリを並べる。
 - `${ARS_ROOT}` / `${DOMAIN_ROOT}` プレースホルダが使える (マシン依存の実パス/ドメインを焼かない)。
 
+## 機密 (secret) の trust 境界
+
+断片は任意リポ直下に置けるため、 そのままだと **どのリポでも** secret 系宣言
+(`infisical` / `requires_secret` / `cernere_launch_credentials`) を書けてしまい、
+「自分の断片から他サービスの secret を引き込む」 trust boundary の拡大になる。
+
+そのため secret 系宣言の trust surface を **常に可視化** し、 **enforce モードで剥がせる** ようにする:
+
+- secret 系宣言を持つ断片は、 モードに関わらず必ず warn ログを出す (trust surface を surface)。
+- env `EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST` に **リポ dir 名** をカンマ区切りで設定すると
+  **enforce モード** になり、 allowlist 外のリポの断片からは secret 系フィールドを剥がす
+  (他フィールドは有効)。 未設定時は非破壊 (既存挙動維持) で warn のみ。
+
+```
+# 厳格化する: 列挙したリポの断片だけが secret を宣言できる
+EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST=Cernere,Aedilis
+```
+
+- secret を確実に扱いたい定義は、 レビュー済みの `catalog/services.yaml` (正本) に置くのが本筋。
+
 ## 探索と反映
 
 - 探索対象: `${ARS_ROOT}` 直下の各ディレクトリ + env `EXCUBITOR_FRAGMENT_DIRS`
   (カンマ区切りの追加ルート) 直下。 各 `<child>/excubitor.catalog.yaml` を 1 階層で拾う。
-- 集積結果はファイル集合 + mtime をキーに **メモリキャッシュ** する (変化が無ければ再パースしない)。
-- 既存断片の変更は file watch で自動 reload。 **新規** 断片ファイルの出現は、
-  何らかの reload (services.yaml 変更 / scan / Excubitor 再起動) を 1 度跨ぐと監視対象に入る。
+- 集積結果は各断片の **内容ハッシュ** をキーに **メモリキャッシュ** する (内容が変わらなければ
+  再パースしない)。 mtime 非依存なので、 mtime を据え置いたまま内容だけ書き換わっても取りこぼさない。
+- 一時エラー (走査 / 読み込み / parse の transient 失敗、 書き込み途中の YAML 等) は
+  「サービス削除」 とは扱わない。 直近の成功結果を保持し、 既存サービスが黙って消えるのを防ぐ。
+  実際にファイル/ディレクトリが無い (ENOENT) ときのみ削除として扱う。
+- 既存断片の変更に加え、 **新規** 断片ファイルの出現も監視する (リポ dir + 走査ルートを
+  ディレクトリ監視し、 `excubitor.catalog.yaml` の作成イベントで reload)。 fs.watch の
+  確立に失敗した対象は握りつぶさず error ログで surface する。
+- 有効な YAML だがスキーマ不一致の断片エントリは黙って捨てず warn を出す (`code` + zod issues)。

@@ -5,6 +5,16 @@ import { z } from 'zod';
 import { readAutoServicesRaw } from './auto-catalog-file.js';
 import { readFragmentServicesRaw } from './fragments.js';
 import { interpolateRoots } from './interpolate.js';
+import { createNamedLogger } from '../shared/logger.js';
+
+const logger = createNamedLogger('excubitor.catalog.loader');
+
+/** zod のエラーを 1 行ずつの `path: message` へ畳む (診断ログ用)。 */
+function formatZodIssues(error: z.ZodError): string {
+  return error.issues
+    .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+    .join('; ');
+}
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -371,10 +381,22 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const fragmentServices: unknown[] = [];
   for (const entry of readFragmentServicesRaw().services) {
     const code = (entry as { code?: unknown }).code;
-    if (typeof code !== 'string' || baseCodes.has(code) || fragmentCodes.has(code)) continue;
-    if (ServiceSchema.safeParse(entry).success) {
+    if (typeof code !== 'string') {
+      logger.warn({ entry }, 'fragment service entry ignored: missing/invalid "code"');
+      continue;
+    }
+    // base が同 code を持つなら断片は base を上書きできない (trust boundary: 手書き正本が勝つ)。
+    if (baseCodes.has(code) || fragmentCodes.has(code)) continue;
+    const result = ServiceSchema.safeParse(entry);
+    if (result.success) {
       fragmentCodes.add(code);
       fragmentServices.push(entry);
+    } else {
+      // 有効な YAML だがスキーマ不一致 (型ミス等)。 黙って捨てず必ず可視化する。
+      logger.warn(
+        { code, issues: formatZodIssues(result.error) },
+        'fragment service entry dropped: schema validation failed',
+      );
     }
   }
 

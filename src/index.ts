@@ -25,7 +25,7 @@ import { currentDb } from './db/index.js';
 import { loadCatalog, type Catalog, type Service } from './catalog/loader.js';
 import { syncCatalog } from './catalog/sync.js';
 import { watchCatalog, watchFragments, type CatalogWatcherHandle } from './catalog/watcher.js';
-import { fragmentFiles } from './catalog/fragments.js';
+import { fragmentFiles, fragmentWatchDirs } from './catalog/fragments.js';
 import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
 import {
@@ -83,10 +83,23 @@ const logger = createNamedLogger('concordia.observability');
 const httpLogger = createNamedLogger('excubitor.http');
 const observabilityStartedAt = new Date().toISOString();
 
+/** canonical な backend port。 共有 .mcp.json はこの port の instance だけが整合する。 */
+const DEFAULT_BACKEND_PORT = 17332;
+
 /** backend 自身の listen port (server.ts と同じ導出)。 MCP の self-URL 等に使う。 */
 function backendPort(): number {
   const n = Number(process.env.EXCUBITOR_PORT);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 17332;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BACKEND_PORT;
+}
+
+/**
+ * 共有 `.mcp.json` を書き換えてよいか。 scratch / alt-port / safe-mode で立ち上げた instance が
+ * 共有設定を自分の (一時的な) 接続先で上書きするのを防ぐ。 canonical port かつ通常起動のときだけ許可する。
+ */
+function shouldReconcileMcpJson(): boolean {
+  if (backendPort() !== DEFAULT_BACKEND_PORT) return false; // alt-port / scratch instance
+  if (detectSafeMode()) return false; // safe-mode 起動
+  return true;
 }
 
 const SLOW_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_SLOW_REQUEST_MS', 5_000);
@@ -384,11 +397,18 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // .mcp.json (ワークスペース直下) の excubitor エントリを backend 直載せの
   // Streamable HTTP (`/mcp`) に整合する。 旧 stdio 形式 (セッション毎プロセス) からの
   // 移行もここで自動的に行われる。 自分の MCP なので Excubitor が own。
-  try {
-    const r = reconcileMcpJson(arsRoot(), backendPort());
-    if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
-  } catch (err) {
-    logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
+  if (shouldReconcileMcpJson()) {
+    try {
+      const r = reconcileMcpJson(arsRoot(), backendPort());
+      if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
+    }
+  } else {
+    logger.info(
+      { port: backendPort(), safe_mode: detectSafeMode() },
+      '.mcp.json reconcile skipped (alt-port / scratch / safe-mode — 共有設定を保護)',
+    );
   }
 
   // boot: catalog ↁEDB sync
@@ -437,11 +457,21 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // 各サービスリポの断片 (excubitor.catalog.yaml) を監視するハンドル。
   // reload のたびに張り直し、 新規に現れた断片ファイルも監視対象へ取り込む。
   let fragmentWatcherHandle: CatalogWatcherHandle | null = null;
+  // debounce timer は watcher の張り直しを跨いで安定なこのスコープが所有する。
+  // (watchFragments 内に持たせると rewatch 時に発火直前の pending timer を巻き添えで
+  //  clear してしまう競合が起きるため — reconciliation finding #7)
+  let fragmentReloadTimer: NodeJS.Timeout | undefined;
+  const scheduleFragmentReload = () => {
+    if (fragmentReloadTimer) clearTimeout(fragmentReloadTimer);
+    fragmentReloadTimer = setTimeout(() => {
+      fragmentReloadTimer = undefined;
+      void reloadCatalog('fragment change');
+    }, 500);
+  };
   const rewatchFragments = () => {
     fragmentWatcherHandle?.stop();
-    fragmentWatcherHandle = watchFragments(fragmentFiles(), async () => {
-      await reloadCatalog('fragment change');
-    });
+    // files = 既存断片の内容監視、 dirs = 新規断片ファイルの出現監視 (起動後追加も拾う)。
+    fragmentWatcherHandle = watchFragments(fragmentFiles(), fragmentWatchDirs(), scheduleFragmentReload);
   };
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
@@ -1010,6 +1040,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。
       // 明示停止は stop API / launcher stop からのみ行う。
       try { watcherHandle?.stop?.(); } catch { /* noop */ }
+      try { if (fragmentReloadTimer) clearTimeout(fragmentReloadTimer); } catch { /* noop */ }
       try { fragmentWatcherHandle?.stop?.(); } catch { /* noop */ }
       try { scannerHandle?.stop?.(); } catch { /* noop */ }
       try { dispatchHandle.stop(); } catch { /* best-effort shutdown */ }
