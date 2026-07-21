@@ -25,7 +25,7 @@ import { currentDb } from './db/index.js';
 import { loadCatalog, type Catalog, type Service } from './catalog/loader.js';
 import { syncCatalog } from './catalog/sync.js';
 import { watchCatalog, watchFragments, type CatalogWatcherHandle } from './catalog/watcher.js';
-import { fragmentFiles } from './catalog/fragments.js';
+import { fragmentRepoDirs, fragmentRoots } from './catalog/fragments.js';
 import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
 import {
@@ -438,10 +438,14 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // reload のたびに張り直し、 新規に現れた断片ファイルも監視対象へ取り込む。
   let fragmentWatcherHandle: CatalogWatcherHandle | null = null;
   const rewatchFragments = () => {
-    fragmentWatcherHandle?.stop();
-    fragmentWatcherHandle = watchFragments(fragmentFiles(), async () => {
+    // 直前に張っていた watcher を畳む。 stop() は「debounce が保留中だったか」を返す。
+    // reload 直前に届いた変更 (debounce 発火前) を、 teardown で無言に捨てないための情報。
+    const wasPending = fragmentWatcherHandle?.stop() ?? false;
+    fragmentWatcherHandle = watchFragments(fragmentRoots(), fragmentRepoDirs(), async () => {
       await reloadCatalog('fragment change');
     });
+    // 旧 watcher に保留があったなら新 watcher 側で debounce を再アームし、 取りこぼしを防ぐ。
+    if (wasPending) fragmentWatcherHandle.notifyPending();
   };
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();

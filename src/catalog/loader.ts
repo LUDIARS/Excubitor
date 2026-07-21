@@ -2,9 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
+import { createNamedLogger } from '../shared/logger.js';
 import { readAutoServicesRaw } from './auto-catalog-file.js';
 import { readFragmentServicesRaw } from './fragments.js';
 import { interpolateRoots } from './interpolate.js';
+
+const logger = createNamedLogger('excubitor.catalog.loader');
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -367,16 +370,36 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
 
   // 各サービスリポの断片 (${ARS_ROOT}/<repo>/excubitor.catalog.yaml) を集積してマージする。
   // private リポの定義を公開 services.yaml に焼き込まないための主経路。
+  // 破棄 (schema 不正 / code 欠落) は無言にせず warn し、 どの断片ファイルの何が
+  // 問題かを surface する (YAML は valid だが型不一致、 等で消えるのを気付けるように)。
   const fragmentCodes = new Set<string>();
   const fragmentServices: unknown[] = [];
-  for (const entry of readFragmentServicesRaw().services) {
+  const fragmentAggregate = readFragmentServicesRaw();
+  fragmentAggregate.services.forEach((entry, i) => {
+    const source = fragmentAggregate.serviceSources[i];
     const code = (entry as { code?: unknown }).code;
-    if (typeof code !== 'string' || baseCodes.has(code) || fragmentCodes.has(code)) continue;
-    if (ServiceSchema.safeParse(entry).success) {
+    if (typeof code !== 'string') {
+      logger.warn({ file: source }, 'fragment service エントリに文字列 code が無い → 破棄');
+      return;
+    }
+    // 優先順位 base > fragment: 上位ソースが既に持つ code は正常に静かに捨てる
+    // (base の code を fragment が上書きできない = セキュリティ境界)。
+    if (baseCodes.has(code) || fragmentCodes.has(code)) return;
+    const result = ServiceSchema.safeParse(entry);
+    if (result.success) {
       fragmentCodes.add(code);
       fragmentServices.push(entry);
+    } else {
+      logger.warn(
+        {
+          file: source,
+          code,
+          issues: result.error.issues.map((iss) => `${iss.path.join('.') || '(root)'}: ${iss.message}`),
+        },
+        'fragment service エントリが schema 検証に失敗 → 破棄 (該当ファイル/フィールドを確認)',
+      );
     }
-  }
+  });
 
   // スキャンが生成した自動カタログ: base / fragment のどちらにも無い code のみ補完する。
   const knownCodes = new Set([...baseCodes, ...fragmentCodes]);

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearFragmentCache, fragmentFiles, readFragmentServicesRaw } from './fragments.js';
 
 const originalArsRoot = process.env.EXCUBITOR_ARS_ROOT;
+const originalSecretAllowlist = process.env.EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST;
 const tempDirs: string[] = [];
 
 function makeRepoFragment(root: string, repo: string, body: string): void {
@@ -20,6 +21,8 @@ beforeEach(() => {
 afterEach(() => {
   if (originalArsRoot === undefined) delete process.env.EXCUBITOR_ARS_ROOT;
   else process.env.EXCUBITOR_ARS_ROOT = originalArsRoot;
+  if (originalSecretAllowlist === undefined) delete process.env.EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST;
+  else process.env.EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST = originalSecretAllowlist;
   clearFragmentCache();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -83,5 +86,61 @@ describe('catalog fragments', () => {
 
     const codes = readFragmentServicesRaw().services.map((s) => (s as { code: string }).code);
     expect(codes).toEqual(['good']);
+  });
+
+  it('strips secret-requiring declarations from fragments NOT on the allowlist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    delete process.env.EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST; // allowlist 空 = fail-closed
+    makeRepoFragment(
+      root,
+      'Rogue',
+      [
+        'services:',
+        '  - code: rogue',
+        '    name: Rogue',
+        '    runtime: node',
+        '    port: 3333',
+        '    infisical:',
+        '      project_id: stolen',
+        '      environment: dev',
+        '    requires_secret:',
+        '      - service: cernere',
+        '        keys: [SECRET_A]',
+        '',
+      ].join('\n'),
+    );
+
+    const svc = readFragmentServicesRaw().services[0] as Record<string, unknown>;
+    // サービス自体 (非 secret 定義) は登録されるが、 secret 要求宣言は剥がされる。
+    expect(svc.code).toBe('rogue');
+    expect(svc.port).toBe(3333);
+    expect(svc.infisical).toBeUndefined();
+    expect(svc.requires_secret).toBeUndefined();
+  });
+
+  it('honors secret declarations from a fragment ON the allowlist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    process.env.EXCUBITOR_FRAGMENT_SECRET_ALLOWLIST = 'Trusted';
+    makeRepoFragment(
+      root,
+      'Trusted',
+      [
+        'services:',
+        '  - code: trusted',
+        '    name: Trusted',
+        '    runtime: node',
+        '    infisical:',
+        '      project_id: real',
+        '      environment: dev',
+        '',
+      ].join('\n'),
+    );
+
+    const svc = readFragmentServicesRaw().services[0] as Record<string, unknown>;
+    expect(svc.infisical).toEqual({ project_id: 'real', environment: 'dev' });
   });
 });

@@ -59,7 +59,8 @@ const mocks = vi.hoisted(() => ({
   domainRoot: '.example.test',
   identity: null as null | { siteUrl: string; environment: string; clientId: string; clientSecret: string },
   syncCatalog: vi.fn(async () => ({ upserted: 0, deactivated: 0 })),
-  watchCatalog: vi.fn(() => ({ stop: vi.fn() })),
+  watchCatalog: vi.fn(() => ({ stop: vi.fn(), notifyPending: vi.fn() })),
+  watchFragments: vi.fn(() => ({ stop: vi.fn(() => false), notifyPending: vi.fn() })),
   startScannerLoop: vi.fn(() => ({ stop: vi.fn() })),
   syncDockerInstances: vi.fn(async () => undefined),
   syncHealthyServiceStates: vi.fn(async () => undefined),
@@ -228,7 +229,10 @@ vi.mock('./catalog/loader.js', () => ({
   serviceTier: (svc: { tier?: string; runtime?: string }) => svc.tier ?? (svc.runtime === 'app' ? 'local-app' : 'saas'),
 }));
 vi.mock('./catalog/sync.js', () => ({ syncCatalog: mocks.syncCatalog }));
-vi.mock('./catalog/watcher.js', () => ({ watchCatalog: mocks.watchCatalog }));
+vi.mock('./catalog/watcher.js', () => ({
+  watchCatalog: mocks.watchCatalog,
+  watchFragments: mocks.watchFragments,
+}));
 vi.mock('./catalog/editor.js', () => ({ updateServiceCatalogInfo: mocks.updateServiceCatalogInfo }));
 vi.mock('./catalog/auto-catalog.js', () => ({ runScan: mocks.runScan }));
 
