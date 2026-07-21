@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,10 +7,12 @@ import { clearFragmentCache, fragmentFiles, readFragmentServicesRaw } from './fr
 const originalArsRoot = process.env.EXCUBITOR_ARS_ROOT;
 const tempDirs: string[] = [];
 
-function makeRepoFragment(root: string, repo: string, body: string): void {
+function makeRepoFragment(root: string, repo: string, body: string): string {
   const repoDir = join(root, repo);
   mkdirSync(repoDir, { recursive: true });
-  writeFileSync(join(repoDir, 'excubitor.catalog.yaml'), body, 'utf8');
+  const path = join(repoDir, 'excubitor.catalog.yaml');
+  writeFileSync(path, body, 'utf8');
+  return path;
 }
 
 beforeEach(() => {
@@ -81,7 +83,61 @@ describe('catalog fragments', () => {
     makeRepoFragment(root, 'Good', 'services:\n  - code: good\n    name: Good\n    runtime: node\n');
     makeRepoFragment(root, 'Broken', 'services: [ this is : not : valid yaml\n');
 
-    const codes = readFragmentServicesRaw().services.map((s) => (s as { code: string }).code);
+    const aggregate = readFragmentServicesRaw();
+    const codes = aggregate.services.map((s) => (s as { code: string }).code);
     expect(codes).toEqual(['good']);
+    expect(aggregate.issues).toEqual([
+      expect.objectContaining({ kind: 'yaml-parse', retained: false }),
+    ]);
+  });
+
+  it('retains the last-known-good services while a fragment is temporarily broken', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    const path = makeRepoFragment(root, 'Stable', 'services:\n  - code: stable\n    name: Stable\n    runtime: node\n');
+
+    expect(readFragmentServicesRaw().services).toHaveLength(1);
+    writeFileSync(path, 'services: [ temporarily : broken : yaml\n', 'utf8');
+
+    const aggregate = readFragmentServicesRaw();
+    expect(aggregate.services).toEqual([
+      expect.objectContaining({ code: 'stable' }),
+    ]);
+    expect(aggregate.issues).toEqual([
+      expect.objectContaining({ kind: 'yaml-parse', source: path.replace(/\\/g, '/'), retained: true }),
+    ]);
+  });
+
+  it('retains the last-known-good services while the discovery root is temporarily unavailable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    makeRepoFragment(root, 'Stable', 'services:\n  - code: stable\n    name: Stable\n    runtime: node\n');
+    expect(readFragmentServicesRaw().services).toHaveLength(1);
+
+    rmSync(root, { recursive: true, force: true });
+    const aggregate = readFragmentServicesRaw();
+
+    expect(aggregate.services).toEqual([expect.objectContaining({ code: 'stable' })]);
+    expect(aggregate.issues).toEqual([
+      expect.objectContaining({ kind: 'root-read', source: root.replace(/\\/g, '/'), retained: true }),
+    ]);
+  });
+
+  it('invalidates the cache by content hash even when mtime is preserved', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    const path = makeRepoFragment(root, 'Hash', 'services:\n  - code: foo\n    name: Foo\n    runtime: node\n');
+    const fixedTime = new Date('2026-07-19T00:00:00.000Z');
+    utimesSync(path, fixedTime, fixedTime);
+
+    expect((readFragmentServicesRaw().services[0] as { code: string }).code).toBe('foo');
+    writeFileSync(path, 'services:\n  - code: bar\n    name: Bar\n    runtime: node\n', 'utf8');
+    utimesSync(path, fixedTime, fixedTime);
+    expect(statSync(path).mtimeMs).toBe(fixedTime.getTime());
+
+    expect((readFragmentServicesRaw().services[0] as { code: string }).code).toBe('bar');
   });
 });

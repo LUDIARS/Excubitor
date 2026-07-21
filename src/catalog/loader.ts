@@ -2,9 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
+import { createNamedLogger } from '../shared/logger.js';
 import { readAutoServicesRaw } from './auto-catalog-file.js';
 import { readFragmentServicesRaw } from './fragments.js';
 import { interpolateRoots } from './interpolate.js';
+
+const logger = createNamedLogger('excubitor.catalog.loader');
 
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
@@ -369,13 +372,38 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   // private リポの定義を公開 services.yaml に焼き込まないための主経路。
   const fragmentCodes = new Set<string>();
   const fragmentServices: unknown[] = [];
-  for (const entry of readFragmentServicesRaw().services) {
-    const code = (entry as { code?: unknown }).code;
-    if (typeof code !== 'string' || baseCodes.has(code) || fragmentCodes.has(code)) continue;
-    if (ServiceSchema.safeParse(entry).success) {
-      fragmentCodes.add(code);
-      fragmentServices.push(entry);
+  for (const fragment of readFragmentServicesRaw().entries) {
+    const validation = ServiceSchema.safeParse(fragment.service);
+    if (!validation.success) {
+      logger.warn(
+        {
+          source: fragment.source,
+          code: (fragment.service as { code?: unknown } | null)?.code,
+          issues: validation.error.issues.map((issue) => ({
+            code: issue.code,
+            path: issue.path.join('.'),
+            message: issue.message,
+          })),
+        },
+        'invalid catalog fragment service ignored',
+      );
+      continue;
     }
+
+    const privilegedFields = (['infisical', 'requires_secret', 'cernere_launch_credentials'] as const)
+      .filter((field) => validation.data[field] !== undefined);
+    if (!fragment.trusted && privilegedFields.length > 0) {
+      logger.warn(
+        { source: fragment.source, code: validation.data.code, privilegedFields },
+        'untrusted catalog fragment service ignored',
+      );
+      continue;
+    }
+
+    const code = validation.data.code;
+    if (baseCodes.has(code) || fragmentCodes.has(code)) continue;
+    fragmentCodes.add(code);
+    fragmentServices.push(validation.data);
   }
 
   // スキャンが生成した自動カタログ: base / fragment のどちらにも無い code のみ補完する。
