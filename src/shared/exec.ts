@@ -5,6 +5,8 @@
 
 import { spawn } from 'node:child_process';
 
+import { killProcessTree } from './kill-tree.js';
+
 export interface ExecResult {
   ok: boolean;
   code: number | null;
@@ -32,7 +34,7 @@ export function execCapture(
 ): Promise<ExecResult> {
   return new Promise((resolveP) => {
     const needsShell = shell || (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(cmd));
-    const proc = spawn(cmd, args, { cwd, shell: needsShell, env: normalizedEnv() });
+    const proc = spawn(cmd, args, { cwd, shell: needsShell, env: normalizedEnv(), windowsHide: true });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -43,7 +45,7 @@ export function execCapture(
       resolveP(r);
     };
     const timer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch { /* noop */ }
+      killProcessTree(proc);
       finish({ ok: false, code: null, stdout, stderr: stderr + '\n[timeout]' });
     }, timeoutMs);
     proc.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf8')));

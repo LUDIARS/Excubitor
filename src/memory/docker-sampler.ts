@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { parseSize } from './units.js';
+import { killProcessTree } from '../shared/kill-tree.js';
 
 export interface DockerMemStat {
   /** コンテナ名 (catalog の container_names と突合する)。 */
@@ -78,7 +79,7 @@ export async function sampleDockerStats(timeoutMs = 15000): Promise<Map<string, 
 
 function runDocker(args: string[], timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
-    const proc = spawn('docker', args, { shell: false });
+    const proc = spawn('docker', args, { shell: false, windowsHide: true });
     let out = '';
     let settled = false;
     const done = (v: string | null): void => {
@@ -88,7 +89,7 @@ function runDocker(args: string[], timeoutMs: number): Promise<string | null> {
       resolve(v);
     };
     const timer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch { /* noop */ }
+      killProcessTree(proc);
       done(null);
     }, timeoutMs);
     proc.stdout.on('data', (c: Buffer) => (out += c.toString('utf8')));
