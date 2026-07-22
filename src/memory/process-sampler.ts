@@ -11,6 +11,8 @@
 
 import { spawn } from 'node:child_process';
 
+import { killProcessTree } from '../shared/kill-tree.js';
+
 export interface ProcEntry {
   pid: number;
   ppid: number;
@@ -202,7 +204,7 @@ export function listProcesses(timeoutMs = 15000): Promise<ProcEntry[] | null> {
 /** stdout を集める軽量 spawn。 失敗・timeout・非 0 終了は null。 */
 function runCapture(cmd: string, args: string[], timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { shell: false });
+    const proc = spawn(cmd, args, { shell: false, windowsHide: true });
     let out = '';
     let settled = false;
     const done = (v: string | null): void => {
@@ -212,7 +214,7 @@ function runCapture(cmd: string, args: string[], timeoutMs: number): Promise<str
       resolve(v);
     };
     const timer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch { /* noop */ }
+      killProcessTree(proc);
       done(null);
     }, timeoutMs);
     proc.stdout.on('data', (c: Buffer) => (out += c.toString('utf8')));

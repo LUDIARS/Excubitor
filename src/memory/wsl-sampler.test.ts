@@ -9,6 +9,10 @@ describe('parseDistroList', () => {
   it('既定マーカー (*) を除去', () => {
     expect(parseDistroList('* Ubuntu\nDebian')).toEqual(['Ubuntu', 'Debian']);
   });
+  it('rancher-desktop 系 (docker backend distro) を除外', () => {
+    const raw = 'Ubuntu\r\nrancher-desktop\r\nrancher-desktop-data\r\n';
+    expect(parseDistroList(raw)).toEqual(['Ubuntu']);
+  });
 });
 
 describe('parseMeminfo', () => {
