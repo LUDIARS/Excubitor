@@ -2,7 +2,7 @@
  * ライブログ SSE (`GET /api/v1/services/:code/logs`)。
  *
  * log bus を購読し、 指定 service_code の行を Server-Sent Events で配信する。
- * frontend の subscribeLogs (EventSource) が購読する。 docker-tail / process-bridge /
+ * frontend の subscribeLogs (EventSource) が購読する。 process-bridge /
  * Vestigium file-tail のいずれの経路で来た行もここに乗る。
  *
  * 注意: これはライブストリーム。 Excubitor 再起動中など接続が無い間の行は流れない
