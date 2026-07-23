@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+*.stackdump
 .env
 .env.local
 .env.*.local
