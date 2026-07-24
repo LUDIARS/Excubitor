@@ -31,6 +31,41 @@ interface McpJson {
   [k: string]: unknown;
 }
 
+/** Excubitor backend の既定 listen port。 これ以外での起動は「非通常起動」扱い。 */
+export const DEFAULT_BACKEND_PORT = 17332;
+
+/** reconcile 実行可否の判定入力。 起動モードを表す純粋な値のみを受ける (テスト可能)。 */
+export interface McpReconcileGate {
+  /** SafeMode (EXCUBITOR_SAFE_MODE=1 / --safe) で起動しているか。 */
+  safeMode: boolean;
+  /** 今回起動した backend の listen port。 */
+  port: number;
+  /** 既定ポート (省略時は DEFAULT_BACKEND_PORT)。 */
+  defaultPort?: number;
+}
+
+export interface McpReconcileDecision {
+  /** true のときだけ共有 `.mcp.json` を reconcile してよい。 */
+  reconcile: boolean;
+  /** スキップ理由 (reconcile=true のときは null)。 ログに残す。 */
+  skipReason: "safe_mode" | "non_default_port" | null;
+}
+
+/**
+ * 共有 `.mcp.json` を reconcile してよいのは「通常起動」だけかを判定する。
+ *
+ * 通常起動 = SafeMode でなく、 かつ既定ポートで起動している場合。 scratch 起動・
+ * 別ポート起動・SafeMode 起動は一時的/非常用の起動であり、 常用 Excubitor が使う
+ * 正規の `.mcp.json` を「今回の (非常用) port」に書き換えて壊してはならないので
+ * reconcile をスキップする。
+ */
+export function shouldReconcileMcpJson(gate: McpReconcileGate): McpReconcileDecision {
+  const defaultPort = gate.defaultPort ?? DEFAULT_BACKEND_PORT;
+  if (gate.safeMode) return { reconcile: false, skipReason: "safe_mode" };
+  if (gate.port !== defaultPort) return { reconcile: false, skipReason: "non_default_port" };
+  return { reconcile: true, skipReason: null };
+}
+
 /** backend port から excubitor MCP サーバの接続定義 (Streamable HTTP) を組み立てる。 */
 export function excubitorMcpEntry(port: number): McpServerEntry {
   return {

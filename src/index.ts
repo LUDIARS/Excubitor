@@ -72,7 +72,7 @@ import { buildFederationRouter } from './federation/router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail } from './log/process-log-tail.js';
 import { arsRoot } from './shared/roots.js';
-import { reconcileMcpJson } from './mcp/mcp-json.js';
+import { reconcileMcpJson, shouldReconcileMcpJson, DEFAULT_BACKEND_PORT } from './mcp/mcp-json.js';
 import { buildMcpHttpRouter } from './mcp/http.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
@@ -86,7 +86,7 @@ const observabilityStartedAt = new Date().toISOString();
 /** backend 自身の listen port (server.ts と同じ導出)。 MCP の self-URL 等に使う。 */
 function backendPort(): number {
   const n = Number(process.env.EXCUBITOR_PORT);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 17332;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BACKEND_PORT;
 }
 
 const SLOW_REQUEST_MS = readPositiveIntEnv('EXCUBITOR_SLOW_REQUEST_MS', 5_000);
@@ -384,11 +384,25 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // .mcp.json (ワークスペース直下) の excubitor エントリを backend 直載せの
   // Streamable HTTP (`/mcp`) に整合する。 旧 stdio 形式 (セッション毎プロセス) からの
   // 移行もここで自動的に行われる。 自分の MCP なので Excubitor が own。
-  try {
-    const r = reconcileMcpJson(arsRoot(), backendPort());
-    if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
-  } catch (err) {
-    logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
+  //
+  // ただし共有 `.mcp.json` を書き換えてよいのは「通常起動」 (SafeMode でない + 既定ポート)
+  // のときだけ。 scratch 起動・別ポート起動・SafeMode 起動は一時的/非常用の起動なので、
+  // 常用 Excubitor の正規 `.mcp.json` を今回の (非常用) port に書き換えて壊さないよう
+  // reconcile をスキップし、 スキップした事実をログに残す (無言で挙動を変えない)。
+  const mcpPort = backendPort();
+  const mcpGate = shouldReconcileMcpJson({ safeMode: detectSafeMode(), port: mcpPort });
+  if (mcpGate.reconcile) {
+    try {
+      const r = reconcileMcpJson(arsRoot(), mcpPort);
+      if (r.changed) logger.info({ path: r.path, reason: r.reason }, '.mcp.json reconciled');
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, '.mcp.json reconcile failed (継続)');
+    }
+  } else {
+    logger.info(
+      { port: mcpPort, defaultPort: DEFAULT_BACKEND_PORT, reason: mcpGate.skipReason },
+      '.mcp.json reconcile skipped (非通常起動: 共有 MCP 設定を保護)',
+    );
   }
 
   // boot: catalog ↁEDB sync
