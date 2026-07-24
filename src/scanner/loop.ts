@@ -7,13 +7,14 @@ import { processDowntimeAlerts } from './downtime-alert.js';
 
 const logger = createNamedLogger('excubitor.scanner');
 
-const DEFAULT_INTERVAL_MS = 10_000;  // 10s
+/** 全サービスの死活走査は重いので、5 分ごとにまとめて実行する。 */
+export const HEALTH_SCAN_INTERVAL_MS = 5 * 60 * 1_000;
 
 export interface ScannerHandle {
   stop: () => void;
 }
 
-export function startScannerLoop(catalog: Catalog, intervalMs = DEFAULT_INTERVAL_MS): ScannerHandle {
+export function startScannerLoop(catalog: Catalog, intervalMs = HEALTH_SCAN_INTERVAL_MS): ScannerHandle {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
 
