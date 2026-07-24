@@ -151,6 +151,8 @@ const mocks = vi.hoisted(() => ({
     environment: 'dev',
   })),
   reconcileMcpJson: vi.fn(() => ({ changed: false, path: 'E:\\tmp\\.mcp.json', reason: 'ok' })),
+  shouldReconcileMcpJson: vi.fn(() => ({ reconcile: true, skipReason: null })),
+  DEFAULT_BACKEND_PORT: 17332,
   resolveBuildVersion: vi.fn(async () => ({
     project_code: 'excubitor',
     major: 0,
@@ -329,7 +331,11 @@ vi.mock('./safe-mode.js', () => ({
   isSafeMode: mocks.isSafeMode,
 }));
 
-vi.mock('./mcp/mcp-json.js', () => ({ reconcileMcpJson: mocks.reconcileMcpJson }));
+vi.mock('./mcp/mcp-json.js', () => ({
+  reconcileMcpJson: mocks.reconcileMcpJson,
+  shouldReconcileMcpJson: mocks.shouldReconcileMcpJson,
+  DEFAULT_BACKEND_PORT: mocks.DEFAULT_BACKEND_PORT,
+}));
 vi.mock('./ops/emergency.js', () => ({ runEmergencyAction: mocks.runEmergencyAction }));
 
 vi.mock('./update/checker.js', () => ({

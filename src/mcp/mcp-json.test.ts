@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { excubitorMcpEntry, reconcileMcpJson } from "./mcp-json.js";
+import {
+  excubitorMcpEntry,
+  reconcileMcpJson,
+  shouldReconcileMcpJson,
+  DEFAULT_BACKEND_PORT,
+} from "./mcp-json.js";
 
 const tmpDirs: string[] = [];
 function freshDir(): string {
@@ -27,6 +32,43 @@ describe("excubitorMcpEntry", () => {
 
   it("port 指定が反映される", () => {
     expect(excubitorMcpEntry(9999).url).toBe("http://127.0.0.1:9999/mcp");
+  });
+});
+
+describe("shouldReconcileMcpJson", () => {
+  it("通常起動 (SafeMode でない + 既定ポート) では reconcile する", () => {
+    expect(shouldReconcileMcpJson({ safeMode: false, port: DEFAULT_BACKEND_PORT })).toEqual({
+      reconcile: true,
+      skipReason: null,
+    });
+  });
+
+  it("SafeMode 起動では既定ポートでも reconcile をスキップする", () => {
+    expect(shouldReconcileMcpJson({ safeMode: true, port: DEFAULT_BACKEND_PORT })).toEqual({
+      reconcile: false,
+      skipReason: "safe_mode",
+    });
+  });
+
+  it("別ポート起動 (scratch/検証) では reconcile をスキップする", () => {
+    expect(shouldReconcileMcpJson({ safeMode: false, port: 58156 })).toEqual({
+      reconcile: false,
+      skipReason: "non_default_port",
+    });
+  });
+
+  it("SafeMode は別ポート判定より優先される", () => {
+    expect(shouldReconcileMcpJson({ safeMode: true, port: 58156 })).toEqual({
+      reconcile: false,
+      skipReason: "safe_mode",
+    });
+  });
+
+  it("defaultPort を明示指定して判定できる", () => {
+    expect(shouldReconcileMcpJson({ safeMode: false, port: 9000, defaultPort: 9000 }).reconcile).toBe(true);
+    expect(shouldReconcileMcpJson({ safeMode: false, port: 9000, defaultPort: 17332 }).skipReason).toBe(
+      "non_default_port",
+    );
   });
 });
 
