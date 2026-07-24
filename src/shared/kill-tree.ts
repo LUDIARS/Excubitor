@@ -14,6 +14,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 
+const TASKKILL_REAPER_TIMEOUT_MS = 10_000;
+
 /**
  * Kill `child` and every descendant. Best-effort and non-throwing: a probe's
  * timeout path must never crash the scanner/memory loop.
@@ -31,7 +33,14 @@ export function killProcessTree(child: ChildProcess): void {
         windowsHide: true,
         detached: true,
       });
-      reaper.on('error', () => { /* taskkill missing / race: nothing to do */ });
+      // taskkill 自体が WMI/OS 側で固まることがある。detached のまま無期限に残さない。
+      const timeout = setTimeout(() => {
+        try { reaper.kill('SIGKILL'); } catch { /* already gone */ }
+      }, TASKKILL_REAPER_TIMEOUT_MS);
+      timeout.unref?.();
+      const clearReaperTimeout = (): void => clearTimeout(timeout);
+      reaper.once('close', clearReaperTimeout);
+      reaper.once('error', clearReaperTimeout);
       reaper.unref();
     } catch {
       try { child.kill('SIGKILL'); } catch { /* already gone */ }

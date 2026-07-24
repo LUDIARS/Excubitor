@@ -68,6 +68,8 @@ import {
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
+import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
+import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail } from './log/process-log-tail.js';
@@ -434,6 +436,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const errorDetectorHandle = await startErrorDetector();
   const dispatchHandle = startConcordiaDispatchLoop(() => currentCatalog!);
   const scannerHandle = startScannerLoop(currentCatalog);
+  // WMI/ps の全プロセス走査はこの loop だけが担当し、memory/Concordia はキャッシュを参照する。
+  const processSnapshotHandle = startProcessSnapshotLoop();
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
@@ -625,6 +629,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
   app.route('/', buildMemoryRouter(() => currentCatalog!));
+  app.route('/', buildProcessSnapshotRouter());
 
   // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作)
   app.route('/', buildFederationRouter(() => currentCatalog!));
@@ -1031,6 +1036,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { dispatchHandle.stop(); } catch { /* best-effort shutdown */ }
       try { errorDetectorHandle.stop(); } catch { /* best-effort shutdown */ }
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
+      try { processSnapshotHandle.stop(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { parquetHandle.stop(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
