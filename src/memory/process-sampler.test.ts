@@ -79,6 +79,29 @@ describe('parseWindowsProcList (CPU 列付き)', () => {
   });
 });
 
+describe('parseWindowsProcList (共有 snapshot JSONL)', () => {
+  it('command line の comma と quote を壊さず parse する', () => {
+    const raw = JSON.stringify({
+      pid: 100,
+      ppid: 4,
+      rss: 1048576,
+      cpu_ms: 3,
+      name: 'node.exe',
+      started_at: 123456,
+      command_line: 'node "a,b.js" --session s1',
+    });
+    expect(parseWindowsProcList(raw)).toEqual([{
+      pid: 100,
+      ppid: 4,
+      rss: 1048576,
+      cpuMs: 3,
+      name: 'node.exe',
+      startedAt: 123456,
+      commandLine: 'node "a,b.js" --session s1',
+    }]);
+  });
+});
+
 describe('parsePosixCpuTime', () => {
   it('MM:SS', () => expect(parsePosixCpuTime('01:30')).toBe(90_000));
   it('HH:MM:SS', () => expect(parsePosixCpuTime('1:00:00')).toBe(3_600_000));
@@ -91,6 +114,20 @@ describe('parsePosixProcList (TIME 列付き)', () => {
     expect(parsePosixProcList('100 4 1024 00:10')).toEqual([
       { pid: 100, ppid: 4, rss: 1024 * 1024, cpuMs: 10_000 },
     ]);
+  });
+});
+
+describe('parsePosixProcList (共有 snapshot 列付き)', () => {
+  it('etimes/name/args を開始時刻と command line に載せる', () => {
+    expect(parsePosixProcList('100 4 1024 00:10 30 node node app.js --flag', 100_000)).toEqual([{
+      pid: 100,
+      ppid: 4,
+      rss: 1024 * 1024,
+      cpuMs: 10_000,
+      name: 'node',
+      startedAt: 70_000,
+      commandLine: 'node app.js --flag',
+    }]);
   });
 });
 

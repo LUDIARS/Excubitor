@@ -18,6 +18,12 @@ export interface ProcEntry {
   ppid: number;
   /** 常駐セット (Windows=WorkingSetSize, POSIX=RSS) のバイト数。 */
   rss: number;
+  /** OS の image / command 名。 */
+  name?: string;
+  /** 起動時刻 (Unix epoch milliseconds)。取得不能なら未設定。 */
+  startedAt?: number;
+  /** 完全な command line。取得不能なら未設定。 */
+  commandLine?: string;
   /**
    * プロセス起動以降の累積 CPU 時間 (ミリ秒)。 取得できなかった (列が無い) 行では未設定。
    * 単発値ではなく累積カウンタなので、 CPU 使用率は連続 tick 間の delta で算出する (collector)。
@@ -68,6 +74,26 @@ export function parsePosixCpuTime(raw: string): number | null {
 export function parseWindowsProcList(raw: string): ProcEntry[] {
   const entries: ProcEntry[] = [];
   for (const line of raw.split(/\r?\n/)) {
+    if (line.trimStart().startsWith('{')) {
+      try {
+        const value = JSON.parse(line) as Record<string, unknown>;
+        const pid = Number(value.pid);
+        const ppid = Number(value.ppid);
+        const rss = Number(value.rss);
+        if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !Number.isFinite(rss)) continue;
+        const entry: ProcEntry = { pid, ppid, rss };
+        const cpuMs = Number(value.cpu_ms);
+        if (Number.isFinite(cpuMs)) entry.cpuMs = cpuMs;
+        if (typeof value.name === 'string') entry.name = value.name;
+        const startedAt = Number(value.started_at);
+        if (Number.isFinite(startedAt) && startedAt > 0) entry.startedAt = startedAt;
+        if (typeof value.command_line === 'string') entry.commandLine = value.command_line;
+        entries.push(entry);
+      } catch {
+        // 書きかけ・診断出力など JSON でない行は従来どおり skip。
+      }
+      continue;
+    }
     const cols = line.split(',');
     if (cols.length < 3) continue;
     const pid = Number(cols[0]);
@@ -89,9 +115,28 @@ export function parseWindowsProcList(raw: string): ProcEntry[] {
  * POSIX `ps -eo pid=,ppid=,rss=[,time=]` の出力を parse (pure)。 rss は KB なので bytes へ換算。
  * 4 列目があれば CPU 時間 (TIME) として cpuMs に載せる。
  */
-export function parsePosixProcList(raw: string): ProcEntry[] {
+export function parsePosixProcList(raw: string, sampledAt = Date.now()): ProcEntry[] {
   const entries: ProcEntry[] = [];
   for (const line of raw.split(/\r?\n/)) {
+    const extended = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)(?:\s+(.*))?$/);
+    if (extended) {
+      const pid = Number(extended[1]);
+      const ppid = Number(extended[2]);
+      const rssKb = Number(extended[3]);
+      const cpuMs = parsePosixCpuTime(extended[4]!);
+      const ageSec = Number(extended[5]);
+      const entry: ProcEntry = {
+        pid,
+        ppid,
+        rss: rssKb * 1024,
+        name: extended[6]!,
+        startedAt: sampledAt - ageSec * 1000,
+        commandLine: extended[7] ?? extended[6]!,
+      };
+      if (cpuMs != null) entry.cpuMs = cpuMs;
+      entries.push(entry);
+      continue;
+    }
     const cols = line.trim().split(/\s+/);
     if (cols.length < 3) continue;
     const pid = Number(cols[0]);
@@ -112,7 +157,7 @@ export function parsePosixProcList(raw: string): ProcEntry[] {
  * rootPid を根とする部分木 (自身 + 全子孫) の RSS を合算 (pure)。
  * cycle / 自己参照 (pid===ppid) は visited で防ぐ。 rootPid が存在しなければ {0,0}。
  */
-export function sumTreeRss(procs: ProcEntry[], rootPid: number): TreeRss {
+export function sumTreeRss(procs: readonly ProcEntry[], rootPid: number): TreeRss {
   const byPid = new Map<number, ProcEntry>();
   const children = new Map<number, number[]>();
   for (const p of procs) {
@@ -148,7 +193,7 @@ export function sumTreeRss(procs: ProcEntry[], rootPid: number): TreeRss {
  * rootPid を根とする部分木の 累積 CPU 時間 (ms) を合算 (pure)。 cpuMs を持つプロセスのみ加算する。
  * 木に 1 つも cpuMs が無ければ null (= CPU 計測不能)。 ツリー走査は sumTreeRss と同じく cycle 安全。
  */
-export function sumTreeCpu(procs: ProcEntry[], rootPid: number): number | null {
+export function sumTreeCpu(procs: readonly ProcEntry[], rootPid: number): number | null {
   const byPid = new Map<number, ProcEntry>();
   const children = new Map<number, number[]>();
   for (const p of procs) {
@@ -187,16 +232,20 @@ export function sumTreeCpu(procs: ProcEntry[], rootPid: number): number | null {
  */
 export function listProcesses(timeoutMs = 15000): Promise<ProcEntry[] | null> {
   if (process.platform === 'win32') {
+    // 1 process = 1 JSON line。CommandLine の comma / quote / 改行を安全に運ぶ。
     // WorkingSetSize はバイト、 Kernel/UserModeTime は 100ns 単位の累積 CPU 時間。
     const script =
+      '[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); ' +
       'Get-CimInstance Win32_Process | ForEach-Object { ' +
-      "[string]$_.ProcessId + ',' + [string]$_.ParentProcessId + ',' + [string]$_.WorkingSetSize + ',' + " +
-      '[string]$_.KernelModeTime + ' + "',' + [string]$_.UserModeTime }";
+      '$started=$null; if ($_.CreationDate) { $started=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }; ' +
+      '[pscustomobject]@{ pid=[int]$_.ProcessId; ppid=[int]$_.ParentProcessId; rss=[long]$_.WorkingSetSize; ' +
+      'cpu_ms=([double]$_.KernelModeTime+[double]$_.UserModeTime)/10000; name=[string]$_.Name; ' +
+      'started_at=$started; command_line=[string]$_.CommandLine } | ConvertTo-Json -Compress }';
     return runCapture('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], timeoutMs).then(
       (out) => (out == null ? null : parseWindowsProcList(out)),
     );
   }
-  return runCapture('ps', ['-eo', 'pid=,ppid=,rss=,time='], timeoutMs).then((out) =>
+  return runCapture('ps', ['-eo', 'pid=,ppid=,rss=,time=,etimes=,comm=,args='], timeoutMs).then((out) =>
     out == null ? null : parsePosixProcList(out),
   );
 }
