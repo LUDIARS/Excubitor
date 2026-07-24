@@ -10,7 +10,8 @@ import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Catalog, Service } from '../catalog/loader.js';
-import { listProcesses, sumTreeRss, sumTreeCpu } from './process-sampler.js';
+import { sumTreeRss, sumTreeCpu } from './process-sampler.js';
+import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
 import { sampleDockerStats } from './docker-sampler.js';
 import { fetchMemoryMetrics } from './metrics-sampler.js';
 import { sampleWsl } from './wsl-sampler.js';
@@ -77,12 +78,11 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
   const now = Date.now();
   const cpuCount = os.cpus().length;
   const running = loadRunningInstances();
-  const needProcess = catalog.services.some((s) => isProcessRuntime(s) && running.has(s.code));
   const needDocker = catalog.services.some((s) => isDockerRuntime(s) && running.has(s.code));
 
-  // OS 呼び出しは tick あたり 1 回。 host (マシン全体) は常に採る。
-  const [procList, dockerStats, host] = await Promise.all([
-    needProcess ? listProcesses() : Promise.resolve(null),
+  // 全プロセス走査は process-snapshot loop が一元管理する。ここではキャッシュだけを読む。
+  const procList = getFreshProcessSnapshot(now)?.processes ?? null;
+  const [dockerStats, host] = await Promise.all([
     needDocker ? sampleDockerStats() : Promise.resolve(null),
     sampleHost(),
   ]);
