@@ -764,14 +764,17 @@ services:
     tier: personal
     project_code: custos
     component: server
-    port: 8765
+    # port / health は Custos の実装 (src/main.ts, src/app.ts) が正本。
+    # backend 7676 (CUSTOS_PORT) / frontend 4649 (CUSTOS_FRONTEND_PORT) を
+    # 単一 Hono アプリが両方 listen する。health endpoint は /api/health。
+    port: 7676
     repo: LUDIARS/Custos
     runtime: dev-process-md
     cwd: ${ARS_ROOT}/Custos
     autostart: false
     health:
       type: http
-      url: http://localhost:8765/health
+      url: http://localhost:7676/api/health
       interval_sec: 30
     provides:
       CUSTOS_URL: http://${host}:${port}
