@@ -49,6 +49,30 @@ describe('catalog fragments', () => {
     expect(agg.sources).toHaveLength(2);
   });
 
+  // ARS_ROOT 直下には作業用の git worktree が並ぶ。 worktree は未マージブランチの作業コピー
+  // なので、 そこの fragment を本番 catalog へ混ぜてはいけない (本体リポと同じ code を
+  // 二重供給してマージ順で勝敗が決まる、 worktree を消すとサービスが消える、等)。
+  it('ignores git worktrees so unmerged branches cannot inject services', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-wt-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+
+    // 通常のリポジトリ: `.git` はディレクトリ。
+    makeRepoFragment(root, 'RealRepo', 'services:\n  - code: real\n    name: Real\n    runtime: node\n');
+    mkdirSync(join(root, 'RealRepo', '.git'), { recursive: true });
+
+    // git worktree: `.git` は gitdir 参照を書いたファイル。
+    makeRepoFragment(root, 'WorkTree', 'services:\n  - code: from-worktree\n    name: WT\n    runtime: node\n');
+    writeFileSync(join(root, 'WorkTree', '.git'), 'gitdir: /elsewhere/.git/worktrees/WorkTree\n', 'utf8');
+
+    // `.git` を持たないディレクトリ (親リポの一部として fragment を出すもの) は対象のまま。
+    makeRepoFragment(root, 'scripts', 'services:\n  - code: plain\n    name: Plain\n    runtime: node\n');
+
+    const codes = readFragmentServicesRaw().services.map((s) => (s as { code: string }).code).sort();
+    expect(codes).toEqual(['plain', 'real']);
+    expect(fragmentFiles().some((path) => path.includes('WorkTree'))).toBe(false);
+  });
+
   it('interpolates ${ARS_ROOT} inside fragment values', () => {
     const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
     tempDirs.push(root);

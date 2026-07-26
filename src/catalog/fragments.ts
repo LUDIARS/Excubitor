@@ -154,6 +154,12 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
       // Symlinks/junctions are intentionally outside the configured trust boundary.
       if (!child.isDirectory()) continue;
       const repositoryPath = normalizeAbsolute(join(root.path, child.name));
+      // git worktree は一時的な作業コピーであり、 本番 catalog の供給源にしない。
+      // 未マージブランチのサービス定義が混ざるうえ、 本体リポと同じ code を二重供給して
+      // マージ順で勝敗が決まる不安定な状態を生む (2026-07-26 実測: ARS_ROOT 直下の
+      // worktree 4 件が ludellus-web / PrivateGame-unity-validation / volputas x2 を供給し、
+      // ludellus-web は本体リポのどこにも存在しなかった)。
+      if (isGitWorktree(repositoryPath)) continue;
       const path = normalizeAbsolute(join(repositoryPath, FRAGMENT_FILENAME));
       try {
         if (!statSync(path).isFile()) continue;
@@ -192,6 +198,21 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
 /** 各ルート直下の `<child>/excubitor.catalog.yaml` を列挙 (存在するもののみ、 昇順)。 */
 export function fragmentFiles(): string[] {
   return discoverFragmentSources().sources.map((source) => source.path);
+}
+
+/**
+ * git worktree のルートかどうか。
+ *
+ * worktree は `.git` を **ファイル** (`gitdir: ...` を書いた参照) として持ち、 通常のリポジトリは
+ * ディレクトリとして持つ。 `.git` を一切持たないディレクトリ (Castra の `scripts/` など、
+ * 親リポの一部として fragment を提供するもの) は従来どおり対象に残す。
+ */
+function isGitWorktree(directory: string): boolean {
+  try {
+    return statSync(join(directory, '.git')).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function isWithinRoot(path: string, root: string): boolean {
