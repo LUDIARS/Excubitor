@@ -764,17 +764,27 @@ services:
     tier: personal
     project_code: custos
     component: server
-    # port / health は Custos の実装 (src/main.ts, src/app.ts) が正本。
-    # backend 7676 (CUSTOS_PORT) / frontend 4649 (CUSTOS_FRONTEND_PORT) を
-    # 単一 Hono アプリが両方 listen する。health endpoint は /api/health。
-    port: 7676
+    # 単一 Hono アプリが backend (CUSTOS_PORT) と frontend
+    # (CUSTOS_FRONTEND_PORT, 既定 4649) の両方を listen する (src/main.ts)。
+    # **このマシンには CUSTOS_PORT=8765 が設定済みで、コードの既定値 7676 を
+    # 上書きしている。** 実測でも 8765 が LISTEN。既定値だけ見て 7676 に
+    # 直すと health check が通らなくなる (2026-07-26 に一度やってしまった)。
+    # health endpoint は /api/health (/health ではない)。
+    port: 8765
     repo: LUDIARS/Custos
     runtime: dev-process-md
     cwd: ${ARS_ROOT}/Custos
     autostart: false
+    env:
+      # このマシンには CERNERE_URL が設定済みなので Custos は認証を要求するが、
+      # Cernere は常時起動していないためトークン検証が必ず失敗し全 API が 401 になる。
+      # Custos は tier: personal / loopback bind の本人専用ツールなので素通しにする。
+      # **LAN へ公開する場合は必ず外すこと** — Custos は任意コマンド実行・
+      # キー/マウス注入・画面取得ができ、無認証公開は第三者に全操作を許す (CWE-668)。
+      CUSTOS_OPEN: "1"
     health:
       type: http
-      url: http://localhost:7676/api/health
+      url: http://localhost:8765/api/health
       interval_sec: 30
     provides:
       CUSTOS_URL: http://${host}:${port}
