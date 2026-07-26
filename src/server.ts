@@ -40,17 +40,23 @@ const requestTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_REQUEST_TIMEOUT_M
 const headersTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_HEADERS_TIMEOUT_MS', 65_000);
 const keepAliveTimeoutMs = readPositiveIntEnv('EXCUBITOR_BACKEND_KEEP_ALIVE_TIMEOUT_MS', 5_000);
 
+// uncaughtException / unhandledRejection のハンドラでは **logger (pino) を使わない**。
+//
+// pino は sonic-boom 経由で stdout の fd へ非同期に書く。 supervisor は子の stdout を
+// ファイル fd に向けているため、 「出力先 fd が壊れる」 種類の障害では logger.error 自体が
+// 同じ例外を再生産し、 ハンドラが自分のトリガーを作り続ける無限ループになる。
+//
+// 実害 (2026-07-26): `EBADF: bad file descriptor, write` → uncaughtException →
+// logger.error → EBADF … のループで logs/excubitor-diagnostic.log が 25 日で 32.4 GB
+// (毎秒 165 KB) に達し、 同期書き込みが単一スレッドの CPU を 87% 占有していた。
+//
+// 記録は writeDiagnostic が担う (同期 fs、 pino 非依存、 同一事象の連投は自前で抑制)。
 process.on('uncaughtException', (err) => {
-  logger.error({ err: err.stack ?? err.message }, 'uncaught exception');
   writeDiagnostic('uncaughtException', { err: err.stack ?? err.message });
 });
 
 process.on('unhandledRejection', (reason) => {
   const err = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
-  logger.error(
-    { err },
-    'unhandled rejection',
-  );
   writeDiagnostic('unhandledRejection', { err });
 });
 
