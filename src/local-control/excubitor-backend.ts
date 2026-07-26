@@ -2,7 +2,11 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { execCapture } from '../shared/exec.js';
+import { startProcessLog } from '../log/process-file.js';
 import type { ExcubitorStatusPayload } from './protocol.js';
+
+/** backend の stdout/stderr の落とし先 (`data/process-logs/<code>.{out,err}.log`)。 */
+const BACKEND_LOG_CODE = 'excubitor-backend';
 
 export interface ExcubitorBackendOptions {
   rootDir: string;
@@ -378,6 +382,22 @@ export class ExcubitorBackendController {
 
   private spawnBackend(instanceToken: string): ChildProcess {
     if (this.options.spawnBackend) return this.options.spawnBackend(instanceToken);
+    // backend の stdout/stderr は supervisor から **継承しない**。
+    //
+    // backend は detached で spawn し、 supervisor だけが再起動されても生き残る設計。 その状態で
+    // supervisor の stdout を inherit していると、 supervisor が終了した時点で継承したハンドルが
+    // 無効になり、 backend の pino (sonic-boom) が書き込むたびに EBADF を投げる。 それが
+    // uncaughtException として上がり続け、 起動シーケンス中に起きると listen へ到達できずに死ぬ。
+    //
+    // 実害 (2026-07-26): 2 日間動き続けた supervisor の配下で
+    // `EBADF: bad file descriptor, write` が uncaughtException として無限に発生し、
+    // 診断ログが 30 GB を超えた。 supervisor 経由では backend が listen できないのに、
+    // 同じ dist を手動起動すると正常に listen する状態になっていた (= 継承した壊れたハンドルが原因)。
+    //
+    // 他サービスと同じく親所有のファイル fd へ向ける (log/process-file.ts の設計どおり:
+    // 「親が死んでも write 先は生存する」)。 fd は startProcessLog が所有し、 再 spawn 時に
+    // 前回分を閉じる。 detached な旧 backend は複製 fd を持つので影響を受けない。
+    const { stdoutFd, stderrFd } = startProcessLog(BACKEND_LOG_CODE);
     return spawn(process.execPath, [join(this.options.rootDir, 'dist', 'server.js'), '--service'], {
       cwd: this.options.rootDir,
       env: {
@@ -387,7 +407,7 @@ export class ExcubitorBackendController {
         EXCUBITOR_LIFECYCLE_OWNER: 'supervisor',
         EXCUBITOR_INSTANCE_TOKEN: instanceToken,
       },
-      stdio: ['ignore', 'inherit', 'inherit'],
+      stdio: ['ignore', stdoutFd, stderrFd],
       // The backend must remain alive if the OS manager restarts only the
       // supervisor. On Windows this also breaks it out of the Scheduled Task
       // job; on POSIX it creates an independent process group.
