@@ -38,6 +38,29 @@ describe('fragment watcher', () => {
     }
   });
 
+  // 既存 fragment の変更は個別 watcher が即時に拾う。 polling を十分長く設定することで、
+  // fallback ではなく watcher 経由で検出できていることを保証する
+  // (discovery root の recursive watch を外した代わりが機能しているかの回帰テスト)。
+  it('detects edits to an existing fragment through its own watcher', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-watch-edit-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+    const repo = join(root, 'ExistingRepo');
+    mkdirSync(repo, { recursive: true });
+    const fragment = join(repo, 'excubitor.catalog.yaml');
+    writeFileSync(fragment, 'services:\n  - code: before\n    name: Before\n    runtime: node\n', 'utf8');
+
+    const onChange = vi.fn();
+    const handle = watchFragments(onChange, { debounceMs: 10, pollIntervalMs: 60_000 });
+
+    try {
+      writeFileSync(fragment, 'services:\n  - code: after\n    name: After\n    runtime: node\n', 'utf8');
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: 2_000 });
+    } finally {
+      handle.stop();
+    }
+  });
+
   it('uses polling when fs.watch setup fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'excubitor-watch-missing-'));
     tempDirs.push(root);
