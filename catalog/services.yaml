@@ -699,6 +699,28 @@ services:
     provides:
       CONCORDIA_URL: http://${host}:${port}
 
+  - code: revisor
+    name: Revisor (PR Review)
+    tier: personal
+    project_code: revisor
+    component: pr-review
+    port: 4240
+    repo: LUDIARS/Revisor
+    runtime: node
+    cwd: ${ARS_ROOT}/Revisor
+    command: node src/cli.mjs serve
+    allow_hot_reload: false
+    autostart: true
+    restart_policy: always
+    max_restart: 5
+    log_path: ${ARS_ROOT}/logs/revisor
+    health:
+      type: http
+      url: http://localhost:4240/health
+      interval_sec: 30
+    provides:
+      REVISOR_URL: http://${host}:${port}
+
   - code: concordia-cost
     name: Concordia Cost Worker
     tier: personal

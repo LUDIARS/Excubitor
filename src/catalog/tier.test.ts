@@ -93,6 +93,24 @@ describe('catalog (services.yaml)', () => {
     }
   });
 
+  it('Revisorを独立した常駐PRレビューサービスとして登録する', () => {
+    expect(catalog.services.find((s) => s.code === 'revisor')).toMatchObject({
+      tier: 'personal',
+      project_code: 'revisor',
+      component: 'pr-review',
+      port: 4240,
+      command: 'node src/cli.mjs serve',
+      autostart: true,
+      restart_policy: 'always',
+      health: {
+        type: 'http',
+        url: 'http://localhost:4240/health',
+      },
+    });
+    expect(catalog.services.find((s) => s.code === 'revisor')?.cwd)
+      .toMatch(/[\\/]Revisor$/u);
+  });
+
   it('discutere の port は nuntius (3100) と競合せず env で整合する', () => {
     const di = catalog.services.find((s) => s.code === 'discutere');
     const nuntius = catalog.services.find((s) => s.code === 'nuntius-api');
