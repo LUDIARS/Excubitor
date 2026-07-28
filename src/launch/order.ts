@@ -3,7 +3,7 @@
  *   tier 0: infra (postgres / redis / minio / mailpit)
  *   tier 1: Cernere (認証基盤)
  *   tier 2: Corpus (Hub)
- *   tier 3: corpus submodule 依存 (<private-reference-012>Hub 等)
+ *   tier 3: corpus submodule 依存
  *   tier 5: その他 leaf サービス
  *
  * tier 単位でまとめて起動し、 tier 間にだけ待ちを入れる (orchestrator 側)。
@@ -16,12 +16,13 @@ const TIER_BY_PROJECT: Record<string, number> = {
   infra: 0,
   cernere: 1,
   corpus: 2,
-  <private-reference-012>hub: 3,
 };
 
-export function startTier(svc: Pick<Service, 'project_code' | 'code'>): number {
+export function startTier(svc: Pick<Service, 'project_code' | 'code' | 'uses_corpus'>): number {
   const key = svc.project_code ?? svc.code;
-  return TIER_BY_PROJECT[key] ?? 5;
+  const platformTier = TIER_BY_PROJECT[key];
+  if (platformTier !== undefined) return platformTier;
+  return svc.uses_corpus ? 3 : 5;
 }
 
 export interface OrderedTier {

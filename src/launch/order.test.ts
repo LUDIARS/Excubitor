@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { expandWithDependencies, startTier, orderForStart, orderForStop } from './order.js';
 import type { Service } from '../catalog/loader.js';
 
-function svc(code: string, project_code?: string): Service {
+function svc(code: string, project_code?: string, uses_corpus?: boolean): Service {
   return {
     code,
     name: code,
     project_code,
+    uses_corpus,
     monitor_only: false,
     runtime: 'node',
     autostart: false,
@@ -16,11 +17,11 @@ function svc(code: string, project_code?: string): Service {
 }
 
 describe('startTier', () => {
-  it('infra/cernere/corpus/<private-reference-012>hub に専用 tier を割り当てる', () => {
+  it('infra/cernere/corpus/corpus依存サービスに専用 tier を割り当てる', () => {
     expect(startTier(svc('infra-pg', 'infra'))).toBe(0);
     expect(startTier(svc('cernere-backend', 'cernere'))).toBe(1);
     expect(startTier(svc('corpus', 'corpus'))).toBe(2);
-    expect(startTier(svc('<private-reference-012>hub', '<private-reference-012>hub'))).toBe(3);
+    expect(startTier(svc('derived-hub', 'derived-hub', true))).toBe(3);
   });
 
   it('その他 leaf は tier 5', () => {

@@ -414,40 +414,6 @@ services:
     provides:
       LUDELLUS_URL: http://${host}:${port}
 
-  - code: EducationLab
-    name: EducationLab (学校運営 hub)
-    tier: saas
-    project_code: EducationLab
-    component: server
-    port: 5187
-    repo: VGA-EducationLab/EducationHub
-    runtime: node
-    cwd: ${ARS_ROOT}/EducationLab
-    command: npm run dev
-    allow_hot_reload: true
-    # EducationLab は Corpus (submodule) を in-process 起動する派生 hub (standalone corpus:5185 は使わない)。
-    # Corpus プラグインが各バックエンドへ connector 接続するため、 その実依存を depends_on に明示する:
-    #   認証=Cernere / 出席・施設・イベント=Aedilis / 企業=Tirocinium / 議論・学習=Discutere /
-    #   レビュー・アンケート=Volputas / 出席passkey=Ostiarius。
-    # (uses_corpus は standalone corpus を起動する別義なので付けない。)
-    depends_on: [cernere, cernere-frontend, aedilis, tirocinium, discutere, volputas, ostiarius]
-    autostart: false
-    env:
-      CORPUS_PUBLIC_URL: http://localhost:5187
-      CORPUS_TOKEN_MODE: cernere-project-token
-      <private-reference-004>_OMNIPOTENS_REVIEW_ROOT: ${ARS_ROOT}/Omnipotents/Review
-    required_env: [CERNERE_BASE_URL, CERNERE_FRONTEND_URL, CORPUS_PUBLIC_URL, CORPUS_TOKEN_MODE, <private-reference-004>_OMNIPOTENS_REVIEW_ROOT]
-    requires_secret:
-      - service: cernere
-        keys: [EXCUBITOR_CERNERE_CLIENT_ID, EXCUBITOR_CERNERE_CLIENT_SECRET]
-    cernere_launch_credentials:
-      target_project: EducationLab
-    health:
-      type: tcp
-      interval_sec: 30
-    provides:
-      <private-reference-004>_URL: http://${host}:${port}
-
   # ─────────────── Tirocinium (面接練習) ───────────────
   - code: tirocinium
     name: Tirocinium server (面接練習)

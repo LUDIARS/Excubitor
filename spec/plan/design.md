@@ -177,7 +177,7 @@ Concordia の `catalog/loader.ts` の `ServiceSchema` を継承。主フィー�
 ### 6.1 現状の置換対象
 
 `dev.ps1` の 16 サービス (Cernere / Corpus / Actio / Schedula / Aedilis / Bibliotheca / Nuntius /
-Concordia / Conciliator / Custos / Quaestor / Praeforma / Imperativus / Signum / Ludellus / <private-reference-012>Hub)
+Concordia / Conciliator / Custos / Quaestor / Praeforma / Imperativus / Signum / Ludellus / 各repo fragmentで登録される派生サービス)
 を catalog に `runtime: node` (or `docker-compose`) として全登録する。
 現状 catalog は 17 entry (infra 4 + 一部サービス) なので、**不足分を追記して全サービス化**する。
 
@@ -340,7 +340,7 @@ spawn/kill へ fallback してはならない。
 
 ### 12.2 起動順序 (tier)
 
-infra(0) → Cernere(1) → Corpus(2) → corpus 依存(<private-reference-012>Hub, 3) → leaf(5)。tier 単位で control を呼び、tier 間に 1.5s 待ち。Cernere / Corpus を起動セットに含めれば leaf より先に上がるので「Corpus / Cernere と繋げる」が成立 (Corpus は discovery で leaf の port + manifest を拾う)。
+infra(0) → Cernere(1) → Corpus(2) → corpus submodule 依存サービス(3) → leaf(5)。tier 単位で control を呼び、tier 間に 1.5s 待ち。Cernere / Corpus を起動セットに含めれば leaf より先に上がるので「Corpus / Cernere と繋げる」が成立 (Corpus は discovery で leaf の port + manifest を拾う)。
 
 ### 12.3 Infisical relay (各サービス自前 fetch → Excubitor 集約)
 
