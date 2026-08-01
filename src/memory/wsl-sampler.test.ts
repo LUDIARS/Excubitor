@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { parseDistroList, parseMeminfo, parseVmmem, parseProcStat, cpuPctFromStat } from './wsl-sampler.js';
+import {
+  parseDistroList,
+  parseMeminfo,
+  parseVmmem,
+  parseProcStat,
+  cpuPctFromStat,
+  createWslProbeBreaker,
+  isWslProbeAllowed,
+  recordWslProbeOutcome,
+  WSL_PROBE_COOLDOWN_MS,
+  WSL_PROBE_FAILURE_THRESHOLD,
+} from './wsl-sampler.js';
 
 describe('parseDistroList', () => {
   it('distro 名を抽出し docker-desktop 系を除外', () => {
@@ -67,5 +78,51 @@ describe('parseVmmem', () => {
   });
   it('vmmem 不在なら 0', () => {
     expect(parseVmmem('"explorer.exe","1","Console","1","100 K"')).toEqual({ rssBytes: 0, procs: [] });
+  });
+});
+
+describe('wsl probe breaker', () => {
+  const T0 = 1_700_000_000_000;
+
+  it('初期状態では guest プローブを許可する', () => {
+    expect(isWslProbeAllowed(createWslProbeBreaker(), T0)).toBe(true);
+  });
+
+  it('閾値未満の連続失敗では開かない', () => {
+    let b = createWslProbeBreaker();
+    for (let i = 0; i < WSL_PROBE_FAILURE_THRESHOLD - 1; i += 1) {
+      b = recordWslProbeOutcome(b, false, T0);
+      expect(isWslProbeAllowed(b, T0)).toBe(true);
+    }
+    expect(b.consecutiveFailures).toBe(WSL_PROBE_FAILURE_THRESHOLD - 1);
+  });
+
+  it('連続失敗が閾値に達すると cooldown 分だけ開く', () => {
+    let b = createWslProbeBreaker();
+    for (let i = 0; i < WSL_PROBE_FAILURE_THRESHOLD; i += 1) b = recordWslProbeOutcome(b, false, T0);
+    expect(isWslProbeAllowed(b, T0)).toBe(false);
+    // cooldown 中は叩かない = ハンドルも孤児も増えない
+    expect(isWslProbeAllowed(b, T0 + WSL_PROBE_COOLDOWN_MS - 1)).toBe(false);
+    // 経過後は 1 度だけ試して復帰可否を見る
+    expect(isWslProbeAllowed(b, T0 + WSL_PROBE_COOLDOWN_MS)).toBe(true);
+  });
+
+  it('成功したら即座に閉じ、 失敗カウントも戻る', () => {
+    let b = createWslProbeBreaker();
+    for (let i = 0; i < WSL_PROBE_FAILURE_THRESHOLD; i += 1) b = recordWslProbeOutcome(b, false, T0);
+    expect(isWslProbeAllowed(b, T0)).toBe(false);
+
+    b = recordWslProbeOutcome(b, true, T0 + WSL_PROBE_COOLDOWN_MS);
+    expect(b).toEqual(createWslProbeBreaker());
+    expect(isWslProbeAllowed(b, T0 + WSL_PROBE_COOLDOWN_MS)).toBe(true);
+  });
+
+  it('開いたまま失敗を重ねても cooldown は現在時刻から引き直される', () => {
+    let b = createWslProbeBreaker();
+    for (let i = 0; i < WSL_PROBE_FAILURE_THRESHOLD; i += 1) b = recordWslProbeOutcome(b, false, T0);
+    const retryAt = T0 + WSL_PROBE_COOLDOWN_MS;
+    b = recordWslProbeOutcome(b, false, retryAt);
+    expect(isWslProbeAllowed(b, retryAt)).toBe(false);
+    expect(isWslProbeAllowed(b, retryAt + WSL_PROBE_COOLDOWN_MS)).toBe(true);
   });
 });
