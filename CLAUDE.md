@@ -103,6 +103,7 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。
   上限 (`EXCUBITOR_PROCESS_LOG_MAX_MB`、既定 32MB) 超過分は open (=サービス起動/再起動) 時に
   `<file>.1` へローテーション (稼働中の rename は不可のため open 時のみ)。
+- **win32 の managed service は Job Object 脱出 spawn (job-breakaway) が既定**。supervisor は Scheduled Task の Job 内で動き `detached: true` では子が Job を継承するため、WMI (Win32_Process.Create) 経由で Job 外に生成し pid を adopted 管理に載せる (`src/process/breakaway-spawn.ts`、`EXCUBITOR_SPAWN_STRATEGY` で上書き可)。supervisor が死んでもサービスは残り、再起動時は reconcile が生存 pid を再採用して何もしない。
 - 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
 - **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /

@@ -1,0 +1,55 @@
+{
+  "name": "update",
+  "description": "Git pull update application plus branch/update status reporting per service.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/update/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Uu]pdate",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "gitPull",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "branches",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "checkUpdates",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"update\" domain: Git pull update application plus branch/update status reporting per service.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "構成 / src/update/"
+  ],
+  "rationale": "src/update (5 files) handles version/git update workflows separate from scanning.",
+  "updatedAt": "2026-08-02T09:07:03.979Z"
+}

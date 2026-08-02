@@ -1,0 +1,72 @@
+{
+  "name": "http-api",
+  "description": "The Hono backend entrypoint, observability bootstrap, and HTTP routes that proxy local-control IPC and expose all subsystems.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/server",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/index",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/shared/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "bootObservability",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "server",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "route",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "hono",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"http-api\" domain: The Hono backend entrypoint, observability bootstrap, and HTTP routes that proxy local-control IPC and expose all subsystems.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "構成 / src/server.ts",
+    "技術スタック"
+  ],
+  "rationale": "The backend entrypoint and shared HTTP layer wire the subsystems into a loopback API surface.",
+  "updatedAt": "2026-08-02T09:07:03.972Z"
+}

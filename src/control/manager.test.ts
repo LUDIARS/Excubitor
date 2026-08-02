@@ -53,7 +53,9 @@ describe('control manager lifecycle guards', () => {
       stdout: '',
       stderr: '',
     });
-    mocks.spawnService.mockResolvedValue({ child: { pid: 4321 } });
+    // SpawnedProcess は job-breakaway では ChildProcess を持たないため、pid は
+    // 直接フィールドで公開される (child 経由で読んではならない)。
+    mocks.spawnService.mockResolvedValue({ child: null, pid: 4321 });
     mocks.killService.mockResolvedValue(true);
     mocks.controlDockerCompose.mockResolvedValue({
       ok: true,
@@ -92,13 +94,21 @@ describe('control manager lifecycle guards', () => {
     });
     mocks.spawnService.mockImplementation(async () => {
       events.push('spawn');
-      return { child: { pid: 4321 } };
+      return { child: null, pid: 4321 };
     });
 
     const result = await controlService(service(), 'restart', 'test');
 
     expect(result.ok).toBe(true);
+    expect(result.stdout).toContain('restarted pid=4321');
     expect(events).toEqual(['env', 'build', 'stop', 'spawn']);
+  });
+
+  it('reports the spawned pid without reaching through a ChildProcess', async () => {
+    const result = await controlService(service(), 'start', 'test');
+
+    expect(result).toMatchObject({ ok: true, exit_code: 0 });
+    expect(result.stdout).toContain('spawned pid=4321');
   });
 
   it('reports a verified stop failure', async () => {

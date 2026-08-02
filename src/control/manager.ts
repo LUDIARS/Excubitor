@@ -123,7 +123,7 @@ async function controlProcess(
       const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
-        stdout: `${buildPrefix}spawned pid=${p.child.pid ?? '?'}`,
+        stdout: `${buildPrefix}spawned pid=${p.pid ?? '?'}`,
         stderr: '',
         exit_code: 0,
         command: `spawn ${svc.runtime}:${svc.code}`,
@@ -191,7 +191,7 @@ async function controlProcess(
       const buildPrefix = build.skipped ? '' : 'build ok\n';
       return {
         ok: true,
-        stdout: `${buildPrefix}restarted pid=${p.child.pid ?? '?'}`,
+        stdout: `${buildPrefix}restarted pid=${p.pid ?? '?'}`,
         stderr: '',
         exit_code: 0,
         command: `restart ${svc.code}`,

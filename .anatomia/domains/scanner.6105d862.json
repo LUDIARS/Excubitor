@@ -1,0 +1,64 @@
+{
+  "name": "scanner",
+  "description": "Periodic scanning of docker, host processes, git, versions, and ports to derive liveness/death state for each service.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/scanner/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ss]canner",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "scanLoop",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "hostProcess",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "portsScan",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "liveness",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"scanner\" domain: Periodic scanning of docker, host processes, git, versions, and ports to derive liveness/death state for each service.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "構成 / src/scanner/",
+    "scanner/ports.ts"
+  ],
+  "rationale": "src/scanner (21 files) is the observability/health-derivation subsystem, independent of control and logging.",
+  "updatedAt": "2026-08-02T09:07:03.978Z"
+}

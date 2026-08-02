@@ -88,6 +88,25 @@ export function processLogFile(code: string, channel: Channel): string {
   return path.join(processLogDir(), `${code}.${suffix}.log`);
 }
 
+/**
+ * breakaway spawn 用: ログファイルのパスだけを用意する (fd は開かない)。
+ * 子が cmd.exe の append リダイレクトで直接ファイルへ書くため、supervisor は
+ * fd を所有しない (親の死とログ書き込みを完全に切り離す)。
+ *
+ * fd は持たないが、 ローテーションの契機は startProcessLog と同じ 「open
+ * (= サービス起動/再起動) 時のみ」 を維持する。 ここで回さないと win32 既定の
+ * breakaway 経路だけ上限 (EXCUBITOR_PROCESS_LOG_MAX_MB) が効かず無制限に増える。
+ */
+export function ensureProcessLogPaths(code: string): { stdoutPath: string; stderrPath: string } {
+  fs.mkdirSync(processLogDir(), { recursive: true });
+  const stdoutPath = processLogFile(code, 'stdout');
+  const stderrPath = processLogFile(code, 'stderr');
+  const limit = maxLogBytes();
+  rotateIfOversized(stdoutPath, limit);
+  rotateIfOversized(stderrPath, limit);
+  return { stdoutPath, stderrPath };
+}
+
 interface Handle {
   stop: () => void;
 }

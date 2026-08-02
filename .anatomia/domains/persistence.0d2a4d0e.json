@@ -1,0 +1,72 @@
+{
+  "name": "persistence",
+  "description": "SQLite (better-sqlite3 + drizzle-orm) schema, migrations, and DB client used as the observability store.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/db/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/migrations/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "drizzle",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "sqlite",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "migration",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "dbClient",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "schema",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"persistence\" domain: SQLite (better-sqlite3 + drizzle-orm) schema, migrations, and DB client used as the observability store.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "技術スタック (SQLite)",
+    "リポ構成 migrations/"
+  ],
+  "rationale": "src/db (5 files) + migrations are the shared data layer, a cross-cutting persistence domain.",
+  "updatedAt": "2026-08-02T09:07:03.976Z"
+}

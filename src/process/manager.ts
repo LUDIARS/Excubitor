@@ -20,24 +20,28 @@ import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
 import { execCapture } from '../shared/exec.js';
-import { startProcessLog, stopProcessLog } from '../log/process-file.js';
+import { ensureProcessLogPaths, startProcessLog, stopProcessLog } from '../log/process-file.js';
 import { runServiceBuild } from './build.js';
 import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { verifyProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
+import { quoteWindowsArgument, spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 
 const logger = createNamedLogger('excubitor.process');
 
 export interface SpawnedProcess {
   code: string;
-  child: ChildProcess;
+  /** job-breakaway 起動 (win32 既定) は ChildProcess を持たない (pid 管理)。 */
+  child: ChildProcess | null;
+  pid: number | null;
   startedAt: Date;
   restartCount: number;
 }
 
 interface ManagedProcess extends SpawnedProcess {
+  child: ChildProcess;
   intentionalStop: boolean;
   termination: Promise<void>;
   resolveTermination: () => void;
@@ -95,7 +99,7 @@ export async function validateManagedProcess(code: string): Promise<boolean> {
     if (spawned.child.exitCode === null && spawned.child.signalCode === null) return true;
     if (processes.get(code) !== spawned) return true;
     processes.delete(code);
-    await updateState(code, 'crashed', null, spawned.child.exitCode ?? undefined);
+    await updateInstanceStatus(code, 'crashed', null, spawned.child.exitCode ?? undefined);
     return false;
   }
 
@@ -108,7 +112,7 @@ export async function validateManagedProcess(code: string): Promise<boolean> {
   // replaced by reconciliation or a concurrent start while verification ran.
   if (adopted.get(code) !== candidate) return isManaged(code);
   adopted.delete(code);
-  await updateState(code, 'crashed', null);
+  await updateInstanceStatus(code, 'crashed', null);
   return false;
 }
 
@@ -159,6 +163,8 @@ export interface SpawnOptions {
   allowHotReload?: boolean;
   /** Internal generation used to cancel a start that became stale while awaiting I/O. */
   expectedGeneration?: number;
+  /** テスト用: job-breakaway spawn の PowerShell 実行差し替え。 */
+  breakaway?: BreakawaySpawnOptions;
 }
 
 export function markServiceRunning(code: string): number {
@@ -321,12 +327,11 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   if (generation === undefined || !isCurrentRunningGeneration(svc.code, generation)) {
     throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
   }
-  await updateState(svc.code, 'pending', null);
+  await updateInstanceStatus(svc.code, 'pending', null);
   if (!isCurrentRunningGeneration(svc.code, generation)) {
     throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
   }
 
-  const { stdoutFd, stderrFd } = startProcessLog(svc.code);
   // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
   const resolvedCwd =
     svc.cwd ??
@@ -335,6 +340,29 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
       : svc.start_script
         ? dirname(svc.start_script)
         : undefined);
+
+  // win32 の supervisor は Scheduled Task の Job Object 内で動き、`detached: true`
+  // では子が Job を継承して脱出できない (detached は CREATE_NEW_PROCESS_GROUP /
+  // DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_JOB ではない)。Task の
+  // tree-kill で全サービスが道連れになった実障害 (2026-08-02) の根治として、
+  // win32 既定は WMI 経由の job-breakaway spawn を使い、生成 pid を adopted と
+  // 同じ pid 管理 (reaper 再起動 / taskkill /T stop) に載せる (design.md §17)。
+  if (resolveSpawnStrategy() === 'job-breakaway') {
+    // breakaway は常に cmd.exe を経由するため、child 戦略で shell:false だった
+    // runtime=app (空白入りの exec パス / 引数) は明示的に引用してから 1 行にする。
+    // shell 経由の runtime (node / dev-process-md / start_script) は node の
+    // shell:true と同じく素の連結にして解釈規則を揃える。
+    const commandLine =
+      svc.runtime === 'app'
+        ? [cmd, ...args].map(quoteWindowsArgument).join(' ')
+        : [cmd, ...args].join(' ');
+    return spawnBreakawayService(svc, opts, generation, childEnv, resolvedCwd, commandLine);
+  }
+
+  const { stdoutFd, stderrFd } = startProcessLog(svc.code);
+  // child 戦略: POSIX はプロセスグループ生存のため detached を維持し、win32 で
+  // child 戦略を明示した場合は design.md §15.1 のとおり detached を外して
+  // CREATE_NO_WINDOW (windowsHide) を有効にする。
   const detached = shouldDetachSpawn(process.platform);
   let child: ChildProcess;
   let spawnedAt: Date;
@@ -363,20 +391,20 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     // process if the supervisor dies during the spawn event window.
     await Promise.all([
       waitForSpawn(child),
-      updateState(svc.code, 'pending', child.pid ?? null, undefined, spawnedAt),
+      updateInstanceStatus(svc.code, 'pending', child.pid ?? null, undefined, spawnedAt),
     ]);
   } catch (err) {
     let cleanupFailure: Error | null = null;
     try {
       await terminateUnregisteredChild(svc.code, child);
     } catch (cleanupError) {
-      retainRejectedSpawn(svc.code, child, spawnedAt, cleanupError);
+      retainRejectedSpawn(svc.code, child.pid, spawnedAt, cleanupError);
       cleanupFailure = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
       logger.error({ code: svc.code, err: (cleanupError as Error).message }, 'failed to terminate rejected spawn');
     }
     if (cleanupFailure && child.pid) {
       stopProcessLog(svc.code);
-      await updateState(svc.code, 'pending', child.pid, undefined, spawnedAt).catch((stateError: unknown) => {
+      await updateInstanceStatus(svc.code, 'pending', child.pid, undefined, spawnedAt).catch((stateError: unknown) => {
         logger.error({ code: svc.code, err: (stateError as Error).message }, 'failed to retain rejected spawn identity');
       });
       throw new AggregateError([err, cleanupFailure], `spawn failed and service ${svc.code} could not be terminated`);
@@ -392,7 +420,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     try {
       await terminateUnregisteredChild(svc.code, child);
     } catch (cleanupError) {
-      retainRejectedSpawn(svc.code, child, spawnedAt, cleanupError);
+      retainRejectedSpawn(svc.code, child.pid, spawnedAt, cleanupError);
       throw cleanupError;
     } finally {
       stopProcessLog(svc.code);
@@ -410,6 +438,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   const spawned: ManagedProcess = {
     code: svc.code,
     child,
+    pid: child.pid ?? null,
     startedAt: spawnedAt,
     restartCount,
     intentionalStop: false,
@@ -419,7 +448,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   processes.set(svc.code, spawned);
   logger.info({ code: svc.code, pid: child.pid, restartCount, detached }, 'spawned (windowless)');
 
-  const runningState = updateState(svc.code, 'running', child.pid ?? null, undefined, spawnedAt);
+  const runningState = updateInstanceStatus(svc.code, 'running', child.pid ?? null, undefined, spawnedAt);
 
   child.once('exit', (code, signal) => {
     if (processes.get(svc.code)?.child === child) processes.delete(svc.code);
@@ -474,24 +503,28 @@ export async function killService(code: string, signal: NodeJS.Signals = 'SIGTER
     if (!verified) {
       adopted.delete(code);
       const alive = isPidAlive(a.pid);
-      await updateState(code, alive ? 'crashed' : 'stopped', null);
+      await updateInstanceStatus(code, alive ? 'crashed' : 'stopped', null);
       if (!alive) return true;
       throw new Error(`refusing to stop stale or unverified adopted process ${code} pid=${a.pid}`);
     }
     await treeKill(a.pid);
     adopted.delete(code);
-    await updateState(code, 'stopped', null, 0);
+    await updateInstanceStatus(code, 'stopped', null, 0);
     return true;
   }
   if (pendingSpawn?.failure) throw pendingSpawn.failure;
   return canceledRestart;
 }
 
-function retainRejectedSpawn(code: string, child: ChildProcess, startedAt: Date, error: unknown): void {
+/**
+ * 終了させられなかった (= 生きている) spawn を捨てずに adopted へ載せ、失敗を
+ * pending settlement へ伝える。child / job-breakaway の両戦略で共用する。
+ */
+function retainRejectedSpawn(code: string, pid: number | undefined, startedAt: Date, error: unknown): void {
   const failure = error instanceof Error ? error : new Error(String(error));
   const settlement = spawnSettlements.get(code);
   if (settlement) settlement.failure = failure;
-  if (child.pid) adopted.set(code, { code, pid: child.pid, startedAt });
+  if (pid) adopted.set(code, { code, pid, startedAt });
 }
 
 async function terminateUnregisteredChild(code: string, child: ChildProcess): Promise<void> {
@@ -573,7 +606,7 @@ async function onExit(
   const max = opts.maxRestart ?? svc.max_restart;
   const cleanExit = code === 0 && !signal;
 
-  await updateState(svc.code, intentionalStop || cleanExit ? 'stopped' : 'crashed', null, code ?? undefined);
+  await updateInstanceStatus(svc.code, intentionalStop || cleanExit ? 'stopped' : 'crashed', null, code ?? undefined);
 
   if (intentionalStop) return;
 
@@ -635,6 +668,107 @@ async function autoRestartService(
     });
 }
 
+/** 実行時の spawn 戦略。EXCUBITOR_SPAWN_STRATEGY で明示上書き (不正値は fail-fast)。 */
+function resolveSpawnStrategy(): 'child' | 'job-breakaway' {
+  const override = process.env.EXCUBITOR_SPAWN_STRATEGY;
+  if (override === undefined || override === '') {
+    return process.platform === 'win32' ? 'job-breakaway' : 'child';
+  }
+  if (override === 'child' || override === 'job-breakaway') return override;
+  throw new Error(`EXCUBITOR_SPAWN_STRATEGY must be "child" or "job-breakaway": ${override}`);
+}
+
+// WMI 経由 spawn は powershell の起動を挟むため、作成時刻の照合は spawn 前後の
+// 時計ずれを許容する (通常の adopt 照合の 5s では負荷時に誤検知しうる)。
+const BREAKAWAY_START_TOLERANCE_MS = 30_000;
+
+/**
+ * Job Object の外で起動し、adopted (pid 管理) として登録する。クラッシュ再起動は
+ * AdoptedProcessReaper (validateManagedProcess 失敗 → catalog 準拠の再起動) が担う。
+ */
+async function spawnBreakawayService(
+  svc: Service,
+  opts: SpawnOptions,
+  generation: number,
+  childEnv: Record<string, string>,
+  resolvedCwd: string | undefined,
+  commandLine: string,
+): Promise<SpawnedProcess> {
+  // 前回 child 戦略の fd が残っていれば閉じる。breakaway 子は自前でログファイルへ
+  // append リダイレクトするため、supervisor は fd を所有しない。
+  stopProcessLog(svc.code);
+  const { stdoutPath, stderrPath } = ensureProcessLogPaths(svc.code);
+  const spawnedAt = new Date();
+  let pid: number;
+  try {
+    ({ pid } = await spawnOutsideJob(
+      {
+        commandLine,
+        ...(resolvedCwd === undefined ? {} : { cwd: resolvedCwd }),
+        env: childEnv,
+        stdoutPath,
+        stderrPath,
+      },
+      opts.breakaway ?? {},
+    ));
+  } catch (err) {
+    await recordSpawnFailure(svc.code, err);
+    throw err;
+  }
+  // 復旧 (reconcile/adopt) と同じ形で pid を先に永続化する。この直後に supervisor が
+  // 死んでも boot 時の突合が拾える。
+  await updateInstanceStatus(svc.code, 'pending', pid, undefined, spawnedAt);
+  // pid 再利用に耐える形 (作成時刻つき) で生存確認する。即死はここで fail-fast。
+  const identity = await verifyProcessIdentity(pid, spawnedAt, {
+    toleranceMs: BREAKAWAY_START_TOLERANCE_MS,
+  });
+  if (!identity) {
+    // verifyProcessIdentity は「即死した」と「照合できなかった」を区別しない。
+    // 後者なら pid は生きたまま残るため、§17.4 の孤児検出手順へ回せるよう pid を
+    // 明示して警告する (成功として扱わないのは共通)。
+    logger.warn(
+      { code: svc.code, pid },
+      'breakaway spawn could not be verified; pid may survive as an orphan (see design.md §17.4)',
+    );
+    const failure = new Error(
+      `service ${svc.code} could not be verified after breakaway spawn (pid=${pid});`
+        + ` it exited immediately or its identity was unreadable — check ${stderrPath}`,
+    );
+    await recordSpawnFailure(svc.code, failure);
+    throw failure;
+  }
+  // stop / shutdown とのレース: child 戦略の spawn 完了後 recheck と同じ扱い。
+  // treeKill 完了までは pid が真実なので、消えてから 'stopped' へ落とす
+  // (先に永続化した pending 行を残さない)。
+  if (!isCurrentRunningGeneration(svc.code, generation)) {
+    try {
+      await treeKill(pid);
+    } catch (cleanupError) {
+      // 落とせなかった pid は生きている。child 戦略と同じく adopted に載せて
+      // reaper / 次の stop が拾えるようにし、孤児にしない。
+      retainRejectedSpawn(svc.code, pid, identity.startedAt, cleanupError);
+      throw cleanupError;
+    }
+    await updateInstanceStatus(svc.code, 'stopped', null).catch((stateError: unknown) => {
+      logger.error(
+        { code: svc.code, err: (stateError as Error).message },
+        'failed to record canceled breakaway spawn state',
+      );
+    });
+    throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
+  }
+  adopted.set(svc.code, { code: svc.code, pid, startedAt: identity.startedAt });
+  await updateInstanceStatus(svc.code, 'running', pid, undefined, identity.startedAt);
+  logger.info({ code: svc.code, pid, strategy: 'job-breakaway' }, 'spawned outside the supervisor job (windowless)');
+  return {
+    code: svc.code,
+    child: null,
+    pid,
+    startedAt: identity.startedAt,
+    restartCount: opts.initialRestartCount ?? 0,
+  };
+}
+
 function waitForSpawn(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
     const onSpawn = (): void => {
@@ -660,7 +794,7 @@ async function recordSpawnFailure(code: string, err: unknown): Promise<void> {
   const message = err instanceof Error ? err.message : String(err);
   logger.error({ code, err: message }, 'spawn failed');
   try {
-    await updateState(code, 'crashed', null);
+    await updateInstanceStatus(code, 'crashed', null);
   } catch (stateErr) {
     logger.error({ code, err: (stateErr as Error).message }, 'failed to record spawn failure state');
   }
@@ -759,7 +893,7 @@ function splitCommand(input: string): string[] {
   return input.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((s) => s.replace(/^"|"$/g, '')) ?? [input];
 }
 
-async function updateState(
+async function updateInstanceStatus(
   code: string,
   state: 'running' | 'stopped' | 'crashed' | 'pending',
   pid: number | null,

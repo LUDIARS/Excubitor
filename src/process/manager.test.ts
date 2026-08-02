@@ -24,6 +24,10 @@ vi.mock('../shared/exec.js', () => ({
 vi.mock('../log/process-file.js', () => ({
   startProcessLog: mocks.startProcessLog,
   stopProcessLog: mocks.stopProcessLog,
+  ensureProcessLogPaths: vi.fn(() => ({
+    stdoutPath: 'data/process-logs/test.out.log',
+    stderrPath: 'data/process-logs/test.err.log',
+  })),
 }));
 vi.mock('./build.js', () => ({ runServiceBuild: mocks.runServiceBuild }));
 vi.mock('./startup-env.js', () => ({ assertStartupEnv: vi.fn() }));
@@ -58,6 +62,9 @@ describe('shouldDetachSpawn (design.md §15.1)', () => {
 
 describe('process manager lifecycle hardening', () => {
   beforeEach(() => {
+    // 既存のライフサイクル検証は ChildProcess ベースの挙動を対象にする。win32 の
+    // 既定 (job-breakaway) は専用の describe で検証する。
+    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'child');
     vi.clearAllMocks();
     mocks.dbRun.mockReset();
     mocks.verifyProcessIdentity.mockResolvedValue(true);
@@ -66,6 +73,7 @@ describe('process manager lifecycle hardening', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
@@ -287,3 +295,82 @@ function service(code: string): Service {
     required_env: [],
   } as Service;
 }
+
+describe('job-breakaway spawn (win32 default)', () => {
+  beforeEach(() => {
+    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'job-breakaway');
+    vi.clearAllMocks();
+    mocks.dbRun.mockReset();
+    mocks.prepareSpawnEnv.mockImplementation(async (_svc: unknown, env: Record<string, string>) => env);
+    resumeProcessRestarts();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('spawns through the breakaway runner and registers the pid as adopted', async () => {
+    const startedAt = new Date();
+    mocks.verifyProcessIdentity.mockResolvedValue({ pid: 4321, startedAt, verified: true });
+    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4321}');
+
+    const spawned = await spawnService(service('breakaway-ok'), {
+      breakaway: { runPowerShell },
+    });
+
+    expect(spawned).toMatchObject({ code: 'breakaway-ok', child: null, pid: 4321 });
+    // ChildProcess を作らない (node:child_process の spawn は powershell 差し替えで未使用)。
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(runPowerShell).toHaveBeenCalledTimes(1);
+    // adopted (pid 管理) として登録され、stop / reaper の対象になる。
+    expect(isManaged('breakaway-ok')).toBe(true);
+    expect(getManagedPid('breakaway-ok')).toBe(4321);
+    // 環境変数 (credential を含む) がコマンドラインに載らない: script は stdin 渡し。
+    const script = (runPowerShell.mock.calls[0] as unknown[])[0] as string;
+    expect(script).toContain('FromBase64String');
+  });
+
+  it('quotes a runtime=app exec path so cmd.exe does not split it', async () => {
+    const startedAt = new Date();
+    mocks.verifyProcessIdentity.mockResolvedValue({ pid: 4323, startedAt, verified: true });
+    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4323}');
+    const app = {
+      ...service('breakaway-app'),
+      runtime: 'app',
+      cwd: undefined,
+      command: undefined,
+      exec: 'E:\\Program Files\\hora\\hora.exe',
+      exec_args: ['--profile', 'default one'],
+    } as unknown as Service;
+
+    await spawnService(app, { breakaway: { runPowerShell } });
+
+    // child 戦略は shell:false で exec を直接起動する。breakaway は必ず cmd.exe を
+    // 通るため、同じ引数分割になるよう引用されていなければならない。
+    const script = (runPowerShell.mock.calls[0] as unknown[])[0] as string;
+    const encoded = /FromBase64String\('([^']+)'\)/.exec(script)![1]!;
+    const payload = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as {
+      commandLine: string;
+    };
+    expect(payload.commandLine).toContain(
+      '"E:\\Program Files\\hora\\hora.exe" --profile "default one"',
+    );
+  });
+
+  it('fails fast when the created process cannot be verified', async () => {
+    mocks.verifyProcessIdentity.mockResolvedValue(null);
+    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4322}');
+
+    await expect(
+      spawnService(service('breakaway-dead'), { breakaway: { runPowerShell } }),
+    ).rejects.toThrow(/could not be verified after breakaway spawn \(pid=4322\)/);
+    expect(isManaged('breakaway-dead')).toBe(false);
+  });
+
+  it('rejects an unknown EXCUBITOR_SPAWN_STRATEGY instead of guessing', async () => {
+    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'both');
+    await expect(spawnService(service('breakaway-bad-env'))).rejects.toThrow(
+      /EXCUBITOR_SPAWN_STRATEGY/,
+    );
+  });
+});

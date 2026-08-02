@@ -421,6 +421,9 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
 ユーザ指示:「サービス起動時はウィンドウを作らず起動・再起動も Excubitor から」「Concordia/Memoria 等の start-xxxx.bat 系に対応」「Corpus を使う/使わないケースを設定できるように」「ログを集積しサービス毎に取得、 オンメモリで持たず全サービスをストリームで確認、 API + MCP 対応」「ポート衝突を回避・検知」「カードを大きく詳細 + 最近の更新内容」。
 
 ### 15.1 ウィンドウ無し起動 (req1)
+> 2026-08-02 更新: Windows の既定 spawn 戦略は §17 (job-breakaway) へ移行した。本節は
+> `EXCUBITOR_SPAWN_STRATEGY=child` を選んだ場合の規定として有効。窓抑止の要件自体は不変。
+
 - `process/manager.ts` の spawn を **Windows では `windowsHide: true` のみ (detached を外す)** で起動する。
   - **背景の罠**: `windowsHide` が立てる `CREATE_NO_WINDOW` は、 `detached` が立てる `DETACHED_PROCESS` と併用すると CreateProcess 仕様で**無視される** ([process-creation-flags](https://learn.microsoft.com/windows/win32/procthread/process-creation-flags))。 当初 `detached:true + windowsHide:true` を併用したため窓抑止が効かず、 コンソール非保持の `cmd.exe` が自前で新規コンソール窓を出していた (#req1 の再発)。
   - **対処**: Windows は親プロセス終了で子を連鎖終了しないため、 再起動耐性に `detached` は不要 (boot 時の pid 再採用 reconcile/adoptProcess は不変)。 `CREATE_NO_WINDOW` の子は親と別コンソールを持つので Excubitor 側 Ctrl-C の巻き添えも無い。 停止は `taskkill /T /F`、 ログは fd 直結で detached と無関係。
@@ -510,3 +513,59 @@ spawn と readiness 判定を完了できる。PID 単独ではなく process id
 誤停止しない。
 
 運用手順、Windows 障害条件、受入試験は [`local-control.md`](local-control.md) を正本とする。
+
+---
+
+## 17. v0.8 — win32 job-breakaway spawn (2026-08-02)
+
+### 17.1 背景 (§15.1 の前提が崩れた)
+
+§15.1 は「Windows は親終了で子を連鎖終了しないので detached 不要」を前提にしていたが、
+supervisor を Scheduled Task が起動する構成では **Task Scheduler が起動プロセスを Job Object に
+入れる**。子プロセスは `detached: true` でも Job を継承する (`detached` は
+CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_JOB ではない)。
+結果、Task 停止時の Job tree-kill で supervisor / backend / 全 managed service が道連れになる
+(2026-08-02 実測: いずれも `IsProcessInJob=true`)。
+
+### 17.2 決定
+
+- **win32 の managed service spawn 既定を `job-breakaway` にする** (`src/process/breakaway-spawn.ts`)。
+  WMI `Win32_Process.Create` は WmiPrvSE 側でプロセスを生成するため、呼び出し元の Job に入らない。
+- 非 win32 の既定は従来どおり `child` (detached + プロセスグループ)。
+  `EXCUBITOR_SPAWN_STRATEGY=child|job-breakaway` で明示上書きでき、**不正値は fail-fast**
+  (無言の戦略フォールバックを禁止する §16.2 の原則を spawn 層にも適用)。
+- §15.1 の「Windows は detached を外す」は `child` 戦略を選んだ場合の規定として残る
+  (`shouldDetachSpawn` は不変)。
+
+### 17.3 契約
+
+- 生成後は pid だけを受け取り、boot 時 reconcile と同じ **adopted (pid 管理)** に載せる。
+  停止は `taskkill /T /F`、クラッシュ復帰は AdoptedProcessReaper (catalog の
+  `restart_policy` / `max_restart` 準拠) が担う。`child` 戦略の exit listener +
+  指数バックオフは breakaway 経路には無い。
+- 子の env には起動 credential が含まれるため、**コマンドラインに載せない**。spec 全体を
+  base64 JSON にして PowerShell の stdin へ流し、`Win32_ProcessStartup.EnvironmentVariables`
+  で渡す。ShowWindow=0 (SW_HIDE) で §15.1 の窓抑止要件を維持する。
+- ログは supervisor が fd を所有せず、子が `cmd.exe` の append リダイレクトで
+  `data/process-logs/<code>.{out,err}.log` へ直接書く。tail / error-detector は従来どおり
+  backend 側がファイルを読む。fd を持たないだけで **サイズ上限ローテーションの契機は
+  `child` 戦略と同じ「起動/再起動時のみ」** で、`ensureProcessLogPaths` が
+  `EXCUBITOR_PROCESS_LOG_MAX_MB` 超過分を `<file>.1` へ退避してから パスを返す。
+- 起動直後に作成時刻付きで identity を照合し、即死は fail-fast する (無言の成功報告を作らない)。
+
+### 17.4 既知の制約
+
+- `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、pid を
+  受け取れず孤児プロセスが残りうる。運用上は次回 start 前に `/api/v1/ports` の LISTEN 占有と
+  host プロセススキャンで検出する。
+- **未実機検証**: `Win32_ProcessStartup.EnvironmentVariables` による env 引き渡しと、
+  WmiPrvSE 生成プロセスのセッション/トークンは登録テスト (PowerShell を差し替えたユニット)
+  では確認できない。win32 実機で「子が catalog の `env:` と起動 credential を受け取ること」
+  「Job 外に出ていること (`IsProcessInJob=false`)」を初回導入時に実測する。
+- 再起動抑制の粒度が `child` 戦略より粗い。AdoptedProcessReaper の retry カウンタは
+  start 成功で 0 に戻るため、reap 間隔 (既定 5s) より長く生きてから落ちるサービスは
+  `max_restart` に到達せず再起動し続ける。`child` 戦略の指数バックオフ + 累積
+  restartCount と等価ではない。
+- 全 managed service が adopted 管理になるため、AdoptedProcessReaper の生存確認
+  (`verifyProcessIdentity`) が **サービス数 × 5 秒間隔で `powershell.exe` を起動する**。
+  サービス数が増えたら照合の一括化 (1 回の PowerShell で全 pid を返す) を検討する。

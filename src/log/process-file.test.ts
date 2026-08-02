@@ -3,7 +3,13 @@ import fs, { writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { _activeProcessLogs, processLogFile, startProcessLog, stopProcessLog } from './process-file.js';
+import {
+  _activeProcessLogs,
+  ensureProcessLogPaths,
+  processLogFile,
+  startProcessLog,
+  stopProcessLog,
+} from './process-file.js';
 
 const temporaryDirectories: string[] = [];
 const originalLogDir = process.env.EXCUBITOR_PROCESS_LOG_DIR;
@@ -95,6 +101,22 @@ describe('detached process log files', () => {
 
     expect(await readFile(processLogFile('small-service', 'stdout'), 'utf8')).toBe('small');
     expect(fs.existsSync(`${processLogFile('small-service', 'stdout')}.1`)).toBe(false);
+  });
+
+  it('breakaway 用のパス準備でも open 時ローテーションを行う', async () => {
+    // win32 既定 (job-breakaway) は fd を開かず子が直接 append する。 ここで回さないと
+    // この経路だけ EXCUBITOR_PROCESS_LOG_MAX_MB が効かなくなる。
+    const directory = await mkdtemp(join(tmpdir(), 'excubitor-process-file-breakaway-'));
+    temporaryDirectories.push(directory);
+    process.env.EXCUBITOR_PROCESS_LOG_DIR = directory;
+    process.env.EXCUBITOR_PROCESS_LOG_MAX_MB = '0.001'; // 1KB
+    fs.writeFileSync(processLogFile('breakaway-service', 'stdout'), 'x'.repeat(4096));
+
+    const paths = ensureProcessLogPaths('breakaway-service');
+
+    expect(paths.stdoutPath).toBe(processLogFile('breakaway-service', 'stdout'));
+    expect(fs.existsSync(paths.stdoutPath)).toBe(false); // fd は開かない (子が作る)
+    expect((await readFile(`${paths.stdoutPath}.1`)).byteLength).toBe(4096);
   });
 
   it('closes stdout when opening stderr fails', async () => {
