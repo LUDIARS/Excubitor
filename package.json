@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "release": "tsx src/release/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "test": "vitest run --pool=threads"
+    "test": "vitest run --pool=threads",
+    "smoke:runtime": "node scripts/runtime-smoke.mjs"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.4-r.1",

@@ -47,7 +47,7 @@ import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
-import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode } from './safe-mode.js';
+import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode, detectLogSafeMode, setLogSafeMode, isLogSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
 import { setCatalogServices } from './process/service-registry.js';
@@ -72,7 +72,7 @@ import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { startRetentionLoop } from './db/retention.js';
-import { startProcessLogTail } from './log/process-log-tail.js';
+import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson, shouldReconcileMcpJson, DEFAULT_BACKEND_PORT } from './mcp/mcp-json.js';
 import { buildMcpHttpRouter } from './mcp/http.js';
@@ -369,6 +369,10 @@ export function recordStartupNpmIssues(issues: StartupNpmIssue[]): void {
   }
 }
 
+/** LogSafeMode 用の no-op handle 本体 (shutdown / reload 経路を通常起動と同形に保つ)。 */
+const logSafeModeNoop = (): void => { /* log safe mode: nothing started */ };
+const logSafeModeAsyncNoop = async (): Promise<void> => { /* log safe mode: nothing started */ };
+
 export async function bootObservability(options: BootObservabilityOptions = {}): Promise<ObservabilityHandle> {
   // 設定ファイルに Infisical identity があれば process.env に注入 (relay の前提)。
   // 無ければ未設定のまま → UI が入力を促す。
@@ -430,10 +434,23 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   await syncHealthyServiceStates(currentCatalog);
 
   await seedDefaultRules();
-  const fileTailHandle: FileTailHandle = startFileTail(currentCatalog);
-  const processLogTailHandle = await startProcessLogTail(currentCatalog);
+  // LogSafeMode: ログ購読/集積系を丸ごと起動しない (詳細は safe-mode.ts)。
+  // handle は no-op スタブにして shutdown / reloadCatalog の経路は変えない。
+  const logSafeMode = detectLogSafeMode();
+  setLogSafeMode(logSafeMode);
+  if (logSafeMode) {
+    logger.warn('LOG SAFE MODE: file-tail / process-log-tail / error-detector / parquet compaction disabled');
+  }
+  const fileTailHandle: FileTailHandle = logSafeMode
+    ? { stop: logSafeModeNoop, refresh: logSafeModeNoop }
+    : startFileTail(currentCatalog);
+  const processLogTailHandle: ProcessLogTailHandle = logSafeMode
+    ? { refresh: logSafeModeAsyncNoop, stop: logSafeModeAsyncNoop }
+    : await startProcessLogTail(currentCatalog);
   setCatalogProvider(() => currentCatalog!);
-  const errorDetectorHandle = await startErrorDetector();
+  const errorDetectorHandle = logSafeMode
+    ? { stop: logSafeModeNoop }
+    : await startErrorDetector();
   const dispatchHandle = startConcordiaDispatchLoop(() => currentCatalog!);
   const scannerHandle = startScannerLoop(currentCatalog);
   // WMI/ps の全プロセス走査はこの loop だけが担当し、memory/Concordia はキャッシュを参照する。
@@ -443,7 +460,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
   // 構造化された死活履歴の retention 剪定。
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
-  const parquetHandle = startParquetCompactionLoop(() => currentCatalog!);
+  const parquetHandle = logSafeMode
+    ? { stop: logSafeModeNoop }
+    : startParquetCompactionLoop(() => currentCatalog!);
   const databasePath = currentDb().name;
   const downtimeWorker = options.readDowntimeSummaries || databasePath === ':memory:'
     ? null
@@ -521,6 +540,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       pid: process.pid,
       instance_token: process.env.EXCUBITOR_INSTANCE_TOKEN ?? null,
       safe_mode: isSafeMode(),
+      log_safe_mode: isLogSafeMode(),
       started_at: observabilityStartedAt,
     }),
   );
@@ -639,6 +659,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     return c.json({
       service: 'excubitor',
       safe_mode: isSafeMode(),
+      log_safe_mode: isLogSafeMode(),
       service_mode: serviceMode,
       build_version: await cachedBuildVersion(),
     });

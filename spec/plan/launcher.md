@@ -173,6 +173,29 @@ process 系 (node / dev-process-md / **app**) と docker 系の両方が対象
 - 用途: サービスが落ちて連鎖する状況の切り分け、 Excubitor 自体の更新・検証、
   クリーンな状態からの手動起動。
 
+### 9.3 LogSafeMode — ログ購読/集積だけ止めて起動する
+
+> 要件: ログ I/O が原因で backend が無応答化する事故 (2026-08-02 の Defender
+> エンジンハングで `data/process-logs` の open が永久ブロック) を、 監視 / 制御 /
+> WebUI を生かしたまま切り分けられるモード。 SafeMode とは独立に効く。
+
+- 有効化: `EXCUBITOR_LOG_SAFE_MODE=1` または起動引数 `--no-logs`。
+  SafeMode と違い `EXCUBITOR_SERVICE_MODE=1` でも無効化されない
+  (常用 supervisor 経由の運用のまま切り分けられる)。
+- 挙動 (`detectLogSafeMode()` @ `src/safe-mode.ts` + `bootObservability()` @
+  `src/index.ts`): file-tail (Vestigium JSONL) / process-log-tail
+  (`data/process-logs`) / error-detector / parquet 圧縮 を**起動しない**。
+  各 handle は no-op スタブに差し替えるため、 `reloadCatalog` と shutdown の経路は
+  通常起動と同一のまま。 加えて `src/shared/logger.ts` が自身の pino を warn へ
+  落とす (`EXCUBITOR_LOG_LEVEL` 明示時はそちらを優先)。
+- 動き続けるもの: scanner / memory / retention / dispatch loop、 制御 API、 WebUI、
+  および DB を参照するログ読み出し (`/logs/recent` 等。 新規行の取り込みだけが止まる)。
+- 公開: `GET /health` と `GET /api/v1/system` → `{ log_safe_mode }`。
+- 検証: `src/safe-mode.test.ts` (判定の純関数) +
+  `src/api-routes.test.ts` の `LogSafeMode boot` (起動配線 / health / reload)。
+  実プロセス起動は `scripts/runtime-smoke.mjs` (`npm run smoke:runtime`) が
+  通常起動 / LogSafeMode の 2 パスを隔離ポートで叩いて `/health` を確認する。
+
 ## 今後 (このフェーズ外)
 
 - catalog への候補のワンクリック登録 (services.yaml 追記 or DB overlay)。

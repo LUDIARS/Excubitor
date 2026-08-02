@@ -103,6 +103,9 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。
 - 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
+- **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /
+  error-detector / parquet 圧縮を止め、自身の pino も warn へ落として起動する。 ログ I/O 起因の
+  障害切り分け用 (監視/制御/WebUI/ログ読み出しは動く)。 状態は `/health` の `log_safe_mode`。
 - `uses_corpus` (catalog) は UI から `service_prefs` (DB) で上書きできる。 起動セットに含めると Corpus を自動補完。
 - **他拠点連携 (federation)**: ピアの認証は各ノードの agent token (secret-agent と共用、
   `EXCUBITOR_AGENT_TOKEN` or token ファイル) を Bearer で交換する。 ローカル DB (remote_peers) に

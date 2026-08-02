@@ -140,6 +140,9 @@ const mocks = vi.hoisted(() => ({
   detectServiceMode: vi.fn(() => false),
   setSafeMode: vi.fn(),
   isSafeMode: vi.fn(() => false),
+  detectLogSafeMode: vi.fn(() => false),
+  setLogSafeMode: vi.fn(),
+  isLogSafeMode: vi.fn(() => false),
   getOrCreateAgentToken: vi.fn(() => 'good'),
   agentTokenPath: vi.fn(() => 'E:\\tmp\\excubitor-agent-token'),
   verifyAgentToken: vi.fn((header?: string | null) => header === 'Bearer good' || header === 'good'),
@@ -329,6 +332,9 @@ vi.mock('./safe-mode.js', () => ({
   detectServiceMode: mocks.detectServiceMode,
   setSafeMode: mocks.setSafeMode,
   isSafeMode: mocks.isSafeMode,
+  detectLogSafeMode: mocks.detectLogSafeMode,
+  setLogSafeMode: mocks.setLogSafeMode,
+  isLogSafeMode: mocks.isLogSafeMode,
 }));
 
 vi.mock('./mcp/mcp-json.js', () => ({
@@ -1133,5 +1139,49 @@ describe('Excubitor HTTP APIs', () => {
     const deleted = await requestJson(router, 'DELETE', `/api/v1/peers/${peerId}`);
     expect(deleted.res.status).toBe(200);
     expect(deleted.data).toMatchObject({ ok: true });
+  });
+});
+
+describe('LogSafeMode boot', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.catalog = makeCatalog();
+    mocks.serviceMap = {};
+    resetFiles();
+    resetDbClientForTests();
+    closeDb();
+    resetDbClientForTests();
+    openDb(':memory:');
+    seedDb();
+    mocks.detectLogSafeMode.mockReturnValue(true);
+    mocks.isLogSafeMode.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    mocks.detectLogSafeMode.mockReturnValue(false);
+    mocks.isLogSafeMode.mockReturnValue(false);
+    closeDb();
+    resetDbClientForTests();
+  });
+
+  it('ログ購読/集積系を起動せず /health に log_safe_mode を出す', async () => {
+    const router = await bootRouter();
+    expect(mocks.setLogSafeMode).toHaveBeenCalledWith(true);
+    expect(mocks.startFileTail).not.toHaveBeenCalled();
+    expect(mocks.startProcessLogTail).not.toHaveBeenCalled();
+    expect(mocks.startErrorDetector).not.toHaveBeenCalled();
+    // 監視系は LogSafeMode でも通常どおり動く。
+    expect(mocks.startScannerLoop).toHaveBeenCalled();
+    const { res, data } = await requestJson<{ log_safe_mode: boolean }>(router, 'GET', '/health');
+    expect(res.status).toBe(200);
+    expect(data.log_safe_mode).toBe(true);
+  });
+
+  it('no-op handle でも catalog reload が完走する', async () => {
+    await bootRouter();
+    const calls = mocks.watchCatalog.mock.calls as unknown as Array<[string, () => Promise<void>]>;
+    const onChange = calls.at(-1)?.[1];
+    expect(onChange).toBeTypeOf('function');
+    await expect(onChange!()).resolves.toBeUndefined();
   });
 });
