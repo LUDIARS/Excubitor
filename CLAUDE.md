@@ -101,6 +101,8 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   捏造不可 — 現状 Cernere のみ実 ID。 他 SaaS は Infisical 側の project_id 入手後に充填する。
 - 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。
+  上限 (`EXCUBITOR_PROCESS_LOG_MAX_MB`、既定 32MB) 超過分は open (=サービス起動/再起動) 時に
+  `<file>.1` へローテーション (稼働中の rename は不可のため open 時のみ)。
 - 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
 - **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /

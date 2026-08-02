@@ -79,6 +79,21 @@ Vestigium 形式 60 万行 / 155MB / 3 日分 / 6 サービス。 Windows 11 / N
    process-logs 生ファイル: サイズ上限ローテーション (新, 既定 32MB × 2 世代)
 ```
 
+### process-logs サイズ上限ローテーション (Phase 3 の前半、 実装済み)
+
+実装は `startProcessLog()` / `rotateIfOversized()` / `maxLogBytes()` @ `src/log/process-file.ts`。
+
+- 上限は `EXCUBITOR_PROCESS_LOG_MAX_MB` (既定 32MB)。 不正値・0 以下は既定へフォールバック。
+- 判定と退避は **open 時のみ** (= サービス起動/再起動)。 稼働中の子は fd を直接持つため、
+  走行中の rename/truncate は Windows で安全に行えない (rename 後も子は旧 inode へ書き続け、
+  truncate は sparse file を作る)。 長期稼働サービスは再起動のたびに上限へ丸められる。
+- 世代は現行 + `<file>.1` の 2 世代。 旧 `.1` は破棄する。
+- 退避に失敗しても spawn は止めない (append 継続が最優先)。 warn ログのみ。
+- `.1` は ProcessLogTail の対象外のため、 退避時に tail 未読の行は取りこぼす。
+  上限が tail の追従速度より十分大きい前提で許容する。
+- catalog の `code` は未検証文字列 (リポ断片 YAML 由来) なので、 rm/rename する破壊的
+  経路であるローテーションはログ dir 直下のパスに限定する。
+
 ### 廃止するもの
 
 - `service_instance_logs` への書き込み (log bus の `persistLine`)
