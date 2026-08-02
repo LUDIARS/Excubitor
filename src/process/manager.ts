@@ -244,6 +244,20 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   }
 }
 
+/**
+ * spawn 時に `detached` を立てるか (design.md §15.1)。
+ *
+ * POSIX: managed services are deliberately detached (own process group) so they
+ * survive an OS-manager restart of the local-control supervisor.
+ * Windows: detached を外す。 DETACHED_PROCESS と併用すると windowsHide の
+ * CREATE_NO_WINDOW が CreateProcess 仕様で無視され、 shell 経由の cmd.exe が自前の
+ * コンソール窓を開く。 Windows は親終了で子を連鎖終了しないため再起動耐性に detached は
+ * 不要 (boot 時の reconcile/adoptProcess は不変)。 停止は従来どおり taskkill /T /F。
+ */
+export function shouldDetachSpawn(platform: NodeJS.Platform): boolean {
+  return platform !== 'win32';
+}
+
 async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<SpawnedProcess> {
   if (processes.has(svc.code)) {
     throw new Error(`service ${svc.code} is already spawned`);
@@ -321,11 +335,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
       : svc.start_script
         ? dirname(svc.start_script)
         : undefined);
-  // Managed services are deliberately detached from the supervisor's process
-  // group/job. This is the failure-domain boundary that lets them survive an
-  // OS-manager restart of the local-control supervisor. windowsHide keeps the
-  // Scheduled Task path non-interactive; explicit stop still uses taskkill /T.
-  const detached = true;
+  const detached = shouldDetachSpawn(process.platform);
   let child: ChildProcess;
   let spawnedAt: Date;
   try {

@@ -88,6 +88,8 @@ application, release build orchestration, and service discovery.
 Automated tests, test fixtures, and local specs used to verify Excubitor behavior.
 
 - **unit-and-api-tests**: Vitest files under `src`.
+- **runtime-smoke-checks**: `scripts/runtime-smoke.mjs`, the out-of-process boot
+  smoke described in `spec/setup/runtime-smoke.md`.
 - **spec-and-review-artifacts**: `spec/*` and `review/*` context artifacts.
 
 ## measurement

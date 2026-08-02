@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { load } from 'js-yaml';
 import { describe, it, expect } from 'vitest';
 import { loadCatalog, serviceTier, type Service } from './loader.js';
 import { buildPlanProjects } from '../launch/grouping.js';
@@ -69,8 +71,18 @@ describe('matchProcesses', () => {
 describe('catalog (services.yaml)', () => {
   const catalog = loadCatalog();
 
-  it('フロントエンドは catalog から除外されている', () => {
-    const frontends = catalog.services.filter((s) => s.component === 'frontend');
+  // 手書き正本 (tracked) だけを読む。 loadCatalog() は ${ARS_ROOT} 断片と
+  // gitignore 済み services.auto.yaml もマージするため、 マージ後の集合を厳密一致で
+  // 検証するとマシン依存でしか通らないテストになる (実測: ludellus-web は
+  // ローカル断片からのみ供給され、 services.yaml には存在しない)。
+  const trackedServices = ((load(
+    readFileSync(new URL('../../catalog/services.yaml', import.meta.url), 'utf8'),
+  ) ?? {}) as {
+    services?: { code?: string; component?: string }[];
+  }).services ?? [];
+
+  it('フロントエンドは正本 catalog から除外されている', () => {
+    const frontends = trackedServices.filter((s) => s.component === 'frontend');
     expect(frontends.map((s) => s.code).sort()).toEqual([
       'cernere-frontend',
       'concordia-web',

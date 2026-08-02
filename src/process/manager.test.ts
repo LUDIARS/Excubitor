@@ -40,9 +40,21 @@ import {
   isManaged,
   killService,
   resumeProcessRestarts,
+  shouldDetachSpawn,
   spawnService,
   validateManagedProcess,
 } from './manager.js';
+
+describe('shouldDetachSpawn (design.md §15.1)', () => {
+  it('Windows は detached を外す (DETACHED_PROCESS が CREATE_NO_WINDOW を無効化するため)', () => {
+    expect(shouldDetachSpawn('win32')).toBe(false);
+  });
+
+  it('POSIX は プロセスグループ生存のため detached を維持', () => {
+    expect(shouldDetachSpawn('linux')).toBe(true);
+    expect(shouldDetachSpawn('darwin')).toBe(true);
+  });
+});
 
 describe('process manager lifecycle hardening', () => {
   beforeEach(() => {
@@ -196,7 +208,8 @@ describe('process manager lifecycle hardening', () => {
     expect(mocks.spawn).toHaveBeenCalledWith(
       'node',
       ['demo.js'],
-      expect.objectContaining({ detached: true, windowsHide: true }),
+      // 期待値は design.md §15.1 の契約を直接書く (実装関数を再利用すると恒真になる)。
+      expect.objectContaining({ detached: process.platform !== 'win32', windowsHide: true }),
     );
   });
 

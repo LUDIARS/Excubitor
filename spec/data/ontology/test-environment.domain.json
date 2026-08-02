@@ -6,6 +6,7 @@
   "membership": [
     { "pathPattern": "(^|/)src/.+\\.test\\.ts$" },
     { "pathPattern": "(^|/)src/[^/]+\\.test\\.ts$" },
+    { "pathPattern": "(^|/)scripts/runtime-smoke\\.mjs$" },
     { "pathPattern": "(^|/)spec/[^/]+/[^/]+$" },
     { "pathPattern": "(^|/)review/[^/]+$" },
     { "pathPattern": "(^|/)review/[^/]+/[^/]+$" }
