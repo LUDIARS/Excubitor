@@ -557,12 +557,19 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
   `child` 戦略と同じ「起動/再起動時のみ」** で、`ensureProcessLogPaths` が
   `EXCUBITOR_PROCESS_LOG_MAX_MB` 超過分を `<file>.1` へ退避してから パスを返す。
 - 起動直後に作成時刻付きで identity を照合し、即死は fail-fast する (無言の成功報告を作らない)。
+  `Win32_Process.Create` が返す pid は `Get-Process` が `StartTime` を読めるより先行しうるため、
+  照合は `waitForProcessIdentity` が **既定 3s / 100ms 間隔で再試行**する。再試行しても
+  **成功条件は作成時刻一致のみ** (照合不能を成功へ緩めない) で、期限を過ぎたら fail-closed。
+  再試行中は pid を `pending` として永続化済みなので、supervisor が落ちても boot 時の突合が拾う。
 
 ### 17.4 既知の制約
 
 - `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、pid を
   受け取れず孤児プロセスが残りうる。運用上は次回 start 前に `/api/v1/ports` の LISTEN 占有と
   host プロセススキャンで検出する。
+- 起動直後の identity 照合を最大 3s 再試行するため、**即死 → その間に pid が再利用された**場合は
+  無関係なプロセスが tolerance (30s) 内の作成時刻を持ちうる。単発照合より窓が広い。win32 の pid
+  再利用は即時ではないため実害は低いが、adopt 後の停止は `taskkill /T /F` である点に留意する。
 - **未実機検証**: `Win32_ProcessStartup.EnvironmentVariables` による env 引き渡しと、
   WmiPrvSE 生成プロセスのセッション/トークンは登録テスト (PowerShell を差し替えたユニット)
   では確認できない。win32 実機で「子が catalog の `env:` と起動 credential を受け取ること」

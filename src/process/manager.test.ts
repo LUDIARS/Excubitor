@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   stopProcessLog: vi.fn(),
   runServiceBuild: vi.fn(),
   verifyProcessIdentity: vi.fn(),
+  waitForProcessIdentity: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
 }));
 
@@ -36,7 +37,10 @@ vi.mock('./hot-reload.js', () => ({ assertHotReloadAllowed: vi.fn(async () => un
 vi.mock('./cernere-launch-credential.js', () => ({
   prepareSpawnEnv: mocks.prepareSpawnEnv,
 }));
-vi.mock('./identity.js', () => ({ verifyProcessIdentity: mocks.verifyProcessIdentity }));
+vi.mock('./identity.js', () => ({
+  verifyProcessIdentity: mocks.verifyProcessIdentity,
+  waitForProcessIdentity: mocks.waitForProcessIdentity,
+}));
 
 import {
   adoptProcess,
@@ -355,7 +359,7 @@ describe('job-breakaway spawn (win32 default)', () => {
 
   it('spawns through the breakaway runner and registers the pid as adopted', async () => {
     const startedAt = new Date();
-    mocks.verifyProcessIdentity.mockResolvedValue({ pid: 4321, startedAt, verified: true });
+    mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4321, startedAt, verified: true });
     const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4321}');
 
     const spawned = await spawnService(service('breakaway-ok'), {
@@ -376,7 +380,7 @@ describe('job-breakaway spawn (win32 default)', () => {
 
   it('quotes a runtime=app exec path so cmd.exe does not split it', async () => {
     const startedAt = new Date();
-    mocks.verifyProcessIdentity.mockResolvedValue({ pid: 4323, startedAt, verified: true });
+    mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4323, startedAt, verified: true });
     const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4323}');
     const app = {
       ...service('breakaway-app'),
@@ -402,7 +406,7 @@ describe('job-breakaway spawn (win32 default)', () => {
   });
 
   it('fails fast when the created process cannot be verified', async () => {
-    mocks.verifyProcessIdentity.mockResolvedValue(null);
+    mocks.waitForProcessIdentity.mockResolvedValue(null);
     const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4322}');
 
     await expect(

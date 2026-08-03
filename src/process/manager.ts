@@ -26,7 +26,7 @@ import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
-import { verifyProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
+import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { quoteWindowsArgument, spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 
 const logger = createNamedLogger('excubitor.process');
@@ -703,6 +703,8 @@ function resolveSpawnStrategy(): 'child' | 'job-breakaway' {
 // WMI 経由 spawn は powershell の起動を挟むため、作成時刻の照合は spawn 前後の
 // 時計ずれを許容する (通常の adopt 照合の 5s では負荷時に誤検知しうる)。
 const BREAKAWAY_START_TOLERANCE_MS = 30_000;
+const BREAKAWAY_IDENTITY_WAIT_MS = 3_000;
+const BREAKAWAY_IDENTITY_RETRY_INTERVAL_MS = 100;
 
 /**
  * Job Object の外で起動し、adopted (pid 管理) として登録する。クラッシュ再起動は
@@ -740,9 +742,12 @@ async function spawnBreakawayService(
   // 復旧 (reconcile/adopt) と同じ形で pid を先に永続化する。この直後に supervisor が
   // 死んでも boot 時の突合が拾える。
   await updateInstanceStatus(svc.code, 'pending', pid, undefined, spawnedAt);
-  // pid 再利用に耐える形 (作成時刻つき) で生存確認する。即死はここで fail-fast。
-  const identity = await verifyProcessIdentity(pid, spawnedAt, {
+  // Win32_Process.Create が返す PID は StartTime の可視化より先行しうるため、
+  // 作成時刻つき照合だけを短時間リトライする。照合条件を緩めず、期限後は fail-closed。
+  const identity = await waitForProcessIdentity(pid, spawnedAt, {
     toleranceMs: BREAKAWAY_START_TOLERANCE_MS,
+    timeoutMs: BREAKAWAY_IDENTITY_WAIT_MS,
+    retryIntervalMs: BREAKAWAY_IDENTITY_RETRY_INTERVAL_MS,
   });
   if (!identity) {
     // verifyProcessIdentity は「即死した」と「照合できなかった」を区別しない。
