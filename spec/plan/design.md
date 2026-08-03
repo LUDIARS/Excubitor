@@ -546,6 +546,11 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
 - 子の env には起動 credential が含まれるため、**コマンドラインに載せない**。spec 全体を
   base64 JSON にして PowerShell の stdin へ流し、`Win32_ProcessStartup.EnvironmentVariables`
   で渡す。ShowWindow=0 (SW_HIDE) で §15.1 の窓抑止要件を維持する。
+- stdin へ流すスクリプトは **1 行 = 完結した 1 ステートメント** にする。Windows PowerShell 5.1 の
+  `-Command -` は行末で継続する構文 (`@{` を開いたままの複数行ハッシュテーブル、複数行 try/catch 等) を
+  受けると、エラーも例外も出さず exit code 0 / 出力ゼロで終わる (2026-08-03 実測)。この不変条件は
+  `buildCreateScript` の登録テストが行形状で機械的に検査する。無出力は
+  `runPowerShellViaStdin` が stderr 付きで失敗させる (無言の成功報告を作らない)。
 - ログは supervisor が fd を所有せず、子が `cmd.exe` の append リダイレクトで
   `data/process-logs/<code>.{out,err}.log` へ直接書く。tail / error-detector は従来どおり
   backend 側がファイルを読む。fd を持たないだけで **サイズ上限ローテーションの契機は

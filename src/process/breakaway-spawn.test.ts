@@ -79,6 +79,25 @@ describe('buildCreateScript', () => {
     expect(payload.commandLine).toContain('node server.js');
   });
 
+  it('never leaves a line open for continuation (stdin -Command - silently no-ops on it)', () => {
+    // 実測 (2026-08-03): Windows PowerShell 5.1 へ `-Command -` (stdin) で複数行の
+    // `@{` 継続や try/catch を渡すと、例外もエラーも出さず exit code 0 / 出力ゼロで
+    // 終わる。行ごとに完結したステートメントであることをここで機械的に保証する。
+    // `{` だけでなく、再フォーマットで入り込みやすい他の継続トークンも同時に禁じる。
+    const CONTINUATION_SUFFIXES = ['{', '(', '|', ',', '=', '`'];
+    const script = buildCreateScript({
+      commandLine: 'node server.js',
+      env: { A: '1' },
+      stdoutPath: 'out.log',
+      stderrPath: 'err.log',
+    });
+    for (const line of script.split('\n')) {
+      const trimmed = line.trim();
+      const dangling = CONTINUATION_SUFFIXES.find((suffix) => trimmed.endsWith(suffix));
+      expect(dangling, `line continues past its end with '${dangling}': ${trimmed}`).toBeUndefined();
+    }
+  });
+
   it('omits CurrentDirectory when cwd is not given', () => {
     const script = buildCreateScript({
       commandLine: 'app.exe',

@@ -99,14 +99,15 @@ export function buildCreateScript(spec: BreakawaySpawnSpec): string {
     env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+  // 各行は完結したステートメントにする。`-Command -` (stdin) 経由の Windows PowerShell 5.1
+  // は対話的入力処理のため、`@{` を行末に残す複数行ハッシュテーブルリテラルや複数行 try/catch
+  // など「行末で継続する」構文を渡すと、エラーも例外も出さず exit code 0 で出力ゼロのまま
+  // 終わる (実測 2026-08-03)。行ごとに閉じたステートメントへ畳んで対処する。
   return [
     "$ErrorActionPreference = 'Stop'",
     `$spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json`,
     // ShowWindow=0 (SW_HIDE): cmd.exe のコンソール窓を出さない (windowsHide 相当)。
-    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{',
-    '  ShowWindow = [UInt16]0',
-    '  EnvironmentVariables = [string[]]$spec.env',
-    '}',
+    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [UInt16]0; EnvironmentVariables = [string[]]$spec.env }',
     '$arguments = @{ CommandLine = $spec.commandLine; ProcessStartupInformation = $startup }',
     'if ($null -ne $spec.cwd) { $arguments.CurrentDirectory = $spec.cwd }',
     '$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $arguments',
