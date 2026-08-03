@@ -315,9 +315,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
 
   // build完了後、実spawnの直前に起動単位credentialを発行する。
   // issuer secretはprepareSpawnEnv内で削除され、子にはtarget credentialだけが渡る。
-  const inheritedEnv = Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  );
+  const inheritedEnv = inheritableSupervisorEnv(process.env);
   const childEnv = await prepareSpawnEnv(svc, { ...inheritedEnv, ...(opts.env ?? {}) });
 
   // credential preparation performs asynchronous I/O. A stop or supervisor
@@ -666,6 +664,30 @@ async function autoRestartService(
       initialRestartCount: prevRestartCount + 1,
       expectedGeneration: generation,
     });
+}
+
+/**
+ * 子へ継承させない supervisor 固有の credential。
+ *
+ * supervisor は起動時に `applyInfisicalToEnv()` で **Excubitor 自身の** machine identity を
+ * `process.env` へ載せる (service-runner-infisical.ts)。 この identity は Excubitor が
+ * アクセスできる全 Infisical project を読める鍵なので、 素通しで継承させると relay が
+ * `inject` / `requires_secret` で project・key 単位に絞っている意味が無くなる
+ * (子は自分に配られた secret 以外も自力で fetch できてしまう)。 Cernere の issuer
+ * credential を prepareSpawnEnv が削除するのと同じ扱いにする。
+ *
+ * SITE_URL / ENVIRONMENT は機密でなく、 自前 fetch するサービスの接続先として有用なので残す。
+ */
+const NON_INHERITABLE_ENV_KEYS = ['INFISICAL_CLIENT_ID', 'INFISICAL_CLIENT_SECRET'];
+
+/** spawn 子へ渡す継承 env (undefined と supervisor 固有 credential を落とす)。 */
+export function inheritableSupervisorEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === 'string' && !NON_INHERITABLE_ENV_KEYS.includes(entry[0]),
+    ),
+  );
 }
 
 /** 実行時の spawn 戦略。EXCUBITOR_SPAWN_STRATEGY で明示上書き (不正値は fail-fast)。 */

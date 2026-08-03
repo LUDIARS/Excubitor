@@ -41,6 +41,7 @@ vi.mock('./identity.js', () => ({ verifyProcessIdentity: mocks.verifyProcessIden
 import {
   adoptProcess,
   getManagedPid,
+  inheritableSupervisorEnv,
   isManaged,
   killService,
   resumeProcessRestarts,
@@ -57,6 +58,27 @@ describe('shouldDetachSpawn (design.md §15.1)', () => {
   it('POSIX は プロセスグループ生存のため detached を維持', () => {
     expect(shouldDetachSpawn('linux')).toBe(true);
     expect(shouldDetachSpawn('darwin')).toBe(true);
+  });
+});
+
+describe('inheritableSupervisorEnv', () => {
+  it('drops the Excubitor machine identity credential so children cannot fetch other projects', () => {
+    // supervisor は service-runner-infisical.ts で自身の identity を process.env に載せる。
+    // これが素通しで継承されると、relay が project/key 単位に絞った意味が無くなる。
+    const env = inheritableSupervisorEnv({
+      INFISICAL_SITE_URL: 'https://infisical.example.com',
+      INFISICAL_ENVIRONMENT: 'dev',
+      INFISICAL_CLIENT_ID: 'client-id',
+      INFISICAL_CLIENT_SECRET: 'client-secret',
+      PATH: '/usr/bin',
+      UNSET: undefined,
+    });
+
+    expect(env).toEqual({
+      INFISICAL_SITE_URL: 'https://infisical.example.com',
+      INFISICAL_ENVIRONMENT: 'dev',
+      PATH: '/usr/bin',
+    });
   });
 });
 
@@ -219,6 +241,28 @@ describe('process manager lifecycle hardening', () => {
       // 期待値は design.md §15.1 の契約を直接書く (実装関数を再利用すると恒真になる)。
       expect.objectContaining({ detached: process.platform !== 'win32', windowsHide: true }),
     );
+  });
+
+  it('does not hand the supervisor Infisical credential to the spawned child', async () => {
+    vi.stubEnv('INFISICAL_SITE_URL', 'https://infisical.example.com');
+    vi.stubEnv('INFISICAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('INFISICAL_CLIENT_SECRET', 'client-secret');
+    const child = fakeChild(9198);
+    mocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+
+    await spawnService(service('identity-scope'), { restartPolicy: 'no' });
+
+    const baseEnv = mocks.prepareSpawnEnv.mock.calls[0]![1] as Record<string, string>;
+    expect(baseEnv.INFISICAL_CLIENT_ID).toBeUndefined();
+    expect(baseEnv.INFISICAL_CLIENT_SECRET).toBeUndefined();
+    expect(baseEnv.INFISICAL_SITE_URL).toBe('https://infisical.example.com');
+
+    const stopping = killService('identity-scope');
+    child.emit('exit', null, 'SIGTERM');
+    await expect(stopping).resolves.toBe(true);
   });
 
   it('cancels a reserved start while credential preparation is in flight', async () => {

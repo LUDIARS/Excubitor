@@ -12,6 +12,8 @@ Service lifecycle control: backend bootstrap, safe mode, process launch, adoptio
 stop/restart, and startup preflight.
 
 - **backend-bootstrap**: `src/server.ts`, `src/index.ts`, `src/service-runner.ts`,
+  `src/service-runner-infisical.ts` (supervisor boot glue that applies the
+  Infisical machine identity to the supervisor process env before start),
   `src/startup/*`, safe-mode support, build version/exec helpers, root package
   metadata, and `start-excubitor.bat`.
 - **operator-ui-shell**: frontend boot, dashboard routing, shared API client,
