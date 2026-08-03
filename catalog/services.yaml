@@ -433,7 +433,7 @@ services:
       url: http://localhost:8084/health
       interval_sec: 30
     # secret-agent が tirocinium サービスの secret を解決するための Infisical マッピング。
-    # 値の実体は Infisical (infisical.vtn-game.com) の本プロジェクトに置く。 dev は
+    # 値の実体は Infisical (infisical.ai-run-do.com) の本プロジェクトに置く。 dev は
     # claude CLI バックエンド (TIROCINIUM_LLM_BACKEND=cli) で API キー不要。
     # inject: false — サービス側は secret を env から一切読まない (required_env も空) ため
     # 注入しても供給するものが無い。 加えて上記 project_id は fetch が 403 になり (実 ID 未確認)、
