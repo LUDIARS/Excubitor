@@ -179,7 +179,6 @@ const mocks = vi.hoisted(() => ({
   branchStatus: vi.fn(async (svc: { code: string }) => ({ code: svc.code, current: 'main', branches: [] })),
   applyUpdate: vi.fn(async (svc: { code: string }) => ({ ok: true, code: svc.code, steps: [] })),
   discoverServices: vi.fn(async () => ({ candidates: [], missing: [] })),
-  runScan: vi.fn(async () => ({ written: 1, candidates: [] })),
   buildPortReport: vi.fn(async () => ({ listeners: [], declared: [], conflicts: [] })),
   listReleaseManifests: vi.fn(() => [{ name: 'demo', path: 'demo.yaml' }]),
   loadReleaseManifest: vi.fn(() => ({
@@ -235,8 +234,6 @@ vi.mock('./catalog/loader.js', () => ({
 vi.mock('./catalog/sync.js', () => ({ syncCatalog: mocks.syncCatalog }));
 vi.mock('./catalog/watcher.js', () => ({ watchCatalog: mocks.watchCatalog }));
 vi.mock('./catalog/editor.js', () => ({ updateServiceCatalogInfo: mocks.updateServiceCatalogInfo }));
-vi.mock('./catalog/auto-catalog.js', () => ({ runScan: mocks.runScan }));
-
 vi.mock('./scanner/loop.js', () => ({ startScannerLoop: mocks.startScannerLoop }));
 vi.mock('./scanner/sync.js', () => ({ syncDockerInstances: mocks.syncDockerInstances }));
 vi.mock('./scanner/health-state.js', () => ({ syncHealthyServiceStates: mocks.syncHealthyServiceStates }));
@@ -1011,17 +1008,13 @@ describe('Excubitor HTTP APIs', () => {
     expect(resolved.data).toHaveProperty('secrets');
   });
 
-  it('mutates update, discovery, and release APIs', async () => {
+  it('mutates update and release APIs', async () => {
     const update = await requestJson(router, 'POST', '/api/v1/services/svc-a/update', {
       install: false,
       restart: false,
     });
     expect(update.res.status).toBe(200);
     expect(update.data).toMatchObject({ ok: true, code: 'svc-a' });
-
-    const scan = await requestJson(router, 'POST', '/api/v1/discovery/scan', {});
-    expect(scan.res.status).toBe(200);
-    expect(scan.data).toMatchObject({ written: 1, catalog_total: 3 });
 
     const build = await requestJson(router, 'POST', '/api/v1/releases/demo/build', {
       skipBuild: true,

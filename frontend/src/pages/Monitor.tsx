@@ -7,7 +7,7 @@ import type {
 import {
   fetchProjects, controlService, fetchPorts, setCorpusPref, applyUpdate,
   fetchLaunchPlan, saveLaunchProfile, launchStart, launchStop,
-  fetchMemorySummary, fetchUpdates, fetchDiscovery, scanCatalog, fetchLiveness,
+  fetchMemorySummary, fetchUpdates, fetchDiscovery, fetchLiveness,
   fetchCommits, fetchRecentLogs, emergencyService, saveCatalogInfo,
   fetchServiceEnvConfig, saveServiceEnvConfig,
 } from '../lib/api';
@@ -120,12 +120,6 @@ export default function Monitor() {
     setUpdates(new Map(list.map((u) => [u.code, u])));
     setMsg(`Updates available: ${list.filter((u) => u.available).length}`);
   });
-  const doScan = () => run('scan', async () => {
-    const r = await scanCatalog();
-    setMsg(`Scan complete: created ${r.created.length}, ports ${Object.keys(r.ports).length}, skipped ${r.skipped.length}`);
-    await Promise.all([reloadCore(), reloadPlan().catch(() => {}), fetchDiscovery().then(setDiscovery).catch(() => {})]);
-  });
-
   return (
     <div className="monitor">
       {error && <div className="error-banner">Error: {error}</div>}
@@ -151,7 +145,6 @@ export default function Monitor() {
           <button disabled={busy !== null} onClick={doStopSet}>{busy === 'stop' ? 'Stopping...' : 'Stop set'}</button>
           <span className="bar-sep" />
           <button disabled={busy !== null} onClick={doCheckUpdates}>{busy === 'updates' ? 'Checking...' : 'Check updates'}</button>
-          <button disabled={busy !== null} onClick={doScan}>{busy === 'scan' ? 'Scanning...' : 'Scan catalog'}</button>
         </div>
       </div>
 

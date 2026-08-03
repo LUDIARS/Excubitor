@@ -634,8 +634,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)
   app.route('/', buildUpdateRouter(() => currentCatalog!));
 
-  // 新規サービス検出 + スキャン自動カタログ (/api/v1/discovery[, /scan])
-  app.route('/', buildDiscoveryRouter(() => currentCatalog!, () => reloadCatalog('scan')));
+  // 新規サービス候補の読み取り専用検出 (/api/v1/discovery)
+  app.route('/', buildDiscoveryRouter(() => currentCatalog!));
 
   // リリースビルド (/api/v1/releases — 自己完結ランナブル配布物の組み立て)
   app.route('/', buildReleaseRouter(() => currentCatalog));

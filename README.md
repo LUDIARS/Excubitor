@@ -35,7 +35,7 @@ HTTP サーバーではなく、Ex の外側で動く local-control supervisor �
 | エラータスク | ログのエラーパターンを検知 → triage キュー + 通知 |
 | 設定可視化 | compose / env / Infisical 設定を統合表示 |
 | 復旧操作 | UI/API は `excubitorctl` と同じ IPC を代理実行。HTTP 停止中も CLI から操作可能 |
-| 自動起動 | supervisor が catalog `autostart: true` と restart policy を所有 |
+| 自動起動 | supervisor が各サービス所有の catalog にある `autostart: true` と restart policy を解決 |
 | Secret 注入 | Infisical fetch → 子プロセス env に直接渡して `.env` ファイルを残さない |
 | 起動credential | EducationLab等のspawn直前にExがsecret生成 → Cernereへ暗号化記録 → 子envへ注入 |
 | Infisical 遠隔設定 | secret CRUD を Excubitor 1 か所から |
@@ -115,8 +115,7 @@ Excubitor/
 ├── README.md
 ├── package.json               # backend (Hono + Drizzle)
 ├── tsconfig.json
-├── catalog/
-│   └── services.yaml          # LUDIARS サービス定義 (source of truth)
+├── catalog/                   # サービス所有 catalog の読込・解決ロジック
 ├── migrations/                # excubitor DB スキーマ (連番 SQL)
 ├── spec/plan/design.md        # 設計書
 ├── src/                       # backend サーバ実装

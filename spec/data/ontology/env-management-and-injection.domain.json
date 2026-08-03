@@ -7,7 +7,7 @@
     { "pathPattern": "(^|/)src/secrets/[^/]+$" },
     { "pathPattern": "(^|/)src/process/(inject|startup-env|topology)\\.ts$" },
     { "pathPattern": "(^|/)src/shared/roots(\\.test)?\\.ts$" },
-    { "pathPattern": "(^|/)src/catalog/(loader|sync|watcher|editor|auto-catalog|auto-catalog-file|ports|tier)\\.ts$" },
+    { "pathPattern": "(^|/)src/catalog/(loader|sync|watcher|editor|ports|tier)\\.ts$" },
     { "pathPattern": "(^|/)src/mcp/mcp-json\\.ts$" },
     { "pathPattern": "(^|/)catalog/services\\.ya?ml$" },
     { "pathPattern": "(^|/)frontend/src/pages/(Catalog|Config)\\.tsx$" },

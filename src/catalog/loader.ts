@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
-import { readAutoServicesRaw } from './auto-catalog-file.js';
 import { readFragmentServicesRaw } from './fragments.js';
 import { interpolateRoots } from './interpolate.js';
 
@@ -362,8 +361,8 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
   const parsed = (load(interpolateRoots(raw)) ?? {}) as { services?: unknown[]; [k: string]: unknown };
   const baseServices = Array.isArray(parsed.services) ? parsed.services : [];
 
-  // ソースの優先順位: services.yaml (手書き base) > 各リポの断片 (fragment) > scan (auto)。
-  // 同 code は上位ソースが勝ち、 下位は捨てる。 不正エントリは個別に弾く (全体を壊さない)。
+  // services.yaml と各リポの断片が同じ code を持つ場合、base を優先する。
+  // 不正な断片エントリは個別に弾く (全体を壊さない)。
   const baseCodes = new Set(
     baseServices.map((s) => (s as { code?: unknown }).code).filter((c): c is string => typeof c === 'string'),
   );
@@ -406,18 +405,9 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
     fragmentServices.push(validation.data);
   }
 
-  // スキャンが生成した自動カタログ: base / fragment のどちらにも無い code のみ補完する。
-  const knownCodes = new Set([...baseCodes, ...fragmentCodes]);
-  const autoServices: unknown[] = [];
-  for (const entry of readAutoServicesRaw()) {
-    const code = (entry as { code?: unknown }).code;
-    if (typeof code !== 'string' || knownCodes.has(code)) continue;
-    if (ServiceSchema.safeParse(entry).success) autoServices.push(entry);
-  }
-
   return CatalogSchema.parse({
     ...parsed,
-    services: [...baseServices, ...fragmentServices, ...autoServices],
+    services: [...baseServices, ...fragmentServices],
   });
 }
 

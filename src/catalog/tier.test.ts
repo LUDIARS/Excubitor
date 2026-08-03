@@ -71,10 +71,10 @@ describe('matchProcesses', () => {
 describe('catalog (services.yaml)', () => {
   const catalog = loadCatalog();
 
-  // 手書き正本 (tracked) だけを読む。 loadCatalog() は ${ARS_ROOT} 断片と
-  // gitignore 済み services.auto.yaml もマージするため、 マージ後の集合を厳密一致で
-  // 検証するとマシン依存でしか通らないテストになる (実測: ludellus-web は
-  // ローカル断片からのみ供給され、 services.yaml には存在しない)。
+  // tracked file だけを読む。loadCatalog() は ${ARS_ROOT} のサービス所有断片も
+  // マージするため、マージ後の集合を厳密一致で検証するとマシン依存でしか通らない
+  // テストになる (実測: ludellus-web はローカル断片からのみ供給され、
+  // services.yaml には存在しない)。
   const trackedServices = ((load(
     readFileSync(new URL('../../catalog/services.yaml', import.meta.url), 'utf8'),
   ) ?? {}) as {

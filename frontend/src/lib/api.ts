@@ -675,20 +675,6 @@ export function fetchDiscovery(): Promise<DiscoveryResult> {
   return getJSON<DiscoveryResult>('/api/v1/discovery');
 }
 
-// ─── scan (自動カタログ生成) ───
-export interface ScanResult {
-  created: string[];
-  ports: Record<string, number>;
-  skipped: Array<{ name: string; reason: string }>;
-  scannedRoot: string;
-  catalog_total: number;
-}
-
-/** 未登録 repo を解析し、 実行可能なものを services.auto.yaml に自動生成 (port も検出)。 */
-export function scanCatalog(): Promise<ScanResult> {
-  return postJSON<ScanResult>('/api/v1/discovery/scan', {});
-}
-
 // ─── liveness (稼働率) ───
 export interface DowntimeSummary {
   window_ms: number;

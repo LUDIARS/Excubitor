@@ -1,11 +1,9 @@
 # サービス catalog 断片 (per-repo fragments)
 
-Excubitor の catalog は 3 ソースをマージして構成する。 優先順位は上ほど強い:
+Excubitor の catalog は 2 ソースをマージして構成する。 優先順位は上ほど強い:
 
 1. **`catalog/services.yaml`** — この (公開) Excubitor リポの手書き正本。
 2. **各サービスリポの断片** — `${ARS_ROOT}/<repo>/excubitor.catalog.yaml`。
-3. **`catalog/services.auto.yaml`** — スキャナが自動検出した分 (auto-catalog)。
-
 同じ `code` は上位ソースが勝ち、 下位は捨てる。
 
 ## なぜ断片なのか

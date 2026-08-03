@@ -25,7 +25,6 @@ const envKeys = [
   'LUDIARS_ROOT',
   'EXCUBITOR_FRAGMENT_DIRS',
   'EXCUBITOR_TRUSTED_FRAGMENT_REPOS',
-  'EXCUBITOR_AUTO_CATALOG_PATH',
 ] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 const tempDirs: string[] = [];
@@ -49,7 +48,6 @@ beforeEach(() => {
   delete process.env.LUDIARS_ROOT;
   delete process.env.EXCUBITOR_FRAGMENT_DIRS;
   delete process.env.EXCUBITOR_TRUSTED_FRAGMENT_REPOS;
-  process.env.EXCUBITOR_AUTO_CATALOG_PATH = join(mocks.root, 'services.auto.yaml');
   mocks.warn.mockReset();
   clearFragmentCache();
 });
@@ -68,7 +66,7 @@ afterEach(() => {
 });
 
 describe('catalog source merge', () => {
-  it('keeps base over fragment and fragment over auto entries with the same code', () => {
+  it('keeps base entries over fragment entries with the same code', () => {
     const basePath = join(mocks.root, 'services.yaml');
     writeYaml(basePath, [
       'services:',
@@ -85,25 +83,11 @@ describe('catalog source merge', () => {
       '    name: Fragment Winner',
       '    runtime: node',
     ].join('\n'));
-    writeYaml(process.env.EXCUBITOR_AUTO_CATALOG_PATH!, [
-      'services:',
-      '  - code: shared',
-      '    name: Auto Shared',
-      '    runtime: node',
-      '  - code: fragment-only',
-      '    name: Auto Fragment',
-      '    runtime: node',
-      '  - code: auto-only',
-      '    name: Auto Only',
-      '    runtime: node',
-    ].join('\n'));
-
     const catalog = loadCatalog(basePath);
     const names = new Map(catalog.services.map((service) => [service.code, service.name]));
     expect(names).toEqual(new Map([
       ['shared', 'Base Shared'],
       ['fragment-only', 'Fragment Winner'],
-      ['auto-only', 'Auto Only'],
     ]));
   });
 
