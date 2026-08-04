@@ -19,12 +19,21 @@ function normalizeKeys(keys: Array<string | undefined> = []): string[] {
   return out;
 }
 
+/**
+ * 起動前に揃っていなければならない env キー。
+ *
+ * `infisical.include` は **含めない**。 include は「Infisical から取得する secret を
+ * 絞り込むフィルタ」であって必須宣言ではない。 隣に `infisical.required_env` がある以上、
+ * include まで必須にすると required_env が意味を失い、 任意機能のためだけに列挙した
+ * secret 1 本で起動できなくなる (実例: Volputas の `GLAB_SERVICE_TOKEN` は Discord
+ * リレー専用で、 未設定ならリレーが degraded になるだけなのに起動が止まっていた)。
+ * 必須にしたいキーは `required_env` / `infisical.required_env` に明示する。
+ */
 export function requiredEnvKeysForService(svc: Service): string[] {
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
   return normalizeKeys([
     ...(svc.required_env ?? []),
     ...(cfg?.required_env ?? []),
-    ...(cfg?.include ?? []),
     ...(svc.requires_secret ?? []).flatMap((req) => req.keys),
     ...(svc.cernere_launch_credentials
       ? [

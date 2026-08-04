@@ -18,7 +18,7 @@ function service(patch: Partial<Service>): Service {
 }
 
 describe('startup env validation', () => {
-  it('combines service required_env, infisical required_env, and include', () => {
+  it('combines service required_env and infisical required_env', () => {
     const svc = service({
       required_env: ['STATIC_KEY'],
       infisical: {
@@ -27,11 +27,44 @@ describe('startup env validation', () => {
         inject: true,
         prefix: '',
         required_env: ['SECRET_KEY'],
-        include: ['FILTERED_KEY'],
       },
     });
 
-    expect(requiredEnvKeysForService(svc)).toEqual(['STATIC_KEY', 'SECRET_KEY', 'FILTERED_KEY']);
+    expect(requiredEnvKeysForService(svc)).toEqual(['STATIC_KEY', 'SECRET_KEY']);
+  });
+
+  it('does not require infisical include keys (include is a filter, not a requirement)', () => {
+    // Volputas の GLAB_SERVICE_TOKEN は Discord リレー専用の任意 secret。 include に
+    // 挙げただけで必須化されると、 リレーを使わない構成でサービスが起動できなくなる。
+    const svc = service({
+      required_env: ['STATIC_KEY'],
+      infisical: {
+        project_id: 'project',
+        environment: 'dev',
+        inject: true,
+        prefix: '',
+        include: ['FILTERED_KEY', 'OPTIONAL_TOKEN'],
+      },
+    });
+
+    expect(requiredEnvKeysForService(svc)).toEqual(['STATIC_KEY']);
+    expect(validateStartupEnv(svc, { STATIC_KEY: 'ok' }).ready).toBe(true);
+  });
+
+  it('still requires an include key when it is also declared required', () => {
+    const svc = service({
+      infisical: {
+        project_id: 'project',
+        environment: 'dev',
+        inject: true,
+        prefix: '',
+        required_env: ['DB_URL'],
+        include: ['DB_URL', 'OPTIONAL_TOKEN'],
+      },
+    });
+
+    expect(requiredEnvKeysForService(svc)).toEqual(['DB_URL']);
+    expect(validateStartupEnv(svc, { OPTIONAL_TOKEN: 'x' }).missing).toEqual(['DB_URL']);
   });
 
   it('includes flattened requires_secret keys (cross-service secrets)', () => {
