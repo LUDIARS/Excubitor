@@ -6,7 +6,7 @@
  * (= ディレクトリ欠落) サービスも missing として返す。
  *
  * ランチャーが「新しいサービスの確認」 をするための入力。 登録はまだ手動
- * (catalog/services.yaml 編集) だが、 候補に runtime / port のヒントを添える。
+ * (所有リポの excubitor.catalog.yaml 編集) だが、候補に runtime / port のヒントを添える。
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';

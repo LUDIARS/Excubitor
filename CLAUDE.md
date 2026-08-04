@@ -14,7 +14,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 
 | モジュール | 役割 |
 |--------------|--------|
-| `src/catalog/` | catalog を読み込み + DB sync + file watch。 `catalog/services.yaml` と各リポの断片 `${ARS_ROOT}/<repo>/excubitor.catalog.yaml` (`fragments.ts`、 private 定義の流出回避) をマージする。断片集積は mtime キャッシュ。詳細 [`catalog/FRAGMENTS.md`](catalog/FRAGMENTS.md) |
+| `src/catalog/` | 各サービス所有 `${ARS_ROOT}/<repo>/excubitor.catalog.yaml` を集積 + DB sync + file watch。中央 service catalog と fallback は持たない。内容 hash cache / last-known-good / polling fallback で source 単位に障害を隔離する。Excubitor 固有設定は `excubitor.config.yaml`。詳細 [`catalog/FRAGMENTS.md`](catalog/FRAGMENTS.md) |
 | `src/scanner/` | docker / プロセス / git / version の周期スキャン → 死活 state |
 | `src/local-control/` | versioned IPC、persistent supervisor、`excubitorctl` client、状態永続化 |
 | `src/control/` | supervisor が利用する service adapter。HTTP route は local-control IPC の proxy |

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { load } from 'js-yaml';
+import { readFragmentServicesRaw } from './fragments.js';
 
 export interface CatalogInfoPatch {
   project_code?: string | null;
@@ -15,9 +16,9 @@ type EditableKey = typeof EDITABLE_KEYS[number];
 export function updateServiceCatalogInfo(
   code: string,
   patch: CatalogInfoPatch,
-  path = 'catalog/services.yaml',
+  path?: string,
 ): { code: string; updated: Record<EditableKey, string | null> } {
-  const absPath = resolve(process.cwd(), path);
+  const absPath = resolve(process.cwd(), path ?? ownedCatalogPath(code));
   const raw = readFileSync(absPath, 'utf8');
   const doc = (load(raw) ?? {}) as { services?: Array<{ code?: string }> };
   if (!doc.services?.some((s) => s.code === code)) {
@@ -39,6 +40,19 @@ export function updateServiceCatalogInfo(
   lines.splice(block.start, block.end - block.start, ...blockLines);
   writeFileSync(absPath, lines.join(newline), 'utf8');
   return { code, updated: values };
+}
+
+function ownedCatalogPath(code: string): string {
+  const matches = readFragmentServicesRaw().entries.filter((entry) =>
+    typeof entry.service === 'object'
+    && entry.service !== null
+    && (entry.service as { code?: unknown }).code === code,
+  );
+  if (matches.length === 0) throw new Error(`service-owned catalog not found: ${code}`);
+  if (matches.length > 1) throw new Error(`service-owned catalog is ambiguous: ${code}`);
+  const match = matches[0]!;
+  if (!match.trusted) throw new Error(`service-owned catalog is not trusted: ${code}`);
+  return match.source;
 }
 
 function normalizePatch(patch: CatalogInfoPatch): Record<EditableKey, string | null> {

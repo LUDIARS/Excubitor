@@ -16,8 +16,8 @@ export class SupervisorCatalogRuntime {
   private refreshTail: Promise<Catalog> | null = null;
 
   constructor(
-    private readonly rootDir: string,
-    private readonly catalogPath = join(rootDir, 'catalog', 'services.yaml'),
+    rootDir: string,
+    private readonly runtimeConfigPath = join(rootDir, 'excubitor.config.yaml'),
   ) {}
 
   async initialize(options: { shouldStop?: () => boolean } = {}): Promise<Catalog> {
@@ -40,7 +40,7 @@ export class SupervisorCatalogRuntime {
 
   async refresh(): Promise<Catalog> {
     const loadAndSync = async (): Promise<Catalog> => {
-      const catalog = loadCatalog(this.catalogPath);
+      const catalog = loadCatalog(this.runtimeConfigPath);
       await syncCatalog(catalog);
       setTopologyFromCatalog(catalog);
       setCatalogServices(catalog.services);

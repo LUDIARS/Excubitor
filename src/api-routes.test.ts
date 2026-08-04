@@ -59,7 +59,7 @@ const mocks = vi.hoisted(() => ({
   domainRoot: '.example.test',
   identity: null as null | { siteUrl: string; environment: string; clientId: string; clientSecret: string },
   syncCatalog: vi.fn(async () => ({ upserted: 0, deactivated: 0 })),
-  watchCatalog: vi.fn(() => ({ stop: vi.fn() })),
+  watchRuntimeConfig: vi.fn(() => ({ stop: vi.fn() })),
   startScannerLoop: vi.fn(() => ({ stop: vi.fn() })),
   syncDockerInstances: vi.fn(async () => undefined),
   syncHealthyServiceStates: vi.fn(async () => undefined),
@@ -232,7 +232,7 @@ vi.mock('./catalog/loader.js', () => ({
   serviceTier: (svc: { tier?: string; runtime?: string }) => svc.tier ?? (svc.runtime === 'app' ? 'local-app' : 'saas'),
 }));
 vi.mock('./catalog/sync.js', () => ({ syncCatalog: mocks.syncCatalog }));
-vi.mock('./catalog/watcher.js', () => ({ watchCatalog: mocks.watchCatalog }));
+vi.mock('./catalog/watcher.js', () => ({ watchRuntimeConfig: mocks.watchRuntimeConfig }));
 vi.mock('./catalog/editor.js', () => ({ updateServiceCatalogInfo: mocks.updateServiceCatalogInfo }));
 vi.mock('./scanner/loop.js', () => ({ startScannerLoop: mocks.startScannerLoop }));
 vi.mock('./scanner/sync.js', () => ({ syncDockerInstances: mocks.syncDockerInstances }));
@@ -1172,7 +1172,7 @@ describe('LogSafeMode boot', () => {
 
   it('no-op handle でも catalog reload が完走する', async () => {
     await bootRouter();
-    const calls = mocks.watchCatalog.mock.calls as unknown as Array<[string, () => Promise<void>]>;
+    const calls = mocks.watchRuntimeConfig.mock.calls as unknown as Array<[string, () => Promise<void>]>;
     const onChange = calls.at(-1)?.[1];
     expect(onChange).toBeTypeOf('function');
     await expect(onChange!()).resolves.toBeUndefined();

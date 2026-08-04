@@ -144,9 +144,9 @@
           "paths": [
             "(^|/)src/process/(inject|startup-env|topology)\\.ts$",
             "(^|/)src/shared/roots(\\.test)?\\.ts$",
-            "(^|/)src/catalog/(loader|sync|watcher|editor|ports|tier)\\.ts$",
+            "(^|/)src/catalog/(loader|sync|watcher|editor|ports|tier|runtime-config)\\.ts$",
             "(^|/)src/mcp/mcp-json\\.ts$",
-            "(^|/)catalog/services\\.ya?ml$"
+            "(^|/)excubitor\\.config\\.ya?ml$"
           ]
         },
         {

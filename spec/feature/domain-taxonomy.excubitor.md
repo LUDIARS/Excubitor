@@ -57,9 +57,8 @@ secret agent resolution, and domain-root settings.
 
 - **secret-config**: `src/secrets/*`.
 - **env-injection**: process env injection/topology/startup validation, roots,
-  catalog config surfaces, `.mcp.json` reconciliation, and catalog YAML.
-  `src/index.ts#reloadCatalog` is also assigned here as central catalog reload
-  glue.
+  runtime config surfaces, `.mcp.json` reconciliation, and service-owned catalog YAML.
+  `src/index.ts#reloadCatalog` is also assigned here as distributed catalog aggregation glue.
 - **config-ui**: Catalog and Config pages for domain-root, Infisical, and
   service-env editing.
 

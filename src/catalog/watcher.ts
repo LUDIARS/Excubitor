@@ -33,8 +33,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** catalog/services.yaml の変更を debounce 付きで監視する。 */
-export function watchCatalog(
+/** Excubitor 固有の runtime config 変更を debounce 付きで監視する。 */
+export function watchRuntimeConfig(
   relPath: string,
   onChange: () => void | Promise<void>,
   debounceMs = 500,
@@ -45,13 +45,13 @@ export function watchCatalog(
 
   try {
     watcher = watch(abs, { persistent: false }, () => {
-      timer = scheduleChange(timer, debounceMs, onChange, 'catalog onChange handler failed');
+      timer = scheduleChange(timer, debounceMs, onChange, 'runtime config onChange handler failed');
     });
     watcher.on('error', (error) => {
-      logger.warn({ err: error.message, file: abs }, 'catalog watcher error');
+      logger.warn({ err: error.message, file: abs }, 'runtime config watcher error');
     });
   } catch (error) {
-    logger.warn({ err: errorMessage(error), file: abs }, 'catalog watcher setup failed');
+    logger.warn({ err: errorMessage(error), file: abs }, 'runtime config watcher setup failed');
   }
 
   return {

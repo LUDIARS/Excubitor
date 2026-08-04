@@ -66,34 +66,33 @@ afterEach(() => {
 });
 
 describe('catalog source merge', () => {
-  it('keeps base entries over fragment entries with the same code', () => {
-    const basePath = join(mocks.root, 'services.yaml');
-    writeYaml(basePath, [
+  it('fails closed when multiple repositories claim the same service code', () => {
+    const configPath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(configPath, '{}\n');
+    const first = writeFragment('RepoA', [
       'services:',
       '  - code: shared',
-      '    name: Base Shared',
+      '    name: First Owner',
       '    runtime: node',
     ].join('\n'));
-    writeFragment('Repo', [
+    const second = writeFragment('RepoB', [
       'services:',
       '  - code: shared',
-      '    name: Fragment Shared',
-      '    runtime: node',
-      '  - code: fragment-only',
-      '    name: Fragment Winner',
+      '    name: Second Owner',
       '    runtime: node',
     ].join('\n'));
-    const catalog = loadCatalog(basePath);
-    const names = new Map(catalog.services.map((service) => [service.code, service.name]));
-    expect(names).toEqual(new Map([
-      ['shared', 'Base Shared'],
-      ['fragment-only', 'Fragment Winner'],
-    ]));
+    process.env.EXCUBITOR_TRUSTED_FRAGMENT_REPOS = 'RepoA,RepoB';
+
+    expect(loadCatalog(configPath).services).toEqual([]);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      { code: 'shared', sources: [first.replace(/\\/g, '/'), second.replace(/\\/g, '/')] },
+      'conflicting service-owned catalogs ignored',
+    );
   });
 
   it('logs fragment schema failures with their source instead of dropping them silently', () => {
-    const basePath = join(mocks.root, 'services.yaml');
-    writeYaml(basePath, 'services: []\n');
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
     const source = writeFragment('Invalid', [
       'services:',
       '  - code: invalid',
@@ -108,9 +107,9 @@ describe('catalog source merge', () => {
     );
   });
 
-  it('rejects privileged fields from a repository outside the trust allowlist', () => {
-    const basePath = join(mocks.root, 'services.yaml');
-    writeYaml(basePath, 'services: []\n');
+  it('rejects runnable service definitions from a repository outside the trust allowlist', () => {
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
     const source = writeFragment('Untrusted', [
       'services:',
       '  - code: untrusted',
@@ -127,7 +126,6 @@ describe('catalog source merge', () => {
       expect.objectContaining({
         source: source.replace(/\\/g, '/'),
         code: 'untrusted',
-        privilegedFields: ['infisical'],
       }),
       'untrusted catalog fragment service ignored',
     );
@@ -135,8 +133,8 @@ describe('catalog source merge', () => {
 
   it('accepts privileged fields from an explicitly allowlisted repository', () => {
     process.env.EXCUBITOR_TRUSTED_FRAGMENT_REPOS = 'Trusted';
-    const basePath = join(mocks.root, 'services.yaml');
-    writeYaml(basePath, 'services: []\n');
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
     writeFragment('Trusted', [
       'services:',
       '  - code: trusted',
@@ -154,8 +152,8 @@ describe('catalog source merge', () => {
   });
 
   it('accepts privileged fields from a repository owned by the trusted GitHub organization', () => {
-    const basePath = join(mocks.root, 'services.yaml');
-    writeYaml(basePath, 'services: []\n');
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
     const repositoryPath = join(mocks.root, 'OrganizationRepo');
     mkdirSync(join(repositoryPath, '.git'), { recursive: true });
     writeYaml(
@@ -175,5 +173,45 @@ describe('catalog source merge', () => {
     expect(loadCatalog(basePath).services).toEqual([
       expect.objectContaining({ code: 'organization-repo', requires_secret: [{ service: 'source', keys: ['NAMED_SECRET'] }] }),
     ]);
+  });
+
+  // 既定構成では ARS_ROOT は env ではなく cwd の親から解決される。root を untrusted 扱いにすると
+  // その構成で catalog が丸ごと空になり、監視も起動もできなくなる。
+  it('accepts trusted repositories when the workspace root came from the implicit default', () => {
+    delete process.env.EXCUBITOR_ARS_ROOT;
+    delete process.env.LUDIARS_ROOT;
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
+    const repositoryPath = join(mocks.root, 'ImplicitRoot');
+    mkdirSync(join(repositoryPath, '.git'), { recursive: true });
+    writeYaml(
+      join(repositoryPath, '.git', 'config'),
+      '[remote "origin"]\n  url = https://github.com/LUDIARS/ImplicitRoot.git\n',
+    );
+    writeFragment('ImplicitRoot', [
+      'services:',
+      '  - code: implicit-root',
+      '    name: Implicit Root',
+      '    runtime: node',
+    ].join('\n'));
+
+    expect(loadCatalog(basePath).services).toEqual([
+      expect.objectContaining({ code: 'implicit-root' }),
+    ]);
+  });
+
+  it('still rejects an untrusted repository when the workspace root came from the implicit default', () => {
+    delete process.env.EXCUBITOR_ARS_ROOT;
+    delete process.env.LUDIARS_ROOT;
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
+    writeFragment('Foreign', [
+      'services:',
+      '  - code: foreign',
+      '    name: Foreign',
+      '    runtime: node',
+    ].join('\n'));
+
+    expect(loadCatalog(basePath).services).toEqual([]);
   });
 });

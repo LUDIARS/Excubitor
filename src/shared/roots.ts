@@ -3,7 +3,7 @@
  *
  * これまで E:/Document/Ars がコード/カタログ各所にハードコードされ、 別ドライブ
  * (例 D:/LUDIARS) のマシンで全パスが壊れていた。 ルートを 1 箇所に集約し、
- *   - catalog (services.yaml) の `${ARS_ROOT}` / `${DOMAIN_ROOT}` 補間 (catalog/loader.ts)
+ *   - service-owned catalog / Excubitor runtime config の `${ARS_ROOT}` / `${DOMAIN_ROOT}` 補間
  *   - 新規サービス検出の走査対象 (discovery/scan.ts)
  *   - レビュー JSON の探索ルート (reviews/router.ts)
  *   - 自分の MCP サーバを指す .mcp.json の整合 (mcp/mcp-json.ts)

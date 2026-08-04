@@ -8,7 +8,7 @@
  *   - process bridge (spawn 子�Eロセスの stdout めElog bus へ流す)
  *   - error detector (log bus を購読してパターン検知 ↁEerror_tasks 投�E)
  *   - scanner loop (docker / git / package version の周期スキャン)
- *   - catalog watcher (services.yaml 変更検知して冁Esync)
+ *   - service-owned catalog / runtime config watcher
  *   - autostart 実衁E
  *   - HTTP router を返す (app.ts でマウンチE
  */
@@ -25,7 +25,7 @@ import { currentDb } from './db/index.js';
 import { loadCatalog, type Catalog, type Service } from './catalog/loader.js';
 import { syncCatalog } from './catalog/sync.js';
 import * as catalogWatcher from './catalog/watcher.js';
-import { watchCatalog, type CatalogWatcherHandle } from './catalog/watcher.js';
+import { watchRuntimeConfig, type CatalogWatcherHandle } from './catalog/watcher.js';
 import { startScannerLoop } from './scanner/loop.js';
 import { syncDockerInstances } from './scanner/sync.js';
 import {
@@ -470,7 +470,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const readDowntimeSummaries = options.readDowntimeSummaries
     ?? downtimeWorker?.read
     ?? readDowntimeSummariesInProcess;
-  // catalog をファイルから再読込し DB / topology / file-tail に反映する (watcher + scan 共用)。
+  // service-owned catalogs と Excubitor runtime config を再集積し、各 subsystem へ反映する。
   const reloadCatalog = async (reason: string): Promise<number> => {
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
@@ -492,8 +492,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     );
     return fresh.services.length;
   };
-  const watcherHandle = watchCatalog('catalog/services.yaml', async () => {
-    await reloadCatalog('file change');
+  const watcherHandle = watchRuntimeConfig('excubitor.config.yaml', async () => {
+    await reloadCatalog('runtime config change');
   });
   // Stable root watchers discover new fragment files themselves. Keeping this handle across reloads
   // prevents a reload from cancelling a debounce timer that was scheduled by a concurrent change.

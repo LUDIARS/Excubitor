@@ -2,8 +2,8 @@
  * 各サービスリポが自分の Excubitor catalog 定義を持つ「断片 (fragment)」を集積する。
  *
  * fragment の探索、内容 fingerprint、last-known-good の保持をこのモジュールに集約する。
- * 明示設定された workspace root だけを privileged fragment の信頼境界とし、loader が
- * secret 関連フィールドを受理するか判断できるよう source ごとの trust 情報も返す。
+ * service definition は runnable command を含むため、loader が受理可否を判断できるよう
+ * source ごとの repository trust (LUDIARS origin か明示 allowlist) も返す。
  */
 
 import { createHash } from 'node:crypto';
@@ -46,11 +46,6 @@ export interface FragmentAggregate {
   issues: FragmentIssue[];
 }
 
-interface FragmentRoot {
-  path: string;
-  trusted: boolean;
-}
-
 interface FragmentSource {
   path: string;
   trusted: boolean;
@@ -58,7 +53,7 @@ interface FragmentSource {
 
 interface FragmentDiscovery {
   sources: FragmentSource[];
-  failedRoots: FragmentRoot[];
+  failedRoots: string[];
   issues: FragmentIssue[];
 }
 
@@ -73,6 +68,8 @@ interface AggregateCache {
 }
 
 const fileCache = new Map<string, CachedFragment>();
+/** source ごとに最後に解決できた repository trust。root が一時的に読めない間の retention で使う。 */
+const trustCache = new Map<string, boolean>();
 let aggregateCache: AggregateCache | null = null;
 
 /** forward-slash 正規化 + 末尾スラッシュ除去 (roots.ts と同じ表記に揃える)。 */
@@ -98,52 +95,57 @@ function fingerprint(content: string): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function hasExplicitWorkspaceRoot(): boolean {
-  return Boolean((process.env.EXCUBITOR_ARS_ROOT ?? process.env.LUDIARS_ROOT ?? '').trim());
-}
-
 /**
- * 走査ルート一覧。cwd の親という暗黙 fallback は通常 fragment には使えるが、secret 取得等の
- * privileged fields を許可する trust boundary にはしない。env 追加ルートは明示設定なので trusted。
+ * 走査ルート一覧。
+ *
+ * service definition は runnable command を含むため、trust の判断は root ではなく
+ * **repository 単位** (LUDIARS origin または `EXCUBITOR_TRUSTED_FRAGMENT_REPOS` の明示 allowlist、
+ * `fragment-trust.ts`) で行う。ARS_ROOT が env 明示か cwd の親 fallback かで root を untrusted に
+ * すると、既定構成 (env 未設定 = cwd の親) では全 service が untrusted 判定になり catalog が
+ * 空になる — 監視も起動もできなくなるため、root 自体は trusted とし repository 側で fail-closed する。
  */
-function configuredFragmentRoots(): FragmentRoot[] {
-  const roots: FragmentRoot[] = [
-    { path: normalizeAbsolute(arsRoot()), trusted: hasExplicitWorkspaceRoot() },
-  ];
+function configuredFragmentRoots(): string[] {
+  const roots = [normalizeAbsolute(arsRoot())];
   const extra = (process.env.EXCUBITOR_FRAGMENT_DIRS ?? '').trim();
   if (extra) {
     for (const path of extra.split(',').map((value) => value.trim()).filter(Boolean)) {
-      roots.push({ path: normalizeAbsolute(path), trusted: true });
+      roots.push(normalizeAbsolute(path));
     }
   }
-
-  const deduplicated = new Map<string, FragmentRoot>();
-  for (const root of roots) {
-    const previous = deduplicated.get(root.path);
-    deduplicated.set(root.path, { path: root.path, trusted: root.trusted || previous?.trusted === true });
-  }
-  return [...deduplicated.values()];
+  return [...new Set(roots)];
 }
 
 /** watcher が監視する discovery roots。 */
 export function fragmentRoots(): string[] {
-  return configuredFragmentRoots().map((root) => root.path);
+  return configuredFragmentRoots();
+}
+
+/**
+ * source が信頼できる repository のものか判定する。
+ * 列挙目的の呼び出し (resolveTrust=false) では判定を省く。
+ */
+function resolveRepositoryTrust(
+  repositoryPath: string,
+  repositoryName: string,
+  resolveTrust: boolean,
+): boolean {
+  return !resolveTrust || isTrustedFragmentRepository(repositoryPath, repositoryName);
 }
 
 function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
   const sources = new Map<string, FragmentSource>();
-  const failedRoots: FragmentRoot[] = [];
+  const failedRoots: string[] = [];
   const issues: FragmentIssue[] = [];
 
   for (const root of configuredFragmentRoots()) {
     let children: Dirent[];
     try {
-      children = readdirSync(root.path, { withFileTypes: true });
+      children = readdirSync(root, { withFileTypes: true });
     } catch (error) {
       failedRoots.push(root);
       issues.push({
         kind: 'root-read',
-        source: root.path,
+        source: root,
         message: errorMessage(error),
         retained: false,
       });
@@ -153,7 +155,7 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
     for (const child of children) {
       // Symlinks/junctions are intentionally outside the configured trust boundary.
       if (!child.isDirectory()) continue;
-      const repositoryPath = normalizeAbsolute(join(root.path, child.name));
+      const repositoryPath = normalizeAbsolute(join(root, child.name));
       // git worktree は一時的な作業コピーであり、 本番 catalog の供給源にしない。
       // 未マージブランチのサービス定義が混ざるうえ、 本体リポと同じ code を二重供給して
       // マージ順で勝敗が決まる不安定な状態を生む (2026-07-26 実測: ARS_ROOT 直下の
@@ -173,19 +175,20 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
           retained,
         });
         if (retained) {
-          sources.set(path, {
-            path,
-            trusted: root.trusted && (!resolveTrust || isTrustedFragmentRepository(repositoryPath, child.name)),
-          });
+          sources.set(path, { path, trusted: resolveRepositoryTrust(repositoryPath, child.name, resolveTrust) });
         }
         continue;
       }
 
       const previous = sources.get(path);
-      const trusted = root.trusted
-        && (!resolveTrust || isTrustedFragmentRepository(repositoryPath, child.name));
+      const trusted = resolveRepositoryTrust(repositoryPath, child.name, resolveTrust);
       sources.set(path, { path, trusted: trusted || previous?.trusted === true });
     }
+  }
+
+  // root が読めなくなった間の retention 用に、解決できた trust を source ごとに控える。
+  if (resolveTrust) {
+    for (const source of sources.values()) trustCache.set(source.path, source.trusted);
   }
 
   return {
@@ -225,6 +228,10 @@ function parseServices(content: string): unknown[] {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new TypeError('fragment top-level must be an object with a services array');
   }
+  const topLevelKeys = Object.keys(parsed as Record<string, unknown>);
+  if (topLevelKeys.some((key) => key !== 'services')) {
+    throw new TypeError('service-owned catalog top-level may only contain services');
+  }
   const services = (parsed as { services?: unknown }).services;
   if (!Array.isArray(services)) {
     throw new TypeError('fragment top-level services must be an array');
@@ -237,12 +244,13 @@ function retainFailedRootSources(discovery: FragmentDiscovery): FragmentSource[]
   for (const root of discovery.failedRoots) {
     let retainedAny = false;
     for (const path of fileCache.keys()) {
-      if (!isWithinRoot(path, root.path)) continue;
-      retained.push({ path, trusted: root.trusted });
+      if (!isWithinRoot(path, root)) continue;
+      // repository を再確認できないので、最後に解決できた trust を引き継ぐ (未解決なら fail-closed)。
+      retained.push({ path, trusted: trustCache.get(path) ?? false });
       retainedAny = true;
     }
     const issue = discovery.issues.find((candidate) =>
-      candidate.kind === 'root-read' && candidate.source === root.path,
+      candidate.kind === 'root-read' && candidate.source === root,
     );
     if (issue) issue.retained = retainedAny;
   }
@@ -343,6 +351,9 @@ export function readFragmentServicesRaw(): FragmentAggregate {
   for (const path of fileCache.keys()) {
     if (!activeCachePaths.has(path)) fileCache.delete(path);
   }
+  for (const path of trustCache.keys()) {
+    if (!activeCachePaths.has(path)) trustCache.delete(path);
+  }
 
   const issueKey = discovery.issues
     .map((issue) => `${issue.kind}:${issue.source}:${issue.message}:${issue.retained}`)
@@ -365,5 +376,6 @@ export function readFragmentServicesRaw(): FragmentAggregate {
 /** テスト用: 集積キャッシュを破棄する。 */
 export function clearFragmentCache(): void {
   fileCache.clear();
+  trustCache.clear();
   aggregateCache = null;
 }

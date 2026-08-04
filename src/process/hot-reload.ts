@@ -40,7 +40,7 @@ export async function assertHotReloadAllowed(
   if (!detection) return;
   throw new Error(
     `hot reload is disabled for service ${svc.code}; ${detection.source} matches ${detection.marker}. ` +
-      `Set allow_hot_reload: true in catalog/services.yaml or use a non-watch start command.`,
+      `Set allow_hot_reload: true in the owning repository's excubitor.catalog.yaml or use a non-watch start command.`,
   );
 }
 

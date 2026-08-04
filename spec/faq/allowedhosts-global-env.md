@@ -21,12 +21,12 @@ Tunnel ドメインを個別に `allowedHosts` に書いても、他サービス
 
 ## 解決策
 
-`LUDIARS_ALLOWED_HOSTS=.PrivateProject.dev` を Excubitor の `catalog/services.yaml` で一元管理し、
-子サービス起動時に自動注入する。
+`LUDIARS_ALLOWED_HOSTS=.PrivateProject.dev` を Excubitor 固有の `excubitor.config.yaml` で管理し、
+子サービス起動時に自動注入する。このファイルは監視 runtime policy であり、service catalog ではない。
 
 ### 仕組み
 
-1. `catalog/services.yaml` の `global.env` セクション (ファイル先頭) に定義:
+1. `excubitor.config.yaml` の `global.env` セクションに定義:
 
    ```yaml
    global:
@@ -67,13 +67,13 @@ Actio / Cernere / Nuntius / Schedula / Excubitor / Pagus / Signum / Praeforma / 
 
 ## 優先順位
 
-`services.yaml global.env` < topology env < サービス固有 `env:` < Infisical secret
+`excubitor.config.yaml global.env` < topology env < サービス所有 catalog の `env:` < Infisical secret
 
 サービス固有に `LUDIARS_ALLOWED_HOSTS` を上書きしたい場合はサービスの `env:` セクションに書く。
 
 ## 新しいドメインを追加する場合
 
-`catalog/services.yaml` の `global.env.LUDIARS_ALLOWED_HOSTS` をカンマ区切りで追記するだけ:
+`excubitor.config.yaml` の `global.env.LUDIARS_ALLOWED_HOSTS` をカンマ区切りで追記する:
 
 ```yaml
 global:
@@ -81,4 +81,4 @@ global:
     LUDIARS_ALLOWED_HOSTS: ".PrivateProject.dev,.example.com"
 ```
 
-Excubitor の catalog ホットリロードが反映する (サービス再起動は必要)。
+Excubitor の runtime config watcher が反映する (サービス再起動は必要)。

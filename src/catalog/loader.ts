@@ -1,10 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { load } from 'js-yaml';
 import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
 import { readFragmentServicesRaw } from './fragments.js';
-import { interpolateRoots } from './interpolate.js';
+import { DEFAULT_RUNTIME_CONFIG_PATH, readRuntimeConfig } from './runtime-config.js';
 
 const logger = createNamedLogger('excubitor.catalog.loader');
 
@@ -353,24 +350,13 @@ export function serviceTier(svc: Service): Tier {
   return 'saas';
 }
 
-export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
-  const absPath = resolve(process.cwd(), path);
-  const raw = readFileSync(absPath, 'utf8');
-  // ${ARS_ROOT} / ${DOMAIN_ROOT} をマシン依存の実値に補間してから parse する
-  // (catalog にドライブ/ドメインを焼き込まず、 env or cwd の親から解決する)。
-  const parsed = (load(interpolateRoots(raw)) ?? {}) as { services?: unknown[]; [k: string]: unknown };
-  const baseServices = Array.isArray(parsed.services) ? parsed.services : [];
+export function loadCatalog(runtimeConfigPath = DEFAULT_RUNTIME_CONFIG_PATH): Catalog {
+  const runtimeConfig = readRuntimeConfig(runtimeConfigPath);
+  const servicesByCode = new Map<string, { service: Service; source: string }>();
+  const conflictedCodes = new Set<string>();
 
-  // services.yaml と各リポの断片が同じ code を持つ場合、base を優先する。
-  // 不正な断片エントリは個別に弾く (全体を壊さない)。
-  const baseCodes = new Set(
-    baseServices.map((s) => (s as { code?: unknown }).code).filter((c): c is string => typeof c === 'string'),
-  );
-
-  // 各サービスリポの断片 (${ARS_ROOT}/<repo>/excubitor.catalog.yaml) を集積してマージする。
-  // private リポの定義を公開 services.yaml に焼き込まないための主経路。
-  const fragmentCodes = new Set<string>();
-  const fragmentServices: unknown[] = [];
+  // 各 service definition の正本は、所有 repository 直下の excubitor.catalog.yaml だけ。
+  // 1 source の破損は個別に隔離し、同 code の複数所有は危険なので service 単位で fail-closed にする。
   for (const fragment of readFragmentServicesRaw().entries) {
     const validation = ServiceSchema.safeParse(fragment.service);
     if (!validation.success) {
@@ -389,25 +375,42 @@ export function loadCatalog(path = 'catalog/services.yaml'): Catalog {
       continue;
     }
 
-    const privilegedFields = (['infisical', 'requires_secret', 'cernere_launch_credentials'] as const)
-      .filter((field) => validation.data[field] !== undefined);
-    if (!fragment.trusted && privilegedFields.length > 0) {
+    if (!fragment.trusted) {
       logger.warn(
-        { source: fragment.source, code: validation.data.code, privilegedFields },
+        { source: fragment.source, code: validation.data.code },
         'untrusted catalog fragment service ignored',
       );
       continue;
     }
 
     const code = validation.data.code;
-    if (baseCodes.has(code) || fragmentCodes.has(code)) continue;
-    fragmentCodes.add(code);
-    fragmentServices.push(validation.data);
+    const previous = servicesByCode.get(code);
+    if (previous) {
+      servicesByCode.delete(code);
+      conflictedCodes.add(code);
+      logger.warn(
+        { code, sources: [previous.source, fragment.source] },
+        'conflicting service-owned catalogs ignored',
+      );
+      continue;
+    }
+    if (conflictedCodes.has(code)) {
+      logger.warn(
+        { code, source: fragment.source },
+        'additional conflicting service-owned catalog ignored',
+      );
+      continue;
+    }
+    servicesByCode.set(code, { service: validation.data, source: fragment.source });
   }
 
+  const services = [...servicesByCode.values()].map((entry) => entry.service);
+  if (services.length === 0) {
+    logger.warn('no trusted service-owned catalogs discovered');
+  }
   return CatalogSchema.parse({
-    ...parsed,
-    services: [...baseServices, ...fragmentServices],
+    ...runtimeConfig,
+    services,
   });
 }
 

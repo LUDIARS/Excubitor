@@ -1,6 +1,6 @@
 {
   "name": "catalog",
-  "description": "Loads and merges the three-source service catalog (services.yaml > per-repo fragments > services.auto.yaml), syncs it to the DB, watches files, and resolves tier/env for each service.",
+  "description": "Aggregates service definitions owned by each repository (excubitor.catalog.yaml), reads Excubitor-only runtime policy (excubitor.config.yaml), syncs to the DB, watches files, and resolves tier/env for each service.",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -60,7 +60,7 @@
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"catalog\" domain: Loads and merges the three-source service catalog (services.yaml > per-repo fragments > services.auto.yaml), syncs it to the DB, watches files, and resolves tier/env for each service.",
+  "cardTemplate": "Summarise the \"catalog\" domain: Aggregates service definitions owned by each repository (excubitor.catalog.yaml), reads Excubitor-only runtime policy (excubitor.config.yaml), syncs to the DB, watches files, and resolves tier/env for each service.",
   "source": "spec-draft",
   "mechanics": [],
   "specRefs": [

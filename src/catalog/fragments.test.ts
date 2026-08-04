@@ -73,6 +73,27 @@ describe('catalog fragments', () => {
     expect(fragmentFiles().some((path) => path.includes('WorkTree'))).toBe(false);
   });
 
+  // 所有 catalog は service definition 専用。Excubitor 固有 policy (retention 等) を混ぜた
+  // ファイルは黙って一部無視せず、その source ごと弾いて観測可能にする。
+  it('rejects a fragment that declares top-level keys other than services', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-shape-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+
+    makeRepoFragment(root, 'Good', 'services:\n  - code: good\n    name: Good\n    runtime: node\n');
+    const mixed = makeRepoFragment(
+      root,
+      'Mixed',
+      'retention:\n  enabled: true\nservices:\n  - code: mixed\n    name: Mixed\n    runtime: node\n',
+    );
+
+    const aggregate = readFragmentServicesRaw();
+    expect(aggregate.services.map((s) => (s as { code: string }).code)).toEqual(['good']);
+    expect(aggregate.issues).toEqual([
+      expect.objectContaining({ kind: 'document-shape', source: mixed.replace(/\\/g, '/'), retained: false }),
+    ]);
+  });
+
   it('interpolates ${ARS_ROOT} inside fragment values', () => {
     const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-'));
     tempDirs.push(root);

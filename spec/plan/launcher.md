@@ -62,7 +62,7 @@ v0.4 で対象を「ローカル**サービス** (port を持つ常駐型)」だ
   - **candidates**: catalog 未登録のリポ (runtime 推定 / dev script 有無 / remote 付き)
   - **missing**: catalog にあるが clone されていないリポ
   - `GET /api/v1/discovery`
-- 登録自体は当面手動 (`catalog/services.yaml` 追記)。 候補に runtime ヒントを添える。
+- 登録自体は当面手動 (候補リポ直下の `excubitor.catalog.yaml` 追記)。候補に runtime ヒントを添える。
 
 ## 6. トポロジ env の自動注入 (URL/port)
 
@@ -147,7 +147,8 @@ git fetch + ff-only の後、 `build_command` があれば実行してから res
 
 ### 8.5 適用例
 
-`catalog/services.yaml` に **Hora** (Tauri デスクトップアプリ) を `hora-app` として登録。
+Hora 所有リポの `excubitor.catalog.yaml` に **Hora** (Tauri デスクトップアプリ) を
+`hora-app` として登録。
 他のローカルアプリ (Quaestor / Custos / Legatus 等) も同形式で追加できる。
 
 ## 9. インタラクティブ制御 + SafeMode (v0.4)
@@ -198,7 +199,7 @@ process 系 (node / dev-process-md / **app**) と docker 系の両方が対象
 
 ## 今後 (このフェーズ外)
 
-- catalog への候補のワンクリック登録 (services.yaml 追記 or DB overlay)。
+- catalog への候補のワンクリック登録 (所有リポの `excubitor.catalog.yaml` を狭く更新)。
 - 欠落リポの `git clone` 実行ボタン。
 - アップデートの定期チェック + 通知 (Nuntius 連携)。
 - host プロセススキャンによる `process_match` 実装 (外部起動アプリの自動検知)。

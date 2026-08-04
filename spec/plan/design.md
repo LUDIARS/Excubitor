@@ -7,6 +7,11 @@
 > **2026-07-12 lifecycle amendment:** persistent local supervisor と `excubitorctl` を
 > lifecycle の正本とする。本節の変更および §16 は、Ex backend が process lifecycle を
 > 所有すると記した旧 §§6 / 12 / 15 より優先する。
+>
+> **2026-08-04 catalog ownership amendment:** service definition の正本は各所有リポ直下の
+> `excubitor.catalog.yaml` のみ。中央 service catalog と fallback は禁止する。本 amendment は
+> `catalog/services.yaml` を正本とした旧記述より優先する。Excubitor 固有の運用 policy は
+> `excubitor.config.yaml` に分離する。
 
 ---
 
@@ -50,7 +55,7 @@ Corpus が大規模 Hub の役割を担っていくにあたり、サービス�
 
 ### 2.1 In scope (v0.2)
 
-1. **catalog** — `catalog/services.yaml` を source of truth に全サービスを宣言 (file watch で hot reload)。
+1. **catalog** — 各サービス所有 `excubitor.catalog.yaml` を source ごとに検証・cache・監視して集積する。
 2. **scanner** — docker / プロセス / git / package version の周期スキャン → 死活 state。
 3. **local-control** — persistent supervisor + versioned IPC + `excubitorctl`。API/UI は同じ IPC の proxy。
 4. **process** — supervisor が `autostart`、secret 注入、restart policy を所有。backend は状態を観測する。
@@ -116,7 +121,7 @@ PORT-MAP では旧 Excubitor の 17331 は Concordia web に再割当済み。**
 
 | Excubitor (新) | 移植元 (Concordia) | 内容 |
 |---|---|---|
-| `src/catalog/{loader,sync,watcher}.ts` | `observability/catalog/` | services.yaml ロード + DB sync + file watch |
+| `src/catalog/{loader,fragments,sync,watcher}.ts` | `observability/catalog/` | service-owned catalog 集積 + DB sync + file watch/polling |
 | `src/scanner/{docker,git,host,loop,sync}.ts` | `observability/scanner/` | 周期スキャン → state / git / version |
 | `src/control/{manager,docker-compose}.ts` | `observability/control/` | start / stop / restart |
 | `src/process/{manager,autostart,dev-process-md,inject}.ts` | `observability/process/` | 子プロセス管理 + 一括起動 + secret 注入 |
@@ -125,7 +130,7 @@ PORT-MAP では旧 Excubitor の 17331 は Concordia web に再割当済み。**
 | `src/db/{client,schema}.ts` | `observability/db/` | SQLite client + drizzle schema |
 | `src/app.ts` | `observability/index.ts` の router 部 | Hono router |
 | `web/src/pages/{Monitor,Catalog,Errors}.tsx` + `components/LogsDrawer.tsx` | `Concordia/web/src/...` | Web UI |
-| `catalog/services.yaml` | `Concordia/catalog/services.yaml` | カタログ (全サービス化は §6) |
+| `excubitor.config.yaml` | 新規 | Excubitor 固有の監視・保持・ログ policy。service definitions は禁止。 |
 
 ### 4.1 新規 / 改修モジュール
 
@@ -263,7 +268,7 @@ spawn/kill へ fallback してはならない。
 
 1. Concordia `src/observability/**` を Excubitor `src/**` にコピー (import パスを書き換え)。
 2. `observability/index.ts` の `bootObservability()` を Excubitor `src/server.ts` の main 化。
-3. `Concordia/catalog/services.yaml` を Excubitor `catalog/services.yaml` に移送 + 全サービス追記 (§6.1)。
+3. 各サービス定義を所有リポ直下の `excubitor.catalog.yaml` へ置き、Excubitor は集積のみ担当する。
 4. Concordia web の `pages/{Monitor,Catalog,Errors}.tsx` + `LogsDrawer.tsx` を Excubitor `web/` に移植。
 5. `package.json` deps を観測層が要るものに整理 (hono / better-sqlite3 / drizzle-orm / js-yaml / vestigium / zod)。
 6. port 17332/17333、 DB パス、 dev-process.md、 CLAUDE.md / README の obsolete 表記を除去 + 再稼働版に更新。
@@ -458,9 +463,9 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
 
 `leaking` = slope ≥ 閾値 かつ monotonicRatio ≥ 0.6 かつ 最新 ≥ ベースライン×1.15。`suspect` = slope ≥ 閾値×0.5 かつ monotonicRatio ≥ 0.5。判定は collector(書込) と router(読出) が**同一の detectLeak を共有**。leaking は既存 `error_tasks` triage に起票(同一ターゲットは `[memory-leak] <key>` prefix で dedup、occurrence_count++)→ 既存の調査/自動修正フローに乗る。
 
-### 14.4 設定 (catalog)
+### 14.4 設定 (service-owned catalog / Excubitor runtime config)
 - per-service `memory: { enabled, metrics_url?, leak_window_min(60), leak_threshold_mb_per_hr(50) }`。
-- top-level `memory_monitor: { enabled, interval_sec(60), retention_hours(48), wsl: { enabled, distros[], leak_window_min(120), leak_threshold_mb_per_hr(200) } }`。distros 空 = 自動検出(docker-desktop 系除外)。
+- Excubitor `excubitor.config.yaml` の `memory_monitor: { enabled, interval_sec(60), retention_hours(48), wsl: { enabled, distros[], leak_window_min(120), leak_threshold_mb_per_hr(200) } }`。distros 空 = 自動検出(docker-desktop 系除外)。
 
 ### 14.5 API / UI
 - `GET /api/v1/memory/summary` — 全ターゲットの最新値 + leak 判定 + sparkline 用ダウンサンプル系列。leaking → suspect → RSS 降順でソート。

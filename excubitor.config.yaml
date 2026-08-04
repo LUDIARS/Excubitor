@@ -1,0 +1,38 @@
+# Excubitor runtime policy. This file is not a service catalog.
+# Service definitions belong only in each owning repository's excubitor.catalog.yaml.
+
+global:
+  env:
+    # Shared non-secret environment injected into services started by Excubitor.
+    LUDIARS_ALLOWED_HOSTS: "${DOMAIN_ROOT}"
+
+project_versions:
+  # Excubitor's own displayed build version. Other services report their package/git version.
+  excubitor:
+    major: 1
+    minor: 4
+
+memory_monitor:
+  enabled: true
+  interval_sec: 60
+  retention_hours: 48
+  default_service_rss_budget_mb: 1024
+  default_service_cpu_budget_pct: 80
+  wsl:
+    enabled: true
+    distros: []
+    leak_window_min: 120
+    leak_threshold_mb_per_hr: 200
+
+retention:
+  enabled: true
+  logs_hours: 72
+  liveness_hours: 168
+  parquet_days: 90
+  interval_min: 60
+  batch_rows: 50000
+
+log_store:
+  ring_lines_per_service: 2000
+  ring_lines_global: 20000
+  compact_hour_utc: 18

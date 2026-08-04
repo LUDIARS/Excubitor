@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { load } from 'js-yaml';
 import { describe, it, expect } from 'vitest';
-import { loadCatalog, serviceTier, type Service } from './loader.js';
+import { serviceTier, type Service } from './loader.js';
 import { buildPlanProjects } from '../launch/grouping.js';
 import { matchProcesses } from '../scanner/host-process.js';
 
@@ -65,85 +63,5 @@ describe('matchProcesses', () => {
     expect(alive.has('hora-app')).toBe(true);
     expect(alive.has('other')).toBe(false);
     expect(alive.has('no-match-field')).toBe(false);
-  });
-});
-
-describe('catalog (services.yaml)', () => {
-  const catalog = loadCatalog();
-
-  // tracked file だけを読む。loadCatalog() は ${ARS_ROOT} のサービス所有断片も
-  // マージするため、マージ後の集合を厳密一致で検証するとマシン依存でしか通らない
-  // テストになる (実測: ludellus-web はローカル断片からのみ供給され、
-  // services.yaml には存在しない)。
-  const trackedServices = ((load(
-    readFileSync(new URL('../../catalog/services.yaml', import.meta.url), 'utf8'),
-  ) ?? {}) as {
-    services?: { code?: string; component?: string }[];
-  }).services ?? [];
-
-  it('フロントエンドは正本 catalog から除外されている', () => {
-    const frontends = trackedServices.filter((s) => s.component === 'frontend');
-    expect(frontends.map((s) => s.code).sort()).toEqual([
-      'cernere-frontend',
-      'concordia-web',
-      'praeforma-web',
-    ]);
-    expect(catalog.services.find((s) => s.code === 'cernere-frontend-dev')).toBeUndefined();
-    expect(catalog.services.find((s) => s.code === 'actio-frontend')).toBeUndefined();
-  });
-
-  it('-backend サービスは純粋名にリネーム済 (cernere / actio)', () => {
-    expect(catalog.services.find((s) => s.code === 'cernere')).toBeDefined();
-    expect(catalog.services.find((s) => s.code === 'actio')).toBeDefined();
-    expect(catalog.services.find((s) => s.code === 'cernere-backend-dev')).toBeUndefined();
-    expect(catalog.services.find((s) => s.code === 'actio-backend')).toBeUndefined();
-  });
-
-  it('全サービスに tier が解決できる', () => {
-    for (const s of catalog.services) {
-      expect(['saas', 'infra', 'personal', 'local-app']).toContain(serviceTier(s));
-    }
-  });
-
-  it('Revisorを独立した常駐PRレビューサービスとして登録する', () => {
-    expect(catalog.services.find((s) => s.code === 'revisor')).toMatchObject({
-      tier: 'personal',
-      project_code: 'revisor',
-      component: 'pr-review',
-      port: 4240,
-      command: 'node src/cli.mjs serve',
-      autostart: true,
-      restart_policy: 'always',
-      health: {
-        type: 'http',
-        url: 'http://localhost:4240/health',
-      },
-    });
-    expect(catalog.services.find((s) => s.code === 'revisor')?.cwd)
-      .toMatch(/[\\/]Revisor$/u);
-  });
-
-  it('discutere の port は nuntius (3100) と競合せず env で整合する', () => {
-    const di = catalog.services.find((s) => s.code === 'discutere');
-    const nuntius = catalog.services.find((s) => s.code === 'nuntius-api');
-    expect(di?.port).toBe(3110);
-    expect(nuntius?.port).toBe(3100);
-    expect(di?.env?.BACKEND_PORT).toBe('3110');
-  });
-
-  it('keeps fragment-owned services out of the public base catalog', () => {
-    expect(catalog.services.some((service) => service.code === 'EducationLab')).toBe(false);
-  });
-
-  it('registers Calliope on its canonical port with its upstream dependencies', () => {
-    const calliope = catalog.services.find((s) => s.code === 'calliope');
-    expect(calliope).toMatchObject({
-      port: 8891,
-      project_code: 'calliope',
-      runtime: 'node',
-      health: { type: 'http', url: 'http://localhost:8891/health' },
-    });
-    expect(calliope?.depends_on).toEqual(['actio', 'schedula', 'memoria-server']);
-    expect(calliope?.env?.CALLIOPE_PORT).toBe('8891');
   });
 });

@@ -28,6 +28,10 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 LUDIARS 全サービスの可観測性 + 集中設定 + ログ監視 UI。起動・停止・再起動の正本は
 HTTP サーバーではなく、Ex の外側で動く local-control supervisor である。
 
+サービス定義の正本は各所有リポジトリ直下の `excubitor.catalog.yaml` である。Excubitor は
+それらを集積するだけで、中央 service catalog や欠落サービスへの fallback は持たない。
+catalog がないサービスは監視・起動・再起動の対象にならず、操作時に明示的に失敗する。
+
 | 機能 | 概要 |
 |------|------|
 | 死活監視 | docker / プロセスの running 状態 + health endpoint 結果 |
@@ -115,7 +119,8 @@ Excubitor/
 ├── README.md
 ├── package.json               # backend (Hono + Drizzle)
 ├── tsconfig.json
-├── catalog/                   # サービス所有 catalog の読込・解決ロジック
+├── excubitor.config.yaml      # Excubitor 固有の監視・保持・ログ設定 (service catalog ではない)
+├── catalog/                   # サービス所有 catalog の契約ドキュメント
 ├── migrations/                # excubitor DB スキーマ (連番 SQL)
 ├── spec/plan/design.md        # 設計書
 ├── src/                       # backend サーバ実装

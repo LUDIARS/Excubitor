@@ -37,7 +37,7 @@ export interface LocalControlSupervisorOptions {
   endpoint?: string;
   databasePath?: string;
   statePath?: string;
-  catalogPath?: string;
+  runtimeConfigPath?: string;
   now?: () => string;
   backend?: ExcubitorBackendController;
   adoptedReapIntervalMs?: number;
@@ -80,7 +80,7 @@ export class LocalControlSupervisor {
     this.stateStore = new LocalControlStateStore(
       options.statePath ?? join(this.rootDir, 'data', 'local-control-state.json'),
     );
-    this.catalog = new SupervisorCatalogRuntime(this.rootDir, options.catalogPath);
+    this.catalog = new SupervisorCatalogRuntime(this.rootDir, options.runtimeConfigPath);
     this.adoptedProcessReaper = new AdoptedProcessReaper({
       queue: this.operations,
       refreshCatalog: () => this.catalog.refresh(),
