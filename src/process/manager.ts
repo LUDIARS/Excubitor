@@ -28,6 +28,7 @@ import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { quoteWindowsArgument, spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
+import { clearDeclaredPort } from './port-guard.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -165,6 +166,8 @@ export interface SpawnOptions {
   expectedGeneration?: number;
   /** テスト用: job-breakaway spawn の PowerShell 実行差し替え。 */
   breakaway?: BreakawaySpawnOptions;
+  /** テスト用: 宣言ポートの占有解消の差し替え。 */
+  clearPort?: typeof clearDeclaredPort;
 }
 
 export function markServiceRunning(code: string): number {
@@ -271,6 +274,16 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md' && svc.runtime !== 'app') {
     throw new Error(`spawnService: unsupported runtime ${svc.runtime}`);
   }
+
+  // 宣言ポートを取りこぼした旧インスタンスが握っていると、新プロセスは EADDRINUSE で
+  // 即死し「再起動したのに古いコードが動き続ける」状態になる (port-guard.ts の背景参照)。
+  // spawn 前に必ず確認し、管理外の占有は止めてから進む。
+  await (opts.clearPort ?? clearDeclaredPort)(
+    svc.code,
+    svc.port,
+    getManagedPid(svc.code),
+    { kill: treeKill },
+  );
 
   let cmd: string;
   let args: string[];
