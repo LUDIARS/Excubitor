@@ -142,7 +142,7 @@
           "name": "env-injection",
           "description": "Topology env, startup env validation, injected env construction, and root/domain path resolution.",
           "paths": [
-            "(^|/)src/process/(inject|startup-env|topology)\\.ts$",
+            "(^|/)src/process/(inject|service-version|startup-env|topology)\\.ts$",
             "(^|/)src/shared/roots(\\.test)?\\.ts$",
             "(^|/)src/catalog/(loader|sync|watcher|editor|ports|tier|runtime-config)\\.ts$",
             "(^|/)src/mcp/mcp-json\\.ts$",

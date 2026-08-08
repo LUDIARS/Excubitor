@@ -197,6 +197,23 @@ process 系 (node / dev-process-md / **app**) と docker 系の両方が対象
   実プロセス起動は `scripts/runtime-smoke.mjs` (`npm run smoke:runtime`) が
   通常起動 / LogSafeMode の 2 パスを隔離ポートで叩いて `/health` を確認する。
 
+## 10. サービス実行バージョン契約 (SPEC-SERVICE-RUNTIME-VERSION)
+
+- Excubitor が起動する全サービスへ `EXCUBITOR_SERVICE_VERSION` と
+  `VITE_EXCUBITOR_SERVICE_VERSION` を同じ値で注入する。後者は Vite がブラウザ向け
+  ビルド／dev server へ公開できる非 secret の鏡像であり、他の環境変数は公開しない。
+- バージョンはサービスの source checkout にある package version、Git short hash、
+  `0.0.0+unversioned` の順で解決する。空値や制御文字を含む値は採用しない。
+- process runtime は credential 準備後、実 spawn の直前に最終マージする。catalog env、
+  secret、API override から authoritative value を置換できない。
+- docker-compose runtime は対象 compose file の service 名から一時 override を生成し、
+  `up` / recreate に追加する。一時ディレクトリは生成失敗・docker 成否の全経路で削除し、
+  audit/diagnostic 出力では OS の一時 path を固定ラベルへ置換する。
+- Excubitor 自身も boot 時に同じ runtime contract を `process.env` へ公開し、
+  `/api/v1/system.runtime_version` と header badge はその値を表示する。
+- 単体検証は version source の優先順位、最終 env merge、Compose override の内容と破棄、
+  docker command への override 追加を対象とする。実コンテナへの反映は runtime smoke で確認する。
+
 ## 今後 (このフェーズ外)
 
 - catalog への候補のワンクリック登録 (所有リポの `excubitor.catalog.yaml` を狭く更新)。

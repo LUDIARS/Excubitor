@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process';
 import { type Service } from '../catalog/loader.js';
+import { createComposeVersionOverride } from './compose-version-override.js';
+import { SERVICE_VERSION_ENV } from '../process/service-version.js';
 
 export const DOCKER_CONTROL_TIMEOUT_MS = 30_000;
 export const DOCKER_OUTPUT_LIMIT_BYTES = 64 * 1024;
 export const DOCKER_TERMINATION_GRACE_MS = 5_000;
+const COMPOSE_VERSION_OVERRIDE_COMMAND_LABEL = '<runtime-version-override>';
 
 export type ControlAction = 'start' | 'stop' | 'restart';
 
@@ -18,6 +21,8 @@ export interface ControlResult {
 /**
  * Runs a bounded docker compose lifecycle command.
  * Startup environment values are passed only through the child process env.
+ *
+ * @implements SPEC-SERVICE-RUNTIME-VERSION
  */
 export async function controlDockerCompose(
   svc: Service,
@@ -43,14 +48,52 @@ export async function controlDockerCompose(
       opArgs = ['stop', ...targets];
       break;
     case 'restart':
-      opArgs = ['restart', ...targets];
+      // A compose restart retains the original container environment. Recreate
+      // so the authoritative runtime version is applied as well.
+      opArgs = ['up', '-d', '--force-recreate', ...targets];
       break;
   }
 
-  return execDocker([...composeArgs, ...opArgs], env);
+  if (action === 'stop') return execDocker([...composeArgs, ...opArgs], env);
+
+  const version = env[SERVICE_VERSION_ENV];
+  if (!version) throw new Error(`service ${svc.code} is missing ${SERVICE_VERSION_ENV}`);
+  const override = await createComposeVersionOverride(svc, version);
+  try {
+    const result = await execDocker(
+      [...composeArgs, '-f', override.path, ...opArgs],
+      env,
+      [...composeArgs, '-f', COMPOSE_VERSION_OVERRIDE_COMMAND_LABEL, ...opArgs],
+    );
+    return redactOverridePath(result, override.path);
+  } finally {
+    await override.dispose();
+  }
 }
 
-function execDocker(args: string[], extraEnv: Record<string, string>): Promise<ControlResult> {
+/** @implements SPEC-SERVICE-RUNTIME-VERSION */
+function redactOverridePath(result: ControlResult, overridePath: string): ControlResult {
+  const pathVariants = new Set([overridePath, overridePath.replaceAll('\\', '/')]);
+  const redact = (value: string): string => {
+    let redacted = value;
+    for (const path of pathVariants) {
+      redacted = redacted.replaceAll(path, COMPOSE_VERSION_OVERRIDE_COMMAND_LABEL);
+    }
+    return redacted;
+  };
+  return {
+    ...result,
+    stdout: redact(result.stdout),
+    stderr: redact(result.stderr),
+    command: redact(result.command),
+  };
+}
+
+function execDocker(
+  args: string[],
+  extraEnv: Record<string, string>,
+  displayArgs: string[] = args,
+): Promise<ControlResult> {
   return new Promise((resolve) => {
     const proc = spawn('docker', args, {
       shell: false,
@@ -65,7 +108,7 @@ function execDocker(args: string[], extraEnv: Record<string, string>): Promise<C
     let forced = false;
     let commandTimer: NodeJS.Timeout | null = null;
     let terminationTimer: NodeJS.Timeout | null = null;
-    const command = `docker ${args.join(' ')}`;
+    const command = `docker ${displayArgs.join(' ')}`;
     const finish = (result: ControlResult): void => {
       if (settled) return;
       settled = true;

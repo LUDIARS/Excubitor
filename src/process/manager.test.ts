@@ -19,6 +19,14 @@ vi.mock('../shared/logger.js', () => ({
 }));
 vi.mock('../db/client.js', () => ({ db: () => ({ run: mocks.dbRun }) }));
 vi.mock('./dev-process-md.js', () => ({ resolveDevProcessCommand: vi.fn() }));
+vi.mock('../scanner/git.js', () => ({
+  readGitInfo: vi.fn(async () => ({
+    branch: null,
+    hash: null,
+    dirty: null,
+    package_version: null,
+  })),
+}));
 vi.mock('../shared/exec.js', () => ({
   execCapture: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '' })),
 }));
@@ -243,7 +251,14 @@ describe('process manager lifecycle hardening', () => {
       'node',
       ['demo.js'],
       // 期待値は design.md §15.1 の契約を直接書く (実装関数を再利用すると恒真になる)。
-      expect.objectContaining({ detached: process.platform !== 'win32', windowsHide: true }),
+      expect.objectContaining({
+        detached: process.platform !== 'win32',
+        windowsHide: true,
+        env: expect.objectContaining({
+          EXCUBITOR_SERVICE_VERSION: '0.0.0+unversioned',
+          VITE_EXCUBITOR_SERVICE_VERSION: '0.0.0+unversioned',
+        }),
+      }),
     );
   });
 

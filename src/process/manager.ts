@@ -26,6 +26,7 @@ import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
+import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-version.js';
 import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { clearDeclaredPort } from './port-guard.js';
@@ -267,6 +268,7 @@ export function shouldDetachSpawn(platform: NodeJS.Platform): boolean {
   return platform !== 'win32';
 }
 
+/** @implements SPEC-SERVICE-RUNTIME-VERSION */
 async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<SpawnedProcess> {
   if (processes.has(svc.code)) {
     throw new Error(`service ${svc.code} is already spawned`);
@@ -329,7 +331,12 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   // build完了後、実spawnの直前に起動単位credentialを発行する。
   // issuer secretはprepareSpawnEnv内で削除され、子にはtarget credentialだけが渡る。
   const inheritedEnv = inheritableSupervisorEnv(process.env);
-  const childEnv = await prepareSpawnEnv(svc, { ...inheritedEnv, ...(opts.env ?? {}) });
+  const preparedEnv = await prepareSpawnEnv(svc, { ...inheritedEnv, ...(opts.env ?? {}) });
+  const { env: childEnv, version } = await injectServiceRuntimeVersion(svc, preparedEnv);
+  logger.info(
+    { code: svc.code, version: version.value, versionSource: version.source },
+    'service runtime version injected',
+  );
 
   // credential preparation performs asynchronous I/O. A stop or supervisor
   // shutdown may invalidate this reservation while it is in flight; recheck
@@ -457,7 +464,10 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     resolveTermination,
   };
   processes.set(svc.code, spawned);
-  logger.info({ code: svc.code, pid: child.pid, restartCount, detached }, 'spawned (windowless)');
+  logger.info(
+    { code: svc.code, pid: child.pid, restartCount, detached, version: childEnv[SERVICE_VERSION_ENV] },
+    'spawned (windowless)',
+  );
 
   const runningState = updateInstanceStatus(svc.code, 'running', child.pid ?? null, undefined, spawnedAt);
 
@@ -799,7 +809,10 @@ async function spawnBreakawayService(
   }
   adopted.set(svc.code, { code: svc.code, pid, startedAt: identity.startedAt });
   await updateInstanceStatus(svc.code, 'running', pid, undefined, identity.startedAt);
-  logger.info({ code: svc.code, pid, strategy: 'job-breakaway' }, 'spawned outside the supervisor job (windowless)');
+  logger.info(
+    { code: svc.code, pid, strategy: 'job-breakaway', version: childEnv[SERVICE_VERSION_ENV] },
+    'spawned outside the supervisor job (windowless)',
+  );
   return {
     code: svc.code,
     child: null,

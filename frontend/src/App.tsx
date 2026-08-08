@@ -32,6 +32,7 @@ const frontendUrls = (config.allowedHosts as readonly string[])
   .filter((host) => host !== 'localhost' && host !== '127.0.0.1')
   .map((host) => `https://${host}`);
 
+/** @implements SPEC-SERVICE-RUNTIME-VERSION */
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
@@ -40,13 +41,16 @@ export default function App() {
 
   const [safeMode, setSafeMode] = useState(false);
   const [serviceMode, setServiceMode] = useState(false);
+  const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
   const [buildVersion, setBuildVersion] = useState<SystemInfo['build_version']>(null);
 
+  // @implements SPEC-SERVICE-RUNTIME-VERSION
   useEffect(() => {
     void fetchSystem()
       .then((s) => {
         setSafeMode(s.safe_mode);
         setServiceMode(!!s.service_mode);
+        setRuntimeVersion(s.runtime_version ?? null);
         setBuildVersion(s.build_version ?? null);
       })
       .catch(() => {});
@@ -64,7 +68,7 @@ export default function App() {
           className="badge"
           title={buildVersion?.git_hash ? `patch: ${buildVersion.patch_source}, git: ${buildVersion.git_hash}` : undefined}
         >
-          v{buildVersion?.version ?? '1.4'}
+          v{runtimeVersion ?? buildVersion?.version ?? 'unavailable'}
         </span>
         {safeMode && (
           <span className="badge badge-safe" title="SafeMode: 何も自動起動していません (手動で起動してください)">

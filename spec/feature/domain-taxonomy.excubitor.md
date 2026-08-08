@@ -56,8 +56,8 @@ Environment variable resolution, topology env generation, Infisical mapping,
 secret agent resolution, and domain-root settings.
 
 - **secret-config**: `src/secrets/*`.
-- **env-injection**: process env injection/topology/startup validation, roots,
-  runtime config surfaces, `.mcp.json` reconciliation, and service-owned catalog YAML.
+- **env-injection**: process env injection/topology/startup validation, runtime-version
+  identity, roots, runtime config surfaces, `.mcp.json` reconciliation, and service-owned catalog YAML.
   `src/index.ts#reloadCatalog` is also assigned here as distributed catalog aggregation glue.
 - **config-ui**: Catalog and Config pages for domain-root, Infisical, and
   service-env editing.

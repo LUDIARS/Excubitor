@@ -710,6 +710,8 @@ export interface SystemInfo {
   service: string;
   safe_mode: boolean;
   service_mode?: boolean;
+  /** @implements SPEC-SERVICE-RUNTIME-VERSION */
+  runtime_version?: string | null;
   build_version?: {
     project_code: string;
     major: number;

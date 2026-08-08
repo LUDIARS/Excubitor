@@ -80,6 +80,7 @@ import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
 import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
 import type { StartupNpmIssue } from './startup/npm-install.js';
+import { SERVICE_VERSION_ENV } from './process/service-version.js';
 
 const logger = createNamedLogger('concordia.observability');
 const httpLogger = createNamedLogger('excubitor.http');
@@ -207,6 +208,23 @@ function refreshBuildVersion(catalog: Catalog): void {
 function buildVersionCacheKey(catalog: Catalog): string {
   const base = catalog.project_versions.excubitor;
   return redisCacheKey(`build-version:v1:${base?.major ?? 'none'}:${base?.minor ?? 'none'}`);
+}
+
+/**
+ * Excubitor is a service too. Publish its resolved build identity through the
+ * same runtime contract used for supervised child services before the HTTP UI
+ * begins serving requests.
+ *
+ * @implements SPEC-SERVICE-RUNTIME-VERSION
+ */
+async function publishExcubitorRuntimeVersion(catalog: Catalog): Promise<void> {
+  const build = await resolveBuildVersion(catalog, 'excubitor', process.cwd());
+  const version = build?.version ?? '0.0.0+unversioned';
+  process.env[SERVICE_VERSION_ENV] = version;
+  logger.info(
+    { version, versionSource: build?.patch_source ?? 'unversioned', gitHash: build?.git_hash ?? null },
+    'Excubitor runtime version published',
+  );
 }
 
 function serviceRowView(r: Record<string, unknown>, downtime: DowntimeSummary | null = null): Record<string, unknown> {
@@ -373,6 +391,7 @@ export function recordStartupNpmIssues(issues: StartupNpmIssue[]): void {
 const logSafeModeNoop = (): void => { /* log safe mode: nothing started */ };
 const logSafeModeAsyncNoop = async (): Promise<void> => { /* log safe mode: nothing started */ };
 
+/** @implements SPEC-SERVICE-RUNTIME-VERSION */
 export async function bootObservability(options: BootObservabilityOptions = {}): Promise<ObservabilityHandle> {
   // 設定ファイルに Infisical identity があれば process.env に注入 (relay の前提)。
   // 無ければ未設定のまま → UI が入力を促す。
@@ -417,6 +436,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     perService: currentCatalog.log_store.ring_lines_per_service,
     global: currentCatalog.log_store.ring_lines_global,
   });
+  await publishExcubitorRuntimeVersion(currentCatalog);
   refreshBuildVersion(currentCatalog);
   const sync = await syncCatalog(currentCatalog);
   logger.info(
@@ -480,6 +500,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       global: fresh.log_store.ring_lines_global,
     });
     buildVersionCache = null;
+    await publishExcubitorRuntimeVersion(fresh);
     refreshBuildVersion(fresh);
     setTopologyFromCatalog(fresh);
     setCatalogServices(fresh.services);
@@ -655,15 +676,20 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildFederationRouter(() => currentCatalog!));
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
-  app.get('/api/v1/system', async (c) => {
-    return c.json({
-      service: 'excubitor',
-      safe_mode: isSafeMode(),
-      log_safe_mode: isLogSafeMode(),
-      service_mode: serviceMode,
-      build_version: await cachedBuildVersion(),
-    });
-  });
+  app.get(
+    '/api/v1/system',
+    /** @implements SPEC-SERVICE-RUNTIME-VERSION */
+    async (c) => {
+      return c.json({
+        service: 'excubitor',
+        safe_mode: isSafeMode(),
+        log_safe_mode: isLogSafeMode(),
+        service_mode: serviceMode,
+        runtime_version: process.env[SERVICE_VERSION_ENV] ?? null,
+        build_version: await cachedBuildVersion(),
+      });
+    },
+  );
 
   // topology env (Excubitor が catalog から導出して全サービスに注入する URL/port)。
   app.get('/api/v1/topology', (c) => c.json({ env: getTopologyEnv() }));

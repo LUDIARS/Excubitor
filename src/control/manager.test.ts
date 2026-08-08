@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   resolveInjectEnv: vi.fn(),
   runServiceBuild: vi.fn(),
   assertStartupEnv: vi.fn(),
+  injectServiceRuntimeVersion: vi.fn(),
 }));
 
 vi.mock('../shared/logger.js', () => ({
@@ -33,6 +34,9 @@ vi.mock('../process/manager.js', () => ({
 vi.mock('../process/inject.js', () => ({ resolveInjectEnv: mocks.resolveInjectEnv }));
 vi.mock('../process/build.js', () => ({ runServiceBuild: mocks.runServiceBuild }));
 vi.mock('../process/startup-env.js', () => ({ assertStartupEnv: mocks.assertStartupEnv }));
+vi.mock('../process/service-version.js', () => ({
+  injectServiceRuntimeVersion: mocks.injectServiceRuntimeVersion,
+}));
 
 import { controlService } from './manager.js';
 
@@ -45,6 +49,14 @@ describe('control manager lifecycle guards', () => {
     mocks.cancelServiceRestart.mockReturnValue(1);
     mocks.waitForPendingSpawn.mockResolvedValue(undefined);
     mocks.resolveInjectEnv.mockResolvedValue({ SECRET: 'resolved' });
+    mocks.injectServiceRuntimeVersion.mockImplementation(async (_svc: Service, env: Record<string, string>) => ({
+      env: {
+        ...env,
+        EXCUBITOR_SERVICE_VERSION: '1.2.3',
+        VITE_EXCUBITOR_SERVICE_VERSION: '1.2.3',
+      },
+      version: { value: '1.2.3', source: 'package' },
+    }));
     mocks.runServiceBuild.mockResolvedValue({
       ok: true,
       skipped: true,
@@ -127,6 +139,22 @@ describe('control manager lifecycle guards', () => {
     expect(mocks.resolveInjectEnv).not.toHaveBeenCalled();
     expect(mocks.assertStartupEnv).not.toHaveBeenCalled();
     expect(mocks.controlDockerCompose).toHaveBeenCalledWith(svc, 'stop', { PUBLIC: 'value' });
+  });
+
+  it('passes the final authoritative version to docker compose start', async () => {
+    const svc = service({ runtime: 'docker-compose', compose_file: 'compose.yml' });
+
+    await controlService(svc, 'start', 'test', { EXCUBITOR_SERVICE_VERSION: 'spoofed' });
+
+    expect(mocks.injectServiceRuntimeVersion).toHaveBeenCalledWith(svc, {
+      SECRET: 'resolved',
+      EXCUBITOR_SERVICE_VERSION: 'spoofed',
+    });
+    expect(mocks.controlDockerCompose).toHaveBeenCalledWith(svc, 'start', {
+      SECRET: 'resolved',
+      EXCUBITOR_SERVICE_VERSION: '1.2.3',
+      VITE_EXCUBITOR_SERVICE_VERSION: '1.2.3',
+    });
   });
 });
 

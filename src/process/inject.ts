@@ -17,6 +17,7 @@ import { sharedLogsRoot } from '../log/logs-root.js';
 import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
 import { getServiceByCode } from './service-registry.js';
+import { injectServiceRuntimeVersion } from './service-version.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -108,6 +109,8 @@ export async function resolveRequiresSecretEnv(svc: Service): Promise<Record<str
  * - requires_secret があれば他サービスの named secret を fetch し最優先でマージ
  * - identity 不足 (infisical inject / requires_secret 要求時) → throw (preflight で事前検知させる)
  * - fetch 失敗 → throw
+ *
+ * @implements SPEC-SERVICE-RUNTIME-VERSION
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
   const topology = getTopologyEnv();
@@ -121,7 +124,10 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
   if (!cfg || !cfg.inject) {
     const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
-    return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...requiresSecretEnv };
+    return (await injectServiceRuntimeVersion(
+      svc,
+      { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...requiresSecretEnv },
+    )).env;
   }
 
   const id = readIdentity();
@@ -144,5 +150,8 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   );
   const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
-  return { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env, ...requiresSecretEnv };
+  return (await injectServiceRuntimeVersion(
+    svc,
+    { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env, ...requiresSecretEnv },
+  )).env;
 }

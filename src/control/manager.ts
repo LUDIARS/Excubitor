@@ -15,6 +15,7 @@ import {
 import { resolveInjectEnv } from '../process/inject.js';
 import { runServiceBuild } from '../process/build.js';
 import { assertStartupEnv } from '../process/startup-env.js';
+import { injectServiceRuntimeVersion } from '../process/service-version.js';
 
 const logger = createNamedLogger('excubitor.control');
 
@@ -24,6 +25,8 @@ const logger = createNamedLogger('excubitor.control');
  * - docker-compose: docker compose up/stop/restart
  * - node / dev-process-md / app: ProcessManager spawn / kill
  * - docker (raw): v0.2 で対応予宁E
+ *
+ * @implements SPEC-SERVICE-RUNTIME-VERSION
  */
 export async function controlService(
   svc: Service,
@@ -39,7 +42,12 @@ export async function controlService(
     if (action === 'start' || action === 'restart') {
       try {
         const injected = await resolveInjectEnv(svc);
-        composeEnv = { ...injected, ...env };
+        const versioned = await injectServiceRuntimeVersion(svc, { ...injected, ...env });
+        composeEnv = versioned.env;
+        logger.info(
+          { code: svc.code, version: versioned.version.value, versionSource: versioned.version.source },
+          'service runtime version injected for compose',
+        );
         assertStartupEnv(svc, composeEnv);
       } catch (err) {
         return { ok: false, stdout: '', stderr: (err as Error).message, exit_code: -1, command: 'resolveStartupEnv' };
