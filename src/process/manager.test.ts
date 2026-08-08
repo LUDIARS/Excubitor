@@ -357,14 +357,23 @@ describe('job-breakaway spawn (win32 default)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('spawns through the breakaway runner and registers the pid as adopted', async () => {
+  /** WMI は短命 launcher の pid を返し、実プロセスの pid は launcher が結果へ書く。 */
+  function breakawayOptions(launcherPid: number, servicePid: number) {
+    return {
+      runPowerShell: vi.fn(async () => `{"ReturnValue":0,"ProcessId":${launcherPid}}`),
+      readResult: async () => `{"pid":${servicePid}}`,
+      removeResult: async () => undefined,
+      resultPath: 'data/process-logs/.breakaway-test.json',
+    };
+  }
+
+  it('spawns through the breakaway runner and registers the service pid as adopted', async () => {
     const startedAt = new Date();
     mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4321, startedAt, verified: true });
-    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4321}');
+    const breakaway = breakawayOptions(999, 4321);
+    const runPowerShell = breakaway.runPowerShell;
 
-    const spawned = await spawnService(service('breakaway-ok'), {
-      breakaway: { runPowerShell },
-    });
+    const spawned = await spawnService(service('breakaway-ok'), { breakaway });
 
     expect(spawned).toMatchObject({ code: 'breakaway-ok', child: null, pid: 4321 });
     // ChildProcess を作らない (node:child_process の spawn は powershell 差し替えで未使用)。
@@ -378,10 +387,11 @@ describe('job-breakaway spawn (win32 default)', () => {
     expect(script).toContain('FromBase64String');
   });
 
-  it('quotes a runtime=app exec path so cmd.exe does not split it', async () => {
+  it('hands runtime=app the exec path and args verbatim (no command-line quoting to get wrong)', async () => {
     const startedAt = new Date();
     mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4323, startedAt, verified: true });
-    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4323}');
+    const breakaway = breakawayOptions(998, 4323);
+    const runPowerShell = breakaway.runPowerShell;
     const app = {
       ...service('breakaway-app'),
       runtime: 'app',
@@ -391,28 +401,53 @@ describe('job-breakaway spawn (win32 default)', () => {
       exec_args: ['--profile', 'default one'],
     } as unknown as Service;
 
-    await spawnService(app, { breakaway: { runPowerShell } });
+    await spawnService(app, { breakaway });
 
-    // child 戦略は shell:false で exec を直接起動する。breakaway は必ず cmd.exe を
-    // 通るため、同じ引数分割になるよう引用されていなければならない。
+    // launcher が Node の spawn へ argv をそのまま渡すので、child 戦略 (shell:false) と
+    // 同じ引数分割になる。 コマンドラインへ畳まないため引用のずれが起きない。
     const script = (runPowerShell.mock.calls[0] as unknown[])[0] as string;
     const encoded = /FromBase64String\('([^']+)'\)/.exec(script)![1]!;
     const payload = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as {
       commandLine: string;
+      env: string[];
     };
-    expect(payload.commandLine).toContain(
-      '"E:\\Program Files\\hora\\hora.exe" --profile "default one"',
+    // 常駐する cmd.exe を作らない: コマンドラインは launcher の起動だけ。
+    expect(payload.commandLine).toContain('breakaway-launcher-main');
+    expect(payload.commandLine).not.toContain('hora.exe');
+    const specEntry = payload.env.find((line) => line.startsWith('EXCUBITOR_BREAKAWAY_SPEC='))!;
+    const launchSpec = JSON.parse(
+      Buffer.from(specEntry.slice('EXCUBITOR_BREAKAWAY_SPEC='.length), 'base64').toString('utf8'),
+    ) as { command: string; args: string[]; shell: boolean };
+    expect(launchSpec).toEqual(
+      expect.objectContaining({
+        command: 'E:\\Program Files\\hora\\hora.exe',
+        args: ['--profile', 'default one'],
+        shell: false,
+      }),
     );
   });
 
   it('fails fast when the created process cannot be verified', async () => {
     mocks.waitForProcessIdentity.mockResolvedValue(null);
-    const runPowerShell = vi.fn(async () => '{"ReturnValue":0,"ProcessId":4322}');
 
     await expect(
-      spawnService(service('breakaway-dead'), { breakaway: { runPowerShell } }),
+      spawnService(service('breakaway-dead'), { breakaway: breakawayOptions(997, 4322) }),
     ).rejects.toThrow(/could not be verified after breakaway spawn \(pid=4322\)/);
     expect(isManaged('breakaway-dead')).toBe(false);
+  });
+
+  it('surfaces the launcher failure reason instead of an anonymous immediate exit', async () => {
+    await expect(
+      spawnService(service('breakaway-launch-failed'), {
+        breakaway: {
+          runPowerShell: vi.fn(async () => '{"ReturnValue":0,"ProcessId":996}'),
+          readResult: async () => '{"error":"spawn npm ENOENT"}',
+          removeResult: async () => undefined,
+          resultPath: 'data/process-logs/.breakaway-test.json',
+        },
+      }),
+    ).rejects.toThrow(/spawn npm ENOENT/);
+    expect(isManaged('breakaway-launch-failed')).toBe(false);
   });
 
   it('rejects an unknown EXCUBITOR_SPAWN_STRATEGY instead of guessing', async () => {

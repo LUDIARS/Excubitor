@@ -556,8 +556,8 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
   受けると、エラーも例外も出さず exit code 0 / 出力ゼロで終わる (2026-08-03 実測)。この不変条件は
   `buildCreateScript` の登録テストが行形状で機械的に検査する。無出力は
   `runPowerShellViaStdin` が stderr 付きで失敗させる (無言の成功報告を作らない)。
-- ログは supervisor が fd を所有せず、子が `cmd.exe` の append リダイレクトで
-  `data/process-logs/<code>.{out,err}.log` へ直接書く。tail / error-detector は従来どおり
+- ログは supervisor が fd を所有せず、**短命 launcher が開いた fd** を実プロセスが継承して
+  `data/process-logs/<code>.{out,err}.log` へ直接書く (§17.5)。tail / error-detector は従来どおり
   backend 側がファイルを読む。fd を持たないだけで **サイズ上限ローテーションの契機は
   `child` 戦略と同じ「起動/再起動時のみ」** で、`ensureProcessLogPaths` が
   `EXCUBITOR_PROCESS_LOG_MAX_MB` 超過分を `<file>.1` へ退避してから パスを返す。
@@ -567,11 +567,55 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
   **成功条件は作成時刻一致のみ** (照合不能を成功へ緩めない) で、期限を過ぎたら fail-closed。
   再試行中は pid を `pending` として永続化済みなので、supervisor が落ちても boot 時の突合が拾う。
 
-### 17.4 既知の制約
+### 17.4 v0.8.1 — 起動をコマンドラインで永続化しない (2026-08-08)
 
-- `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、pid を
-  受け取れず孤児プロセスが残りうる。運用上は次回 start 前に `/api/v1/ports` の LISTEN 占有と
-  host プロセススキャンで検出する。
+**背景 (実測)**: WMI は stdio のリダイレクトを持たないため、当初は
+`cmd.exe /d /s /c "<command> 1>>out.log 2>>err.log"` を生成していた。この cmd.exe は
+**サービスの生存期間ずっと居座り**、しかも cmd.exe の `>>` は **書き込み共有を許さずに**
+ログを開く。そのため取りこぼした旧インスタンス (またはハンドルを継承したその子孫) が
+ログを掴んでいると、次の起動の cmd.exe はリダイレクト先を開けず **1 バイトも書かないまま即死**し、
+supervisor からは §17.3 の照合失敗 (`could not be verified after breakaway spawn`) にしか見えない。
+ログが空なので原因も読めず、失敗するたびに残骸が増えるので自然回復もしない。
+
+2026-08-08 の GLab 起動不能はこれだった。8/4 に取り残された cmd.exe (とその子孫) が
+`glab.{out,err}.log` を保持し続け、以後どの start も同形で落ちていた。宣言ポート (§port-guard) は
+空いていたため「ポートを空けても直らない」形になり、切り分けを長引かせた。
+
+**決定 (neco 裁定 2026-08-08)**: 起動をコマンドラインで永続化するのをやめる。Job 外へ WMI で
+出すのは **短命の launcher** (`src/process/breakaway-launcher.ts` / 実行入口
+`breakaway-launcher-main.ts`) だけにし、launcher が
+
+1. ログを **Node の通常の append open** (共有を許す) で開き、
+2. 実プロセスを `child_process.spawn` で起動し (argv をそのまま渡すので引用のずれが無い)、
+3. **実 pid か spawn エラー**を結果ファイルへ原子的に書いて即座に終了する。
+
+**契約**:
+
+- `spawnOutsideJob` が返す pid は launcher ではなく **実プロセス**の pid。以後の adopted 管理・
+  identity 照合・`taskkill /T /F` はすべてこの pid を指す。
+- launcher へ渡す起動 spec も **env 経由** (`EXCUBITOR_BREAKAWAY_SPEC`、base64 JSON)。
+  コマンドラインに載るのは node、source 実行に必要な loader 登録、launcher のパスだけで、
+  credential とサービスの command / argv は従来どおりコマンドラインに出ない。launcher は
+  spec を自分の env から取り除いてから子へ env を渡す (Windows の大小文字違いも予約名として除去)。
+- 結果ファイルは `data/process-logs/.breakaway-<uuid>.json`。成否にかかわらず supervisor が消す。
+  既定 20s 以内に現れなければ fail-closed (launcher の pid を添えて報告する)。
+- **spawn 失敗は理由付きで返る**。`spawn npm ENOENT` のような原因が結果ファイル経由で
+  supervisor まで届くため、「無出力で即死」という診断不能な失敗形が無くなる。
+- Windows は親の終了で子を道連れにしないため launcher は `detached` を付けない
+  (§15.1: DETACHED_PROCESS は CREATE_NO_WINDOW を無効化して窓を開く)。launcher は WmiPrvSE
+  配下 = Job 外で生成されるので、その子である実プロセスも Job 外に残る。
+- `shell` の要否は `child` 戦略と同じ判定 (`runtime !== 'app'`)。`npm` / `.bat` を入口にする
+  サービスでは Windows の仕様上 cmd.exe が 1 つ挟まるが、**その cmd.exe はログのハンドルを
+  コマンドラインのリダイレクトで持たない** (fd は launcher が開いて継承させる) ため、
+  上記の相互ロックは構造的に起きない。
+
+### 17.5 既知の制約
+
+- `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、または
+  launcher が結果を書く前に supervisor 側が期限を迎えた場合、pid を受け取れず孤児プロセスが
+  残りうる。運用上は次回 start 前に `/api/v1/ports` の LISTEN 占有と
+  host プロセススキャンで検出する。孤児が残っても §17.4 以降は **ログのハンドルで次の起動を
+  塞ぐことはない** (塞ぐのは宣言ポートだけで、そちらは port-guard が停止する)。
 - 起動直後の identity 照合を最大 3s 再試行するため、**即死 → その間に pid が再利用された**場合は
   無関係なプロセスが tolerance (30s) 内の作成時刻を持ちうる。単発照合より窓が広い。win32 の pid
   再利用は即時ではないため実害は低いが、adopt 後の停止は `taskkill /T /F` である点に留意する。

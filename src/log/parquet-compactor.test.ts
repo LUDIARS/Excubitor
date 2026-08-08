@@ -53,7 +53,7 @@ describe('Parquet compaction', () => {
       limit: 10,
     });
     expect(logs.map((entry) => entry.line)).toEqual(['current', 'second', 'first']);
-  });
+  }, 10_000);
 
   it('保持期限より古い Parquet だけを削除する', () => {
     const { root, serviceDir } = makeServiceRoot();

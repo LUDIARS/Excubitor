@@ -11,17 +11,61 @@
  * IsProcessInJob=true)。
  *
  * 脱出手段: WMI (Win32_Process.Create)。プロセスは WmiPrvSE (呼び出し元とは別の
- * ホスト) の下で生成されるため、呼び出し元の Job に入らない。生成後は pid だけを
- * 受け取り、既存の adopted-process 系 (pid 監視 / taskkill /T / reaper 再起動) で
- * 管理する。
+ * ホスト) の下で生成されるため、呼び出し元の Job に入らない。
+ *
+ * ただし WMI は stdio のリダイレクトを持たない。以前はそれを
+ * `cmd.exe /d /s /c "<command> 1>>out.log 2>>err.log"` で補っていたが、その cmd.exe は
+ * サービスの生存期間ずっと居座り、cmd.exe の `>>` は書き込み共有を許さずにログを開く。
+ * 取りこぼした旧インスタンスがログを掴んでいると次の起動は無出力のまま即死し、
+ * 「即死したのか照合できないのか分からない」失敗になる (2026-08-08 GLab 起動不能)。
+ * そこで **起動をコマンドラインで永続化するのをやめ** (neco 裁定 2026-08-08)、Job 外へ出すのは
+ * 短命の launcher (breakaway-launcher.ts) だけにして、実プロセスは launcher が
+ * Node の fd で起動する。ここが受け取る pid は launcher ではなく **実プロセス**の pid で、
+ * 以後は既存の adopted-process 系 (pid 監視 / taskkill /T / reaper 再起動) で管理する。
  *
  * 機密の扱い: 子の env には起動 credential が含まれるため、コマンドラインには
  * 一切載せない。spec 全体を base64 JSON にして PowerShell の **stdin** に流し、
- * Win32_ProcessStartup.EnvironmentVariables で渡す。
+ * Win32_ProcessStartup.EnvironmentVariables で渡す。launcher へ渡す起動 spec も
+ * env 経由 (`EXCUBITOR_BREAKAWAY_SPEC`) で、コマンドラインには node、source 実行時の
+ * loader 登録、launcher のパスしか載らない。
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { BREAKAWAY_SPEC_ENV, type BreakawayLaunchSpec } from './breakaway-launcher.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_RESULT_TIMEOUT_MS = 20_000;
+const RESULT_POLL_INTERVAL_MS = 50;
+const LOADER_OPTIONS_WITH_VALUE = new Set([
+  '--experimental-loader',
+  '--import',
+  '--loader',
+  '--require',
+  '-r',
+]);
+const LOADER_OPTION_PREFIXES = [
+  '--experimental-loader=',
+  '--import=',
+  '--loader=',
+  '--require=',
+];
+
+const DEFAULT_RESULT_IO = {
+  read: async (path: string): Promise<string | null> => {
+    try {
+      return await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  },
+  remove: (path: string): Promise<void> => rm(path, { force: true }),
+  sleep: (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)),
+};
 
 /** Win32_Process.Create の ReturnValue → 人間が読める理由。 */
 const CREATE_RETURN_REASONS: Record<number, string> = {
@@ -33,8 +77,11 @@ const CREATE_RETURN_REASONS: Record<number, string> = {
 };
 
 export interface BreakawaySpawnSpec {
-  /** 子として実行する生のコマンドライン (リダイレクトは builder が付ける)。 */
-  commandLine: string;
+  /** 実行するコマンド (shell=false なら実行ファイルそのもの)。 */
+  command: string;
+  args: string[];
+  /** npm / .bat 解決のため cmd.exe を挟むか (child 戦略の shell 判定と同じ)。 */
+  shell: boolean;
   cwd?: string;
   /** 子プロセスの環境変数一式 (継承ではなく全置換)。 */
   env: Record<string, string>;
@@ -43,60 +90,87 @@ export interface BreakawaySpawnSpec {
 }
 
 export interface BreakawaySpawnResult {
+  /** 実プロセスの pid (launcher の pid ではない)。 */
   pid: number;
 }
 
 export interface BreakawaySpawnOptions {
   timeoutMs?: number;
+  /** launcher が結果を書くまで待つ上限。 */
+  resultTimeoutMs?: number;
   /** テスト用: PowerShell 実行の差し替え。 */
   runPowerShell?: (script: string, timeoutMs: number) => Promise<string>;
+  /** テスト用: 結果ファイル読み取りの差し替え (未生成なら null)。 */
+  readResult?: (path: string) => Promise<string | null>;
+  /** テスト用: 結果ファイル削除の差し替え。 */
+  removeResult?: (path: string) => Promise<void>;
+  /** テスト用: 待機の差し替え。 */
+  sleep?: (ms: number) => Promise<void>;
+  /** テスト用: 結果ファイル名の差し替え (既定は uuid)。 */
+  resultPath?: string;
+  /** テスト用: launcher 起動コマンドラインの差し替え。 */
+  launcherCommandLine?: string;
 }
 
 /**
- * cmd.exe のコマンドラインへ 1 トークンを安全に載せる。
- * runtime=app のように child 戦略では shell を介さず (= 空白入りの exec パスが
- * そのまま渡る) 起動する経路で、breakaway 側も同じ引数分割になるよう引用する。
- * 埋め込みの `"` は `/d /s /c "..."` の外側引用符と区別できないため fail-fast。
+ * Win32_Process.Create のコマンドラインへ 1 トークンを安全に載せる。
+ * cmd.exe を経由しないため `%` 展開は起きない。空白を含むパスだけ引用する。
  */
-export function quoteWindowsArgument(value: string): string {
+export function quoteCommandLineToken(value: string): string {
   if (value.includes('"')) {
     throw new Error(`breakaway spawn cannot quote an argument containing a double quote: ${value}`);
   }
-  // cmd.exe は引用符の内側でも `%VAR%` を展開する。引用では防げないため、child 戦略
-  // (shell:false) なら素通りしていた値が静かに書き換わる。silent corruption を作らない。
-  if (value.includes('%')) {
-    throw new Error(`breakaway spawn cannot pass an argument containing '%' through cmd.exe: ${value}`);
-  }
-  return value.length === 0 || /[\s&|<>^()]/.test(value) ? `"${value}"` : value;
+  return value.length === 0 || /[\s]/.test(value) ? `"${value}"` : value;
 }
 
 /**
- * コマンドラインへ append リダイレクトを付けて cmd.exe 経由の 1 行にする。
- * `/d /s /c` は node の shell:true と同じ解釈規則 (外側の二重引用符を保持)。
+ * launcher を起動するコマンドラインを組み立てる。
+ * supervisor が tsx 等の loader 付きで動いている場合 (dev) も launcher を実行できるよう、
+ * selectLauncherExecArgv で選んだ loader 登録を受け取る。
  */
-export function buildRedirectedCommandLine(
-  commandLine: string,
-  stdoutPath: string,
-  stderrPath: string,
+export function buildLauncherCommandLine(
+  execPath: string,
+  execArgv: string[],
+  launcherPath: string,
 ): string {
-  const command = commandLine.trim();
-  if (command.length === 0) throw new Error('breakaway spawn requires a non-empty command line');
-  // ログパスは catalog の service code 由来。`"` が混ざるとリダイレクト先ではなく
-  // 追加のコマンドとして解釈されうるため、組み立て前に弾く。
-  for (const target of [stdoutPath, stderrPath]) {
-    if (target.includes('"')) {
-      throw new Error(`breakaway spawn log path must not contain a double quote: ${target}`);
+  return [execPath, ...execArgv, launcherPath].map(quoteCommandLineToken).join(' ');
+}
+
+/**
+ * source 実行に必要な loader 登録だけを launcher へ引き継ぐ。
+ * `--watch` / `--inspect-brk` / `--test` 等まで渡すと、短命 launcher が常駐・停止したり
+ * entrypoint を実行しなくなったりするため、supervisor の全 execArgv は継承しない。
+ */
+export function selectLauncherExecArgv(execArgv: string[]): string[] {
+  const selected: string[] = [];
+  for (let index = 0; index < execArgv.length; index += 1) {
+    const option = execArgv[index]!;
+    if (LOADER_OPTIONS_WITH_VALUE.has(option)) {
+      const value = execArgv[index + 1];
+      if (value === undefined) {
+        throw new Error(`Node loader option ${option} is missing its value`);
+      }
+      selected.push(option, value);
+      index += 1;
+      continue;
+    }
+    if (LOADER_OPTION_PREFIXES.some((prefix) => option.startsWith(prefix))) {
+      selected.push(option);
     }
   }
-  return `cmd.exe /d /s /c "${command} 1>>"${stdoutPath}" 2>>"${stderrPath}""`;
+  return selected;
 }
 
 /** spec を埋め込んだ PowerShell スクリプト (stdin 渡し) を組み立てる。 */
-export function buildCreateScript(spec: BreakawaySpawnSpec): string {
+export function buildCreateScript(params: {
+  commandLine: string;
+  cwd?: string;
+  env: Record<string, string>;
+}): string {
   const payload = {
-    commandLine: buildRedirectedCommandLine(spec.commandLine, spec.stdoutPath, spec.stderrPath),
-    cwd: spec.cwd ?? null,
-    env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+    commandLine: params.commandLine,
+    cwd: params.cwd ?? null,
+    env: Object.entries(params.env).map(([key, value]) => `${key}=${value}`),
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
   // 各行は完結したステートメントにする。`-Command -` (stdin) 経由の Windows PowerShell 5.1
@@ -106,7 +180,7 @@ export function buildCreateScript(spec: BreakawaySpawnSpec): string {
   return [
     "$ErrorActionPreference = 'Stop'",
     `$spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json`,
-    // ShowWindow=0 (SW_HIDE): cmd.exe のコンソール窓を出さない (windowsHide 相当)。
+    // ShowWindow=0 (SW_HIDE): launcher のコンソール窓を出さない (windowsHide 相当)。
     '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [UInt16]0; EnvironmentVariables = [string[]]$spec.env }',
     '$arguments = @{ CommandLine = $spec.commandLine; ProcessStartupInformation = $startup }',
     'if ($null -ne $spec.cwd) { $arguments.CurrentDirectory = $spec.cwd }',
@@ -115,8 +189,8 @@ export function buildCreateScript(spec: BreakawaySpawnSpec): string {
   ].join('\n');
 }
 
-/** PowerShell 出力 (JSON) を検証して pid を取り出す。 */
-export function parseCreateOutput(output: string): BreakawaySpawnResult {
+/** PowerShell 出力 (JSON) を検証して launcher の pid を取り出す。 */
+export function parseCreateOutput(output: string): { pid: number } {
   const line = output
     .split(/\r?\n/)
     .map((entry) => entry.trim())
@@ -141,16 +215,119 @@ export function parseCreateOutput(output: string): BreakawaySpawnResult {
   return { pid: record.ProcessId };
 }
 
+/** launcher が書いた結果 JSON を検証して実 pid を取り出す。 */
+export function parseLaunchResult(json: string): { pid: number } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`breakaway launcher result is not valid JSON: ${bound(json)}`, { cause: error });
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('breakaway launcher result must be a JSON object');
+  }
+  const record = parsed as { pid?: unknown; error?: unknown };
+  if (typeof record.error === 'string') {
+    // launcher が理由を持っている場合は必ずそれを返す。「即死したように見える」で潰さない。
+    throw new Error(`breakaway launcher could not start the service: ${bound(record.error)}`);
+  }
+  if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid) || record.pid <= 0) {
+    throw new Error(`breakaway launcher returned an invalid pid: ${String(record.pid)}`);
+  }
+  return { pid: record.pid };
+}
+
+/** launcher モジュール (実行入口) の絶対パス。dev の .ts / 本番の .js どちらでも解決する。 */
+export function resolveLauncherPath(): string {
+  const here = fileURLToPath(import.meta.url);
+  const extension = here.endsWith('.ts') ? '.ts' : '.js';
+  return join(dirname(here), `breakaway-launcher-main${extension}`);
+}
+
 /**
- * Job Object の外でプロセスを起動し pid を返す。失敗は throw (無言 fallback 禁止)。
+ * Job Object の外でプロセスを起動し、実プロセスの pid を返す。失敗は throw (無言 fallback 禁止)。
  */
 export async function spawnOutsideJob(
   spec: BreakawaySpawnSpec,
   options: BreakawaySpawnOptions = {},
 ): Promise<BreakawaySpawnResult> {
   const run = options.runPowerShell ?? runPowerShellViaStdin;
-  const output = await run(buildCreateScript(spec), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  return parseCreateOutput(output);
+  const readResult = options.readResult ?? DEFAULT_RESULT_IO.read;
+  const removeResult = options.removeResult ?? DEFAULT_RESULT_IO.remove;
+  const sleep = options.sleep ?? DEFAULT_RESULT_IO.sleep;
+  // 結果ファイルはログと同じディレクトリに置く (supervisor が書ける場所として保証済み)。
+  const resultPath =
+    options.resultPath ?? join(dirname(spec.stdoutPath), `.breakaway-${randomUUID()}.json`);
+
+  const launchSpec: BreakawayLaunchSpec = {
+    command: spec.command,
+    args: spec.args,
+    shell: spec.shell,
+    ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+    stdoutPath: spec.stdoutPath,
+    stderrPath: spec.stderrPath,
+    resultPath,
+  };
+
+  const commandLine =
+    options.launcherCommandLine
+    ?? buildLauncherCommandLine(
+      process.execPath,
+      selectLauncherExecArgv(process.execArgv),
+      resolveLauncherPath(),
+    );
+
+  const launcherEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(spec.env)) {
+    // Windows では大小文字違いも同じ env 名。catalog 側の値で制御 spec を上書きさせず、
+    // launcher から実プロセスへ制御 spec が残る経路も作らない。
+    if (key.toUpperCase() === BREAKAWAY_SPEC_ENV) continue;
+    launcherEnv[key] = value;
+  }
+  launcherEnv[BREAKAWAY_SPEC_ENV] = Buffer.from(JSON.stringify(launchSpec), 'utf8').toString('base64');
+
+  try {
+    const output = await run(
+      buildCreateScript({
+        commandLine,
+        ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+        env: launcherEnv,
+      }),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
+    const launcher = parseCreateOutput(output);
+    const json = await waitForLaunchResult(
+      resultPath,
+      options.resultTimeoutMs ?? DEFAULT_RESULT_TIMEOUT_MS,
+      { readResult, sleep, launcherPid: launcher.pid },
+    );
+    return parseLaunchResult(json);
+  } finally {
+    // 成否にかかわらず残さない。読めなかった場合でも次の起動が古い結果を拾わない。
+    await removeResult(resultPath).catch(() => undefined);
+  }
+}
+
+async function waitForLaunchResult(
+  resultPath: string,
+  timeoutMs: number,
+  deps: {
+    readResult: (path: string) => Promise<string | null>;
+    sleep: (ms: number) => Promise<void>;
+    launcherPid: number;
+  },
+): Promise<string> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    const json = await deps.readResult(resultPath);
+    if (json !== null) return json;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `breakaway launcher (pid=${deps.launcherPid}) did not report a pid within ${timeoutMs}ms`,
+      );
+    }
+    await deps.sleep(RESULT_POLL_INTERVAL_MS);
+  }
 }
 
 function runPowerShellViaStdin(script: string, timeoutMs: number): Promise<string> {

@@ -1,82 +1,121 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildCreateScript,
-  buildRedirectedCommandLine,
+  buildLauncherCommandLine,
   parseCreateOutput,
-  quoteWindowsArgument,
+  parseLaunchResult,
+  quoteCommandLineToken,
+  resolveLauncherPath,
+  selectLauncherExecArgv,
   spawnOutsideJob,
+  type BreakawaySpawnSpec,
 } from './breakaway-spawn.js';
+import { BREAKAWAY_SPEC_ENV, type BreakawayLaunchSpec } from './breakaway-launcher.js';
 
-describe('quoteWindowsArgument', () => {
-  it('quotes values that cmd.exe would otherwise split or interpret', () => {
-    expect(quoteWindowsArgument('E:\\Program Files\\hora\\hora.exe')).toBe(
-      '"E:\\Program Files\\hora\\hora.exe"',
+const SPEC: BreakawaySpawnSpec = {
+  command: 'npm',
+  args: ['run', 'dev'],
+  shell: true,
+  cwd: 'E:\\svc',
+  env: { A: '1' },
+  stdoutPath: 'E:\\logs\\svc.out.log',
+  stderrPath: 'E:\\logs\\svc.err.log',
+};
+
+/** buildCreateScript が埋め込んだ payload を取り出す。 */
+function decodePayload(script: string): { commandLine: string; cwd: string | null; env: string[] } {
+  const encoded = /FromBase64String\('([^']+)'\)/.exec(script)?.[1];
+  expect(encoded).toBeDefined();
+  return JSON.parse(Buffer.from(encoded!, 'base64').toString('utf8')) as {
+    commandLine: string;
+    cwd: string | null;
+    env: string[];
+  };
+}
+
+/** payload の env から launcher spec を取り出す。 */
+function decodeLaunchSpec(script: string): BreakawayLaunchSpec {
+  const entry = decodePayload(script).env.find((line) => line.startsWith(`${BREAKAWAY_SPEC_ENV}=`));
+  expect(entry).toBeDefined();
+  const encoded = entry!.slice(BREAKAWAY_SPEC_ENV.length + 1);
+  return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as BreakawayLaunchSpec;
+}
+
+describe('quoteCommandLineToken', () => {
+  it('quotes paths containing spaces', () => {
+    expect(quoteCommandLineToken('C:\\Program Files\\nodejs\\node.exe')).toBe(
+      '"C:\\Program Files\\nodejs\\node.exe"',
     );
-    expect(quoteWindowsArgument('a&b')).toBe('"a&b"');
-    expect(quoteWindowsArgument('')).toBe('""');
+    expect(quoteCommandLineToken('')).toBe('""');
   });
 
   it('leaves plain tokens untouched', () => {
-    expect(quoteWindowsArgument('--headless')).toBe('--headless');
+    // cmd.exe を経由しないため `%` や `&` の展開は起きない。引用は空白だけで足りる。
+    expect(quoteCommandLineToken('E:\\build\\100%\\launcher.js')).toBe('E:\\build\\100%\\launcher.js');
+    expect(quoteCommandLineToken('--import')).toBe('--import');
   });
 
   it('rejects an embedded double quote instead of producing an ambiguous line', () => {
-    expect(() => quoteWindowsArgument('a"b')).toThrow(/double quote/);
-  });
-
-  it("rejects '%' because cmd.exe expands it even inside quotes", () => {
-    // child 戦略 (shell:false) では素通りしていた値。引用では防げないので、
-    // 静かに書き換わるより fail-fast する。
-    expect(() => quoteWindowsArgument('E:\\build\\100%\\app.exe')).toThrow(/'%'/);
+    expect(() => quoteCommandLineToken('a"b')).toThrow(/double quote/);
   });
 });
 
-describe('buildRedirectedCommandLine', () => {
-  it('wraps the command in cmd.exe with append redirection', () => {
-    const line = buildRedirectedCommandLine(
-      'npm run start',
-      'E:\\logs\\svc.out.log',
-      'E:\\logs\\svc.err.log',
-    );
-    expect(line).toBe(
-      'cmd.exe /d /s /c "npm run start 1>>"E:\\logs\\svc.out.log" 2>>"E:\\logs\\svc.err.log""',
+describe('buildLauncherCommandLine', () => {
+  it('carries the supervisor loader flags so dev (tsx) and dist behave the same', () => {
+    expect(
+      buildLauncherCommandLine(
+        'C:\\Program Files\\nodejs\\node.exe',
+        ['--import', 'file:///E:/x/tsx/loader.mjs'],
+        'E:\\Excubitor\\dist\\process\\breakaway-launcher-main.js',
+      ),
+    ).toBe(
+      '"C:\\Program Files\\nodejs\\node.exe" --import file:///E:/x/tsx/loader.mjs'
+        + ' E:\\Excubitor\\dist\\process\\breakaway-launcher-main.js',
     );
   });
+});
 
-  it('rejects an empty command line', () => {
-    expect(() => buildRedirectedCommandLine('  ', 'out', 'err')).toThrow(/non-empty command/);
+describe('selectLauncherExecArgv', () => {
+  it('keeps source loaders without inheriting flags that change launcher lifecycle', () => {
+    expect(
+      selectLauncherExecArgv([
+        '--inspect-brk=0',
+        '--require',
+        'C:\\tsx\\preflight.cjs',
+        '--watch',
+        '--import=file:///E:/tsx/loader.mjs',
+        '--test',
+      ]),
+    ).toEqual([
+      '--require',
+      'C:\\tsx\\preflight.cjs',
+      '--import=file:///E:/tsx/loader.mjs',
+    ]);
   });
+});
 
-  it('rejects a log path containing a double quote (redirect escape)', () => {
-    expect(() => buildRedirectedCommandLine('app.exe', 'a".log', 'err')).toThrow(/double quote/);
-    expect(() => buildRedirectedCommandLine('app.exe', 'out', 'e".log')).toThrow(/double quote/);
+describe('resolveLauncherPath', () => {
+  it('points at the launcher entrypoint next to this module', () => {
+    const path = resolveLauncherPath();
+    expect(path).toMatch(/breakaway-launcher-main\.(ts|js)$/);
   });
 });
 
 describe('buildCreateScript', () => {
   it('embeds the spec as base64 so secrets never reach a command line', () => {
     const script = buildCreateScript({
-      commandLine: 'node server.js',
+      commandLine: 'node launcher.js',
       cwd: 'E:\\svc',
       env: { SECRET_TOKEN: 'hunter2', PATH: 'C:\\bin' },
-      stdoutPath: 'out.log',
-      stderrPath: 'err.log',
     });
     expect(script).not.toContain('hunter2');
     expect(script).toContain('FromBase64String');
     expect(script).toContain('Win32_ProcessStartup');
     expect(script).toContain('Invoke-CimMethod');
-    // base64 を復号すると env が K=V 形式で入っている。
-    const encoded = /FromBase64String\('([^']+)'\)/.exec(script)?.[1];
-    expect(encoded).toBeDefined();
-    const payload = JSON.parse(Buffer.from(encoded!, 'base64').toString('utf8')) as {
-      commandLine: string;
-      cwd: string | null;
-      env: string[];
-    };
+    const payload = decodePayload(script);
     expect(payload.env).toContain('SECRET_TOKEN=hunter2');
     expect(payload.cwd).toBe('E:\\svc');
-    expect(payload.commandLine).toContain('node server.js');
+    expect(payload.commandLine).toBe('node launcher.js');
   });
 
   it('never leaves a line open for continuation (stdin -Command - silently no-ops on it)', () => {
@@ -85,12 +124,7 @@ describe('buildCreateScript', () => {
     // 終わる。行ごとに完結したステートメントであることをここで機械的に保証する。
     // `{` だけでなく、再フォーマットで入り込みやすい他の継続トークンも同時に禁じる。
     const CONTINUATION_SUFFIXES = ['{', '(', '|', ',', '=', '`'];
-    const script = buildCreateScript({
-      commandLine: 'node server.js',
-      env: { A: '1' },
-      stdoutPath: 'out.log',
-      stderrPath: 'err.log',
-    });
+    const script = buildCreateScript({ commandLine: 'node launcher.js', env: { A: '1' } });
     for (const line of script.split('\n')) {
       const trimmed = line.trim();
       const dangling = CONTINUATION_SUFFIXES.find((suffix) => trimmed.endsWith(suffix));
@@ -99,15 +133,8 @@ describe('buildCreateScript', () => {
   });
 
   it('omits CurrentDirectory when cwd is not given', () => {
-    const script = buildCreateScript({
-      commandLine: 'app.exe',
-      env: {},
-      stdoutPath: 'out.log',
-      stderrPath: 'err.log',
-    });
-    const encoded = /FromBase64String\('([^']+)'\)/.exec(script)![1]!;
-    const payload = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as { cwd: null };
-    expect(payload.cwd).toBeNull();
+    const script = buildCreateScript({ commandLine: 'app.exe', env: {} });
+    expect(decodePayload(script).cwd).toBeNull();
   });
 });
 
@@ -152,31 +179,127 @@ describe('parseCreateOutput', () => {
   });
 });
 
+describe('parseLaunchResult', () => {
+  it('reads the real service pid', () => {
+    expect(parseLaunchResult('{"pid":4321}')).toEqual({ pid: 4321 });
+  });
+
+  it('surfaces the launcher error instead of an anonymous "it exited immediately"', () => {
+    expect(() => parseLaunchResult('{"error":"spawn npm ENOENT"}')).toThrow(/spawn npm ENOENT/);
+  });
+
+  it('rejects a malformed result', () => {
+    expect(() => parseLaunchResult('{"pid":0}')).toThrow(/invalid pid/);
+    expect(() => parseLaunchResult('null')).toThrow(/must be a JSON object/);
+    expect(() => parseLaunchResult('not json')).toThrow(/not valid JSON/);
+  });
+});
+
 describe('spawnOutsideJob', () => {
-  it('runs the create script through the injected PowerShell runner', async () => {
-    const runPowerShell = vi.fn(async (script: string) => {
+  function runner(processId: number) {
+    return vi.fn(async (script: string) => {
       expect(script).toContain('Invoke-CimMethod');
-      return '{"ReturnValue":0,"ProcessId":555}';
+      return `{"ReturnValue":0,"ProcessId":${processId}}`;
     });
-    const result = await spawnOutsideJob(
+  }
+
+  it('returns the pid the launcher reports, not the launcher pid', async () => {
+    const runPowerShell = runner(555);
+    const result = await spawnOutsideJob(SPEC, {
+      runPowerShell,
+      resultPath: 'E:\\logs\\.breakaway-test.json',
+      readResult: async () => '{"pid":4321}',
+      removeResult: async () => undefined,
+    });
+
+    expect(result).toEqual({ pid: 4321 });
+  });
+
+  it('passes the argv and log paths to the launcher through env, never the command line', async () => {
+    const runPowerShell = runner(555);
+    await spawnOutsideJob(
       {
-        commandLine: 'node x.js',
-        env: { A: '1' },
-        stdoutPath: 'o.log',
-        stderrPath: 'e.log',
+        ...SPEC,
+        env: { ...SPEC.env, excubitor_breakaway_spec: 'shadowed-control-value' },
       },
-      { runPowerShell },
+      {
+        runPowerShell,
+        resultPath: 'E:\\logs\\.breakaway-test.json',
+        readResult: async () => '{"pid":4321}',
+        removeResult: async () => undefined,
+      },
     );
-    expect(result).toEqual({ pid: 555 });
+
+    const script = runPowerShell.mock.calls[0]![0];
+    const payload = decodePayload(script);
+    // 常駐する cmd.exe を作らないため、コマンドラインは launcher の起動だけ。
+    expect(payload.commandLine).not.toContain('npm');
+    expect(payload.commandLine).not.toContain('>>');
+    expect(payload.commandLine).toContain('breakaway-launcher-main');
+
+    const launchSpec = decodeLaunchSpec(script);
+    expect(launchSpec).toMatchObject({
+      command: 'npm',
+      args: ['run', 'dev'],
+      shell: true,
+      cwd: 'E:\\svc',
+      stdoutPath: 'E:\\logs\\svc.out.log',
+      stderrPath: 'E:\\logs\\svc.err.log',
+      resultPath: 'E:\\logs\\.breakaway-test.json',
+    });
+    expect(
+      payload.env.filter(
+        (entry) => entry.slice(0, entry.indexOf('=')).toUpperCase() === BREAKAWAY_SPEC_ENV,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('waits for the launcher result and cleans the file up afterwards', async () => {
+    const removeResult = vi.fn(async () => undefined);
+    const readResult = vi
+      .fn<(path: string) => Promise<string | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue('{"pid":99}');
+
+    const result = await spawnOutsideJob(SPEC, {
+      runPowerShell: runner(555),
+      resultPath: 'E:\\logs\\.breakaway-test.json',
+      readResult,
+      removeResult,
+      sleep: async () => undefined,
+    });
+
+    expect(result).toEqual({ pid: 99 });
+    expect(readResult).toHaveBeenCalledTimes(3);
+    expect(removeResult).toHaveBeenCalledWith('E:\\logs\\.breakaway-test.json');
+  });
+
+  it('fails closed (and still cleans up) when the launcher never reports', async () => {
+    const removeResult = vi.fn(async () => undefined);
+
+    await expect(
+      spawnOutsideJob(SPEC, {
+        runPowerShell: runner(555),
+        resultPath: 'E:\\logs\\.breakaway-test.json',
+        readResult: async () => null,
+        removeResult,
+        sleep: async () => undefined,
+        resultTimeoutMs: 0,
+      }),
+    ).rejects.toThrow(/launcher \(pid=555\) did not report a pid/);
+    expect(removeResult).toHaveBeenCalled();
   });
 
   it('propagates create failures without a silent fallback', async () => {
     const runPowerShell = vi.fn(async () => '{"ReturnValue":2,"ProcessId":null}');
     await expect(
-      spawnOutsideJob(
-        { commandLine: 'node x.js', env: {}, stdoutPath: 'o', stderrPath: 'e' },
-        { runPowerShell },
-      ),
+      spawnOutsideJob(SPEC, {
+        runPowerShell,
+        resultPath: 'E:\\logs\\.breakaway-test.json',
+        readResult: async () => null,
+        removeResult: async () => undefined,
+      }),
     ).rejects.toThrow(/access denied/);
   });
 });

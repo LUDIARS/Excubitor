@@ -27,7 +27,7 @@ import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
-import { quoteWindowsArgument, spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
+import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { clearDeclaredPort } from './port-guard.js';
 
 const logger = createNamedLogger('excubitor.process');
@@ -359,15 +359,15 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   // win32 既定は WMI 経由の job-breakaway spawn を使い、生成 pid を adopted と
   // 同じ pid 管理 (reaper 再起動 / taskkill /T stop) に載せる (design.md §17)。
   if (resolveSpawnStrategy() === 'job-breakaway') {
-    // breakaway は常に cmd.exe を経由するため、child 戦略で shell:false だった
-    // runtime=app (空白入りの exec パス / 引数) は明示的に引用してから 1 行にする。
-    // shell 経由の runtime (node / dev-process-md / start_script) は node の
-    // shell:true と同じく素の連結にして解釈規則を揃える。
-    const commandLine =
-      svc.runtime === 'app'
-        ? [cmd, ...args].map(quoteWindowsArgument).join(' ')
-        : [cmd, ...args].join(' ');
-    return spawnBreakawayService(svc, opts, generation, childEnv, resolvedCwd, commandLine);
+    // launcher が Node の spawn で起動するため、コマンドは child 戦略と同じ
+    // (cmd, args, shell) の形のまま渡す。 文字列へ畳まないので引用の食い違いも起きない。
+    return spawnBreakawayService(svc, opts, generation, childEnv, resolvedCwd, {
+      command: cmd,
+      args,
+      // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
+      // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
+      shell: svc.runtime !== 'app',
+    });
   }
 
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
@@ -713,7 +713,7 @@ function resolveSpawnStrategy(): 'child' | 'job-breakaway' {
   throw new Error(`EXCUBITOR_SPAWN_STRATEGY must be "child" or "job-breakaway": ${override}`);
 }
 
-// WMI 経由 spawn は powershell の起動を挟むため、作成時刻の照合は spawn 前後の
+// WMI 経由 spawn は powershell と launcher の起動を挟むため、作成時刻の照合は spawn 前後の
 // 時計ずれを許容する (通常の adopt 照合の 5s では負荷時に誤検知しうる)。
 const BREAKAWAY_START_TOLERANCE_MS = 30_000;
 const BREAKAWAY_IDENTITY_WAIT_MS = 3_000;
@@ -729,10 +729,10 @@ async function spawnBreakawayService(
   generation: number,
   childEnv: Record<string, string>,
   resolvedCwd: string | undefined,
-  commandLine: string,
+  command: { command: string; args: string[]; shell: boolean },
 ): Promise<SpawnedProcess> {
-  // 前回 child 戦略の fd が残っていれば閉じる。breakaway 子は自前でログファイルへ
-  // append リダイレクトするため、supervisor は fd を所有しない。
+  // 前回 child 戦略の fd が残っていれば閉じる。breakaway ではログの fd を短命 launcher が
+  // 開いて子へ渡すため、supervisor は fd を所有しない。
   stopProcessLog(svc.code);
   const { stdoutPath, stderrPath } = ensureProcessLogPaths(svc.code);
   const spawnedAt = new Date();
@@ -740,7 +740,7 @@ async function spawnBreakawayService(
   try {
     ({ pid } = await spawnOutsideJob(
       {
-        commandLine,
+        ...command,
         ...(resolvedCwd === undefined ? {} : { cwd: resolvedCwd }),
         env: childEnv,
         stdoutPath,
@@ -755,7 +755,7 @@ async function spawnBreakawayService(
   // 復旧 (reconcile/adopt) と同じ形で pid を先に永続化する。この直後に supervisor が
   // 死んでも boot 時の突合が拾える。
   await updateInstanceStatus(svc.code, 'pending', pid, undefined, spawnedAt);
-  // Win32_Process.Create が返す PID は StartTime の可視化より先行しうるため、
+  // launcher が返す PID は StartTime の可視化より先行しうるため、
   // 作成時刻つき照合だけを短時間リトライする。照合条件を緩めず、期限後は fail-closed。
   const identity = await waitForProcessIdentity(pid, spawnedAt, {
     toleranceMs: BREAKAWAY_START_TOLERANCE_MS,

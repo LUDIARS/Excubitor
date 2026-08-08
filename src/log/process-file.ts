@@ -90,8 +90,8 @@ export function processLogFile(code: string, channel: Channel): string {
 
 /**
  * breakaway spawn 用: ログファイルのパスだけを用意する (fd は開かない)。
- * 子が cmd.exe の append リダイレクトで直接ファイルへ書くため、supervisor は
- * fd を所有しない (親の死とログ書き込みを完全に切り離す)。
+ * 短命 launcher が append fd を開いて実プロセスへ継承させるため、supervisor は
+ * fd を所有しない (supervisor の死とログ書き込みを完全に切り離す)。
  *
  * fd は持たないが、 ローテーションの契機は startProcessLog と同じ 「open
  * (= サービス起動/再起動) 時のみ」 を維持する。 ここで回さないと win32 既定の

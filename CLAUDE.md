@@ -104,6 +104,7 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   上限 (`EXCUBITOR_PROCESS_LOG_MAX_MB`、既定 32MB) 超過分は open (=サービス起動/再起動) 時に
   `<file>.1` へローテーション (稼働中の rename は不可のため open 時のみ)。
 - **win32 の managed service は Job Object 脱出 spawn (job-breakaway) が既定**。supervisor は Scheduled Task の Job 内で動き `detached: true` では子が Job を継承するため、WMI (Win32_Process.Create) 経由で Job 外に生成し pid を adopted 管理に載せる (`src/process/breakaway-spawn.ts`、`EXCUBITOR_SPAWN_STRATEGY` で上書き可)。supervisor が死んでもサービスは残り、再起動時は reconcile が生存 pid を再採用して何もしない。
+  **WMI で出すのは短命 launcher (`src/process/breakaway-launcher.ts`) だけ**で、ログ fd を開いて実プロセスを起動し実 pid を返したら即終了する。起動を `cmd.exe /c "... 1>>log"` の形でコマンドラインに永続化しない (cmd.exe の `>>` は書き込み共有を許さずログを掴むため、残骸が次の起動を無出力で即死させていた。design.md §17.4)。
 - 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
 - **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /
