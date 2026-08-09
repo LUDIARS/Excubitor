@@ -25,8 +25,9 @@
 Excubitor はログを DB に持たない。**
 
 1. ライブ面 (SSE / recent / error-detector) は log bus + **インメモリリングバッファ**で処理
-2. 履歴クエリは**クエリ時だけ DuckDB インスタンスを開いて JSONL / Parquet を直読み**
-   (常駐 RSS ゼロ。 in-memory instance open 実測 38ms)
+2. 履歴クエリは JSONL だけなら**ストリームで直読み**し、 Parquet を含む場合だけ
+   クエリ時に DuckDB インスタンスを開く (常駐 RSS ゼロ。 in-memory instance open 実測 38ms)。
+   JSONL 経路は結果を `limit` 件に保ち、入力ファイル全体や全一致行をメモリに保持しない。
 3. **日次バッチで前日分 JSONL → Parquet (ZSTD)** に圧縮 (実測 1/20)。
    日付ファイル分割がそのままパーティションプルーニングになる
 4. retention は**ファイル削除のみ** (JSONL は Vestigium sweeper、 Parquet は Excubitor)
@@ -64,9 +65,10 @@ Vestigium 形式 60 万行 / 155MB / 3 日分 / 6 サービス。 Windows 11 / N
                                                      (createWriter, channel=stdout/stderr)
 
 [履歴クエリ] GET /api/v1/logs/query · MCP excubitor_query_logs (新)
-   └▶ 遅延 DuckDB (クエリ毎に :memory: instance)
-        ├─ 当日/未圧縮日: read_json_auto('<logs>/<code>/YYYY-MM-DD.jsonl')
-        └─ 圧縮済み日:    read_parquet('<logs>/<code>/YYYY-MM-DD.parquet')
+   ├─ 当日/未圧縮日のみ: JSONL をストリーム読取 (結果は limit 件のみ保持)
+   └─ 圧縮済み日を含む: 遅延 DuckDB (クエリ毎に :memory: instance)
+        ├─ JSONL:   read_json_auto('<logs>/<code>/YYYY-MM-DD.jsonl')
+        └─ Parquet: read_parquet('<logs>/<code>/YYYY-MM-DD.parquet')
       日付レンジ → 対象ファイル名を事前に絞る (パーティションプルーニング)
 
 [日次バッチ] (Excubitor 内 timer, 深夜)
@@ -78,6 +80,13 @@ Vestigium 形式 60 万行 / 155MB / 3 日分 / 6 サービス。 Windows 11 / N
    Parquet: Excubitor retention loop (catalog retention: に parquet_days 追加, 既定 90d)
    process-logs 生ファイル: サイズ上限ローテーション (新, 既定 32MB × 2 世代)
 ```
+
+### [LOG-STORE-QUERY-JSONL] JSONL 専用クエリ経路
+
+`src/log/query-engine.ts` は対象が JSONL のみなら DuckDB を起動せず、
+`readline` によるストリーム読取で Vestigium レコードを検証・絞り込みする。時刻降順の
+結果は `limit` 件だけを保持する。Parquet を含む対象は DuckDB 経路を使うため、異形式の
+結合と Parquet 読取は従来どおり SQL に委ねる。
 
 ### process-logs サイズ上限ローテーション (Phase 3 の前半、 実装済み)
 
@@ -114,7 +123,7 @@ Vestigium 形式 60 万行 / 155MB / 3 日分 / 6 サービス。 Windows 11 / N
 
 - `GET /api/v1/logs/recent` — リングバッファから返す (互換維持、 DB を読まない)
 - `GET /api/v1/logs/query` (新) — params: `codes`, `from`, `to`, `level`, `contains`,
-  `limit` (≤5000)。 遅延 DuckDB で JSONL/Parquet を直読み
+  `limit` (≤5000)。JSONL のみはストリーム読取、Parquet を含む場合は遅延 DuckDB で直読み
 - `GET /api/v1/services/:code/logs` (SSE) — 無変更 (bus 直結)
 
 ### MCP
@@ -148,14 +157,15 @@ Phase 1+2 を 1 PR、 Phase 3 を 1 PR、 Phase 4 は掃除 PR を想定。
 
 ## 6. リスクと対策
 
-- **書き込み中 JSONL の読み**: 当日ファイルは追記中。 DuckDB の read は行単位で
-  末尾不完全行があり得る → `ignore_errors=true` で読む (欠けるのは書きかけ最終行のみ)
+- **書き込み中 JSONL の読み**: 当日ファイルは追記中。JSONL 専用経路は Vestigium
+  レコードとして検証できない末尾不完全行を無視する。DuckDB 経路では
+  `ignore_errors=true` で読む (いずれも欠けるのは書きかけ最終行のみ)
 - **変換とテールの競合**: 変換対象は「前日」ファイルのみ (UTC 境界越え後) で追記は無い。
   tmp → rename の原子的置換 + 変換後の行数照合で破損を検知
 - **@duckdb/node-api 依存**: ネイティブ addon (~60MB)。 遅延生成なので常駐コストは無し。
   Windows/Node24 prebuilt はベンチで動作確認済み
-- **クエリ同時多発**: instance はクエリ毎に生成・破棄 (stateless)。 同時実行上限 2 の
-  セマフォを入れ、 溢れは 429
+- **クエリ同時多発**: JSONL ストリーム読取と DuckDB 経路のいずれも stateless。 同時実行
+  上限 2 のセマフォを入れ、 溢れは 429
 - **Vestigium との整合**: `.parquet` を `<logs>/<code>/` に同居させる。 Vestigium
   DESIGN §2.1 の圧縮枠 (`.jsonl.gz`, P2 未実装) の実現形として Parquet を採用する旨を
   Vestigium DESIGN.md に追記 (実装 PR と同時に Vestigium 側へ 1 行 PR)。

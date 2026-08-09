@@ -160,7 +160,12 @@ $ActionArguments = "`"$ServiceRunner`" --service-name=$Name"
 $Action = New-ScheduledTaskAction -Execute $NodeExecutable -Argument $ActionArguments -WorkingDirectory $Root
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Limited
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+# -Hidden: Interactive logon で起動する node.exe はコンソールアプリなので、タスクを
+# 隠さないと supervisor の窓がデスクトップに出る (実測 2026-08-09: conhost.exe が
+# supervisor の子として存在した)。Excubitor が起動するサービス側は spawn 時に
+# windowsHide / detached で窓を出さないが (design.md §15.1・§17.4.1・§17.4.2)、
+# supervisor 自身はこのタスク定義でしか制御できない。
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -Hidden
 
 $PreviousTaskXml = if ($ExistingTask) {
   Export-ScheduledTask -TaskName $Name -TaskPath $TaskPath

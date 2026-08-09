@@ -434,6 +434,25 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
   - **対処**: Windows は親プロセス終了で子を連鎖終了しないため、 再起動耐性に `detached` は不要 (boot 時の pid 再採用 reconcile/adoptProcess は不変)。 `CREATE_NO_WINDOW` の子は親と別コンソールを持つので Excubitor 側 Ctrl-C の巻き添えも無い。 停止は `taskkill /T /F`、 ログは fd 直結で detached と無関係。
   - 非 Windows は setsid/プロセスグループ生存のため従来どおり `detached: true` を維持。 再起動は既存 control restart。
 
+#### 15.1.1 supervisor 自身の窓 (2026-08-09)
+
+窓抑止はサービスだけの話ではない。**supervisor (`dist/service-runner.js`) 自身も
+窓を出してはいけない。**
+
+supervisor は Scheduled Task が `node.exe` を直接起動する。node.exe はコンソール
+アプリなので、タスクが `Hidden=False` かつ `LogonType=Interactive` だと
+デスクトップにコンソール窓が出る (実測 2026-08-09: supervisor の子に conhost.exe が
+1 つ存在した)。これは spawn オプションでは制御できず、**タスク定義でしか抑えられない**。
+
+`scripts/install-service.ps1` の `New-ScheduledTaskSettingsSet` に `-Hidden` を付ける。
+`Register-ScheduledTask -Force` で上書き登録するので、**既存の登録もインストーラを
+再実行すれば適用される**。
+
+なお backend (`dist/server.js`) は supervisor が `detached: true` + `windowsHide: true`
+で、shell を挟まずに `process.execPath` から直接起動しているため窓は出ない。
+supervisor を再起動しても生き残ることも実測済み (2026-08-09: 旧 supervisor を停止した
+あとも backend が稼働し続けた)。
+
 ### 15.2 start-<service>.bat 対応 (req2)
 - ServiceSchema に `start_script` (絶対パス) を追加。 runtime=node/dev-process-md で設定されていれば `command` より優先して spawn する (cwd 省略時はスクリプトの dir)。 既存 start-*.bat の「関連リポ pull → build → npm run dev」一式をそのままヘッドレス起動できる。
 - catalog 配線: concordia / memoria-server / bibliotheca / quaestor / tirocinium / discutere。 `pause` は stdin=ignore で EOF 即抜け、 `env:`(BACKEND_PORT 等) は spawn env 経由で bat → npm → node が継承する。
@@ -608,6 +627,46 @@ supervisor からは §17.3 の照合失敗 (`could not be verified after breaka
   サービスでは Windows の仕様上 cmd.exe が 1 つ挟まるが、**その cmd.exe はログのハンドルを
   コマンドラインのリダイレクトで持たない** (fd は launcher が開いて継承させる) ため、
   上記の相互ロックは構造的に起きない。
+
+### 17.4.1 v0.8.2 — launcher は `spawn` 直後に終了しない (2026-08-09)
+
+**背景 (実測)**: §17.4 の launcher は `spawn` イベントを受けたら `unref()` → 結果ファイル
+書き込み → **即終了**していた。しかし `spawn` は `CreateProcess` の成功を意味するだけで、
+子が実行に入ったことは意味しない。launcher がその直後に終了すると **子は起動に入る前に
+消える**。最小再現: 同一の `spawn` を「即 `process.exit(0)`」する親と「300ms 待ってから
+`process.exit(0)`」する親で行うと、前者は子が一行も出力せず痕跡も残さないのに対し、
+後者は正常に立ち上がる。
+
+この形は §17.3 の照合失敗 (`could not be verified after breakaway spawn`) と区別できない。
+2026-08-09 時点で `concordia-control` / `concordia-cost` / `genius` を含む **node ランタイムの
+サービスが Excubitor 経由では 1 つも起動できない**状態になっていた。cmd.exe を入口にする
+サービスの子は生き残るため、症状は「node だけ起動できない」ように見え、`§17.4` の
+「ログのハンドル排他」と誤診しやすい。
+
+**不変条件**: **サービスの子プロセスは Excubitor 側 (supervisor / launcher) の寿命に
+依存しない**。launcher がいつ終了しても子は生き残り、supervisor が再起動しても
+切り離された子を再発見できる。待ち時間で緩和するのではなく、この 2 点を満たす。
+
+**決定**: 経路ごとに満たし方を変える。
+
+1. **`shell` を挟まない起動** (runtime=node の `command` 直起動、runtime=app の `exec`)
+   — `detached: true` で構造的に切り離す。launcher が即終了しても子は残り、
+   launcher が開いたログ fd もそのまま効く。待ちは不要。
+2. **`shell` 経由** (`npm` / `.bat` を入口にするサービス) — `detached` は付けない。
+   DETACHED_PROCESS の cmd.exe はコンソールを持たず、その子へ std ハンドルを渡せなく
+   なるため **ログが落ちる** (2026-08-09 実測: 子は生き残るが stdout が空になる)。
+   こちらは `spawn` 後 `CHILD_SETTLE_TIMEOUT_MS` (既定 750ms) だけ `process.kill(pid, 0)`
+   で子の生存を見張ってから結果を書く (`awaitChildStartup`)。
+   - 子が既に終了している場合は待ち切らずに抜ける (短命コマンドで無駄に待たない)。
+   - **「消えた = 失敗」とは扱わない**。正常終了と起動前の消失は pid の生死だけでは
+     区別できないため、その判定は §17.3 の identity 照合に任せる。
+   - 待ち時間は supervisor 側の結果待ち (既定 20s) に対して十分短く取る。
+
+**再発見**: どちらの経路でも `spawnOutsideJob` が返すのは実プロセスの pid であり、
+`updateInstanceStatus` で spawn 直後に永続化される。supervisor 再起動時は
+`reconcile.ts` が永続 pid + 起動時刻の identity 照合で生存プロセスを再採用する
+(§17.3 と同じ照合なので、PID 再利用を掴まない)。子は Job 外に残るため
+`detached` の有無にかかわらず見つかる。
 
 ### 17.5 既知の制約
 

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import type { DuckDBConnection, Json } from '@duckdb/node-api';
-import { listVestigiumServices } from './vestigium-reader.js';
+import { listVestigiumServices, parseRecord } from './vestigium-reader.js';
 import { withDuckDb } from './duckdb-session.js';
 import { duckDbString, duckDbStringList } from './duckdb-sql.js';
 
@@ -32,12 +33,59 @@ interface LogFileTarget {
   format: LogFileFormat;
 }
 
+/**
+ * @implements LOG-STORE-QUERY-JSONL (spec/plan/log-store.md)
+ */
 export async function queryLogs(logsRoot: string, query: LogQuery): Promise<QueriedLogLine[]> {
   const files = resolveLogFiles(logsRoot, query);
   if (files.length === 0) return [];
+  if (files.every((target) => target.format === 'jsonl')) return queryJsonl(files, query);
   return withDuckDb(async (connection) => executeQuery(connection, files, query));
 }
 
+/**
+ * @implements LOG-STORE-QUERY-JSONL (spec/plan/log-store.md)
+ */
+async function queryJsonl(files: readonly LogFileTarget[], query: LogQuery): Promise<QueriedLogLine[]> {
+  const contains = query.contains?.toLowerCase();
+  const results: QueriedLogLine[] = [];
+  for (const target of files) {
+    for (const file of target.files) {
+      const lines = readline.createInterface({
+        input: fs.createReadStream(file, { encoding: 'utf8' }),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        const record = parseRecord(line);
+        if (!record || record.ts < query.from || record.ts > query.to) continue;
+        if (query.level && record.level !== query.level) continue;
+        if (contains && !record.msg.toLowerCase().includes(contains)) continue;
+        addResult(results, {
+          code: target.code,
+          ts: record.ts,
+          level: record.level,
+          channel: record.channel,
+          line: record.msg,
+        }, query.limit);
+      }
+    }
+  }
+  return results;
+}
+
+function addResult(results: QueriedLogLine[], result: QueriedLogLine, limit: number): void {
+  const insertAt = results.findIndex((existing) => existing.ts < result.ts);
+  if (insertAt === -1) {
+    if (results.length < limit) results.push(result);
+    return;
+  }
+  results.splice(insertAt, 0, result);
+  if (results.length > limit) results.pop();
+}
+
+/**
+ * @implements LOG-STORE-QUERY-JSONL (spec/plan/log-store.md)
+ */
 function resolveLogFiles(logsRoot: string, query: LogQuery): LogFileTarget[] {
   const available = listVestigiumServices(logsRoot);
   const requestedCodes = query.codes ? new Set(query.codes) : undefined;

@@ -7,6 +7,8 @@ import {
   BREAKAWAY_SPEC_ENV,
   launchBreakawayChild,
   parseLaunchSpec,
+  awaitChildStartup,
+  CHILD_SETTLE_TIMEOUT_MS,
   readLaunchSpec,
   writeLaunchResult,
   type BreakawayLaunchSpec,
@@ -146,6 +148,101 @@ describe('launchBreakawayChild', () => {
 
     const result = JSON.parse(readFileSync(launch.resultPath, 'utf8')) as { error: string };
     expect(result.error).toMatch(/ENOENT|spawn/i);
+  });
+
+  it('detaches the child instead of waiting when no shell is involved', async () => {
+    // 不変条件は「子が launcher の寿命に依存しない」こと。shell を挟まない経路は
+    // detached で構造的に切り離せるので、起動猶予を待つ必要が無い。
+    const dir = workspace();
+    const launch = spec(dir, { args: ['-e', 'setTimeout(() => {}, 3_000)'] });
+    let slept = 0;
+
+    const code = await launchBreakawayChild(launch, { ...process.env } as Record<string, string>, {
+      isAlive: () => true,
+      sleep: async (ms) => {
+        slept += ms;
+      },
+      now: () => slept,
+    });
+
+    expect(code).toBe(0);
+    expect(slept).toBe(0);
+    const result = JSON.parse(readFileSync(launch.resultPath, 'utf8')) as { pid: number };
+    try {
+      process.kill(result.pid);
+    } catch {
+      // 既に終わっていれば何もしない。
+    }
+  });
+
+  it('does not return before a shell-launched child has had time to start', async () => {
+    // 回帰の本体: spawn 直後に launcher が抜けると子が起動前に消える (2026-08-09)。
+    // shell 経由は detached を付けられない (cmd.exe が std ハンドルを渡せずログが落ちる)
+    // ため、結果を書く前に起動猶予を待ち切ることで凌ぐ。
+    const dir = workspace();
+    const launch = spec(dir, { args: ['-e', 'setTimeout(() => {}, 3_000)'], shell: true });
+    let slept = 0;
+
+    const code = await launchBreakawayChild(launch, { ...process.env } as Record<string, string>, {
+      isAlive: () => true,
+      sleep: async (ms) => {
+        slept += ms;
+      },
+      now: () => slept,
+    });
+
+    expect(code).toBe(0);
+    expect(slept).toBeGreaterThanOrEqual(CHILD_SETTLE_TIMEOUT_MS);
+    const result = JSON.parse(readFileSync(launch.resultPath, 'utf8')) as { pid: number };
+    try {
+      process.kill(result.pid);
+    } catch {
+      // 既に終わっていれば何もしない。
+    }
+  });
+});
+
+describe('awaitChildStartup', () => {
+  it('waits out the whole window while the child stays alive', async () => {
+    const sleeps: number[] = [];
+    let clock = 0;
+
+    await awaitChildStartup(
+      1234,
+      {
+        isAlive: () => true,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          clock += ms;
+        },
+        now: () => clock,
+      },
+      200,
+      50,
+    );
+
+    expect(sleeps).toEqual([50, 50, 50, 50]);
+  });
+
+  it('stops early when the child has already finished', async () => {
+    let clock = 0;
+    let checks = 0;
+
+    await awaitChildStartup(
+      1234,
+      {
+        isAlive: () => ++checks <= 2,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      },
+      10_000,
+      50,
+    );
+
+    expect(checks).toBe(3);
+    expect(clock).toBeLessThan(10_000);
   });
 });
 

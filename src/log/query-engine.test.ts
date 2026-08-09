@@ -75,4 +75,26 @@ describe('queryLogs', () => {
     });
     expect(logs).toEqual([]);
   });
+
+  it('JSONL 専用経路で新しい順に上限件数だけを返す', async () => {
+    const root = makeRoot();
+    const oldest = Date.parse('2026-01-02T00:00:01Z');
+    const newest = Date.parse('2026-01-02T00:00:03Z');
+    const middle = Date.parse('2026-01-02T00:00:02Z');
+    writeLogs(root, 'alpha', '2026-01-02', [
+      { ts: oldest, level: 'info', service: 'alpha', channel: 'app', msg: 'oldest' },
+      { ts: newest, level: 'info', service: 'alpha', channel: 'app', msg: 'newest' },
+    ]);
+    writeLogs(root, 'beta', '2026-01-02', [
+      { ts: middle, level: 'info', service: 'beta', channel: 'app', msg: 'middle' },
+    ]);
+
+    const logs = await queryLogs(root, {
+      from: Date.parse('2026-01-02T00:00:00Z'),
+      to: Date.parse('2026-01-02T23:59:59Z'),
+      limit: 2,
+    });
+
+    expect(logs.map((entry) => entry.line)).toEqual(['newest', 'middle']);
+  });
 });
