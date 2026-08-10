@@ -49,8 +49,10 @@ export async function controlDockerCompose(
       break;
     case 'restart':
       // A compose restart retains the original container environment. Recreate
-      // so the authoritative runtime version is applied as well.
-      opArgs = ['up', '-d', '--force-recreate', ...targets];
+      // so the authoritative runtime version is applied as well. Keep the old
+      // restart command's target scope: dependencies must not be started as a
+      // side effect of refreshing one service.
+      opArgs = ['up', '-d', '--force-recreate', '--no-deps', ...targets];
       break;
   }
 

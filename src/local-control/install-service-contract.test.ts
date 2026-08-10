@@ -27,18 +27,6 @@ describe('local-control installation contracts', () => {
     expect(script).toContain('$Arguments.IndexOf($ServiceRunner');
   });
 
-  it('hides the Windows task so the supervisor does not open a console window', async () => {
-    // node.exe はコンソールアプリなので、Interactive logon のタスクを隠さないと
-    // supervisor の窓がデスクトップに出る (design.md §15.1.1)。spawn オプションでは
-    // 制御できず、タスク定義でしか抑えられない。
-    const script = await readFile(new URL('../../scripts/install-service.ps1', import.meta.url), 'utf8');
-    const settingsLine = script
-      .split('\n')
-      .find((line) => line.includes('New-ScheduledTaskSettingsSet'));
-    expect(settingsLine).toBeDefined();
-    expect(settingsLine).toContain('-Hidden');
-  });
-
   it('preserves Windows task migration rollback and legacy-wrapper ownership', async () => {
     const [installScript, uninstallScript] = await Promise.all([
       readFile(new URL('../../scripts/install-service.ps1', import.meta.url), 'utf8'),

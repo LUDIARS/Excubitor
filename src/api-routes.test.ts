@@ -616,6 +616,12 @@ describe('Excubitor HTTP APIs', () => {
     });
   }
 
+  it('serves the runtime version published during boot', async () => {
+    const { res, data } = await requestJson<{ runtime_version: string }>(router, 'GET', '/api/v1/system');
+    expect(res.status).toBe(200);
+    expect(data.runtime_version).toBe('0.1.42');
+  });
+
   it('serves downtime summaries for liveness and project cards', async () => {
     const live = await requestJson<{
       downtime: { downtime_ms: number; incidents: number; uptime_ratio: number | null } | null;

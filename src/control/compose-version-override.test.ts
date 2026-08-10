@@ -52,6 +52,32 @@ describe('compose runtime version override', () => {
       }
     }
   });
+
+  it('does not expose compose contents or local paths in YAML diagnostics', async () => {
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'excubitor-compose-source-test-'));
+    const composeFile = join(sourceDirectory, 'compose.yaml');
+    const privateValue = 'private-value-that-must-not-be-reported';
+
+    try {
+      await writeFile(
+        composeFile,
+        `services:\n  web:\n    environment: [${privateValue}\n`,
+        'utf8',
+      );
+      let message = '';
+      try {
+        await createComposeVersionOverride(service(composeFile), '1.2.3');
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toContain('invalid YAML');
+      expect(message).not.toContain(privateValue);
+      expect(message).not.toContain(sourceDirectory);
+    } finally {
+      await rm(sourceDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 function service(composeFile: string): Service {

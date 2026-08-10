@@ -60,7 +60,7 @@ export async function resolveServiceRuntimeVersion(svc: Service): Promise<Servic
 function normalizedVersionComponent(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  if (!trimmed || /[\u0000-\u001f\u007f]/u.test(trimmed)) return null;
+  if (!trimmed || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(trimmed)) return null;
   return trimmed;
 }
 

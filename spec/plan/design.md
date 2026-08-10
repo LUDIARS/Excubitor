@@ -434,25 +434,6 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
   - **対処**: Windows は親プロセス終了で子を連鎖終了しないため、 再起動耐性に `detached` は不要 (boot 時の pid 再採用 reconcile/adoptProcess は不変)。 `CREATE_NO_WINDOW` の子は親と別コンソールを持つので Excubitor 側 Ctrl-C の巻き添えも無い。 停止は `taskkill /T /F`、 ログは fd 直結で detached と無関係。
   - 非 Windows は setsid/プロセスグループ生存のため従来どおり `detached: true` を維持。 再起動は既存 control restart。
 
-#### 15.1.1 supervisor 自身の窓 (2026-08-09)
-
-窓抑止はサービスだけの話ではない。**supervisor (`dist/service-runner.js`) 自身も
-窓を出してはいけない。**
-
-supervisor は Scheduled Task が `node.exe` を直接起動する。node.exe はコンソール
-アプリなので、タスクが `Hidden=False` かつ `LogonType=Interactive` だと
-デスクトップにコンソール窓が出る (実測 2026-08-09: supervisor の子に conhost.exe が
-1 つ存在した)。これは spawn オプションでは制御できず、**タスク定義でしか抑えられない**。
-
-`scripts/install-service.ps1` の `New-ScheduledTaskSettingsSet` に `-Hidden` を付ける。
-`Register-ScheduledTask -Force` で上書き登録するので、**既存の登録もインストーラを
-再実行すれば適用される**。
-
-なお backend (`dist/server.js`) は supervisor が `detached: true` + `windowsHide: true`
-で、shell を挟まずに `process.execPath` から直接起動しているため窓は出ない。
-supervisor を再起動しても生き残ることも実測済み (2026-08-09: 旧 supervisor を停止した
-あとも backend が稼働し続けた)。
-
 ### 15.2 start-<service>.bat 対応 (req2)
 - ServiceSchema に `start_script` (絶対パス) を追加。 runtime=node/dev-process-md で設定されていれば `command` より優先して spawn する (cwd 省略時はスクリプトの dir)。 既存 start-*.bat の「関連リポ pull → build → npm run dev」一式をそのままヘッドレス起動できる。
 - catalog 配線: concordia / memoria-server / bibliotheca / quaestor / tirocinium / discutere。 `pause` は stdin=ignore で EOF 即抜け、 `env:`(BACKEND_PORT 等) は spawn env 経由で bat → npm → node が継承する。

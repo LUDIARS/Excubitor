@@ -20,15 +20,18 @@ Excubitor (Ex) が Windows 上の常駐サービスを安全に start / restart 
   しても、Ex は先頭 PID を検証できず起動失敗にした。
 - stdout/stderr の process log は Vg の代替ではない。ログのために cmd.exe や wrapper を
   常駐させることは禁じる。
-- health / port は稼働の観測には使えるが、起動者・所有者を証明しない。port だけを根拠にした
-  restart 時の kill は、ユーザー起動プロセスを誤って停止し得る。
-- Ex 再起動後にも、それ以前に Ex が起動した対象だけを再採用・停止できなければならない。
+- health / port は稼働の観測に使えるが、起動者・所有者を証明しない。起動元にかかわらず
+  health を確認し、Ex 外の起動は unmanaged 状態として扱う。
+- Ex 再起動後にも、Ex 起動対象は再採用し、Ex 外で起動された対象も service として health を
+  継続監視しなければならない。
 
 ## 非交渉要件
 
 1. cmd.exe、stdout/stderr の pipe、ログ用 wrapper の存続を所有権の根拠にしない。
-2. Ex が stop / restart できるのは、Ex 起動であることを durable に証明できる対象だけ。
-3. health 成功・port 一致だけでは、管理外プロセスを kill しない。
+2. 起動元は managed / unmanaged の状態と audit のために保持し、service としての health 監視を
+   制限しない。
+3. stop / restart は managed / unmanaged を問わず宣言 port の現在の process tree を停止できる。
+   実行前後に health を確認し、起動元と結果を audit する。
 4. PID 再利用、Ex 再起動、launcher 終了、サービスの多段起動を明示的に扱う。
 5. Vg を運用ログの正本とし、process stdout/stderr は診断補助に限定する。
 6. 所有権を証明できない command は黙って採用しない。fail-fast の設定エラーか、明示的な
@@ -66,13 +69,28 @@ watch / daemonize / npm wrapper は Ex 管理対象から除外または専用�
 6. Windows 固有の Job Object・WMI・child process の失敗モード。
 7. 実装を分割する repository / module と、回帰テストの最小セット。
 
-提案は「起動できた」ではなく、誰がそのプロセスを停止してよいかを常に説明できることを
+提案は「起動できた」ではなく、起動元を問わず service health と停止結果を説明できることを
 成功条件にしてください。
+
+## ユーザー方針による改訂（2026-08-10）
+
+Fable 5 の初回提案後、停止権限を verified ownership record に限定する案は却下された。
+管理外の個人起動 ghost process を永久に除去できなくなるためである。
+
+- managed / unmanaged は service status と audit の区分であり、health 観測・停止可否を
+  制限しない。
+- health は Ex 起動か Ex 外かを問わず常に確認する。service state は ownership と独立に
+  healthy / unhealthy を持つ。
+- stop / restart は万能操作とし、宣言 port の listener process tree を managed / unmanaged
+  を問わず停止する。health は停止前の状態と停止後の不達を確認するために必ず実行する。
+- ownership record は Ex 起動プロセスの再採用と診断に使い続けるが、管理外を停止しない理由には
+  使わない。
 
 ## Fable 5 の提案（2026-08-10、読み取り専用）
 
 Fable 5 には本 packet と障害記録だけを渡した。実装・テスト・サービス操作は依頼していない。
-以下は提案の要約であり、採用判断は Ex の通常レビューで行う。
+以下は改訂前の提案の要約であり、stop / restart を verified record に限定する部分、および
+管理外 process を停止しない部分は上記ユーザー方針で明示的に却下された。
 
 ### 推奨: 直接実行 + durable ownership record
 
@@ -85,9 +103,10 @@ process を生成してから PID、creation time、実行イメージパスを�
 正規化済み image_path、argv_hash、state、launch diagnostics から成る。state は
 starting、verified、released、stale を持つ。
 
-stop / restart / Ex 再起動後の再採用で Ex が操作してよい条件は、verified record と
-現在の PID、creation time、image_path がすべて一致することだけである。不一致なら
-stale 化して ownership_lost を返し、kill しない。health と port は稼働観測に限定する。
+改訂前の提案では stop / restart / Ex 再起動後の再採用で Ex が操作してよい条件を verified
+record と現在の PID、creation time、image_path の一致に限定していた。この限定は管理外
+ghost process を残すため、現在は採用しない。verified record は Ex 起動対象の再採用・診断用に
+残し、停止は改訂方針に従って managed / unmanaged を問わず行う。
 
 ### 却下案
 
@@ -97,9 +116,10 @@ stale 化して ownership_lost を返し、kill しない。health と port は�
 
 ### port 衝突と migration
 
-start 時に listener が ownership record と一致しなければ、Ex は kill せず
-port_occupied_by_unmanaged_process として fail-fast にする。明示的な kill-port は
-通常の stop とは分離した人間承認操作として audit する。
+改訂前の提案は、管理外 listener に対して port_occupied_by_unmanaged_process として
+fail-fast にし、kill-port を通常 stop と分離していた。この区別は現在は採用しない。
+listener があれば health を確認して unmanaged service として表示し、通常の stop / restart が
+その process tree を除去できるようにする。
 
 npm、watch、bat、start_script は常駐 entry が直接実行できる形へ移行する。shell が
 必要な command は、明示的な直接実行契約へ変換できるまで catalog sync 時に設定エラー
@@ -109,9 +129,9 @@ npm、watch、bat、start_script は常駐 entry が直接実行できる形へ�
 
 Fable は exec contract、ownership record、ownership verification、process tree、
 breakaway launcher、manager、catalog schema、port scanner を責務別に分けることを提案した。
-最低限、PID 再利用拒否、管理外の port 占有を無傷で 409 にすること、再起動後の一致 record
-だけの再採用、shell command の fail-fast、entry 配下の child 入替えを含む stop を回帰
-テストにする。
+最低限、PID 再利用拒否、管理外 listener の health 監視と status 表示、管理外 listener を含む
+万能 stop / restart、Ex 起動 record の再採用、shell command の fail-fast、entry 配下の child
+入替えを含む stop を回帰テストにする。
 
 実装前に、Windows で creation time と image path を確実に採取できること、resident entry
 が子を入れ替えても自ら常駐すること、Job 脱出状態を確認できることは別途検証する前提である。

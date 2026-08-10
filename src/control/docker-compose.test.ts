@@ -141,7 +141,7 @@ describe('docker compose control bounds', () => {
       [
         'compose', '-f', 'compose.yml',
         '-f', 'compose.version.override.yaml',
-        'up', '-d', '--force-recreate', 'demo',
+        'up', '-d', '--force-recreate', '--no-deps', 'demo',
       ],
       expect.any(Object),
     );

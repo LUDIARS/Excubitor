@@ -35,19 +35,22 @@ describe('service runtime version', () => {
     expect(mocks.readGitInfo).toHaveBeenCalledWith('C:/services/demo');
   });
 
-  it('falls back to a Git build identifier when the package version is unsafe', async () => {
-    mocks.readGitInfo.mockResolvedValue({
-      branch: 'main',
-      hash: 'abcdef123456',
-      dirty: false,
-      package_version: 'bad\nversion',
-    });
+  it.each(['bad\nversion', 'bad\u0085version', 'bad\u2028version'])(
+    'falls back to a Git build identifier when package version %j is unsafe',
+    async (packageVersion) => {
+      mocks.readGitInfo.mockResolvedValue({
+        branch: 'main',
+        hash: 'abcdef123456',
+        dirty: false,
+        package_version: packageVersion,
+      });
 
-    await expect(resolveServiceRuntimeVersion(service())).resolves.toEqual({
-      value: '0.0.0+abcdef123456',
-      source: 'git',
-    });
-  });
+      await expect(resolveServiceRuntimeVersion(service())).resolves.toEqual({
+        value: '0.0.0+abcdef123456',
+        source: 'git',
+      });
+    },
+  );
 
   it('overrides caller-provided values in both runtime environment contracts', async () => {
     mocks.readGitInfo.mockResolvedValue({

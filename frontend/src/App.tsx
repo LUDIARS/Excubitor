@@ -53,7 +53,10 @@ export default function App() {
         setRuntimeVersion(s.runtime_version ?? null);
         setBuildVersion(s.build_version ?? null);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Header metadata is best-effort; the UI remains usable with the
+        // explicit unavailable fallback when the backend is still starting.
+      });
   }, []);
 
   useEffect(() => {

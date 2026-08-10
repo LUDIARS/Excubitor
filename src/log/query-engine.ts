@@ -51,36 +51,75 @@ async function queryJsonl(files: readonly LogFileTarget[], query: LogQuery): Pro
   const results: QueriedLogLine[] = [];
   for (const target of files) {
     for (const file of target.files) {
+      const input = fs.createReadStream(file, { encoding: 'utf8' });
       const lines = readline.createInterface({
-        input: fs.createReadStream(file, { encoding: 'utf8' }),
+        input,
         crlfDelay: Infinity,
       });
-      for await (const line of lines) {
-        const record = parseRecord(line);
-        if (!record || record.ts < query.from || record.ts > query.to) continue;
-        if (query.level && record.level !== query.level) continue;
-        if (contains && !record.msg.toLowerCase().includes(contains)) continue;
-        addResult(results, {
-          code: target.code,
-          ts: record.ts,
-          level: record.level,
-          channel: record.channel,
-          line: record.msg,
-        }, query.limit);
+      let readFailed = false;
+      input.once('error', () => {
+        // readline does not forward input errors. Convert a rotation/read race
+        // into the query's normal failure path without exposing the log path.
+        readFailed = true;
+        lines.close();
+      });
+      try {
+        for await (const line of lines) {
+          const record = parseRecord(line);
+          if (!record || record.ts < query.from || record.ts > query.to) continue;
+          if (query.level && record.level !== query.level) continue;
+          if (contains && !record.msg.toLowerCase().includes(contains)) continue;
+          addResult(results, {
+            code: target.code,
+            ts: record.ts,
+            level: record.level,
+            channel: record.channel,
+            line: record.msg,
+          }, query.limit);
+        }
+      } finally {
+        lines.close();
+        input.destroy();
       }
+      if (readFailed) throw new Error(`failed to read JSONL logs for service ${target.code}`);
     }
   }
-  return results;
+  return results.sort((left, right) => right.ts - left.ts);
 }
 
 function addResult(results: QueriedLogLine[], result: QueriedLogLine, limit: number): void {
-  const insertAt = results.findIndex((existing) => existing.ts < result.ts);
-  if (insertAt === -1) {
-    if (results.length < limit) results.push(result);
+  if (limit <= 0) return;
+  if (results.length < limit) {
+    results.push(result);
+    siftNewestResultsUp(results, results.length - 1);
     return;
   }
-  results.splice(insertAt, 0, result);
-  if (results.length > limit) results.pop();
+  if (results[0]!.ts >= result.ts) return;
+  results[0] = result;
+  siftNewestResultsDown(results, 0);
+}
+
+function siftNewestResultsUp(results: QueriedLogLine[], start: number): void {
+  let index = start;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (results[parent]!.ts <= results[index]!.ts) return;
+    [results[parent], results[index]] = [results[index]!, results[parent]!];
+    index = parent;
+  }
+}
+
+function siftNewestResultsDown(results: QueriedLogLine[], start: number): void {
+  let index = start;
+  for (;;) {
+    const left = index * 2 + 1;
+    if (left >= results.length) return;
+    const right = left + 1;
+    const oldestChild = right < results.length && results[right]!.ts < results[left]!.ts ? right : left;
+    if (results[index]!.ts <= results[oldestChild]!.ts) return;
+    [results[index], results[oldestChild]] = [results[oldestChild]!, results[index]!];
+    index = oldestChild;
+  }
 }
 
 /**

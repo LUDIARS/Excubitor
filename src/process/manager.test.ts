@@ -232,7 +232,7 @@ describe('process manager lifecycle hardening', () => {
   });
 
   it('reserves a service before asynchronous preparation so concurrent starts cannot overwrite it', async () => {
-    const child = fakeChild(9196);
+    const child = fakeChild(2_147_483_647);
     mocks.spawn.mockImplementation(() => {
       queueMicrotask(() => child.emit('spawn'));
       return child;
@@ -266,7 +266,7 @@ describe('process manager lifecycle hardening', () => {
     vi.stubEnv('INFISICAL_SITE_URL', 'https://infisical.example.com');
     vi.stubEnv('INFISICAL_CLIENT_ID', 'client-id');
     vi.stubEnv('INFISICAL_CLIENT_SECRET', 'client-secret');
-    const child = fakeChild(9198);
+    const child = fakeChild(2_147_483_647);
     mocks.spawn.mockImplementation(() => {
       queueMicrotask(() => child.emit('spawn'));
       return child;
@@ -302,7 +302,7 @@ describe('process manager lifecycle hardening', () => {
   });
 
   it('terminates a child whose spawn completes after an explicit stop', async () => {
-    const child = fakeChild(9197);
+    const child = fakeChild(2_147_483_647);
     child.kill.mockImplementation((signal: NodeJS.Signals = 'SIGTERM') => {
       queueMicrotask(() => {
         child.signalCode = signal;
