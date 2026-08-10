@@ -35,6 +35,34 @@ export async function verifyProcessIdentity(
   options: ProcessIdentityOptions = {},
 ): Promise<VerifiedProcessIdentity | null> {
   if (!Number.isInteger(pid) || pid <= 0 || Number.isNaN(expectedStartedAt.getTime())) return null;
+  const actualStartedAt = await readProcessStartedAt(pid, options);
+  if (!actualStartedAt) return null;
+  const toleranceMs = options.toleranceMs ?? START_TIME_TOLERANCE_MS;
+  if (Math.abs(actualStartedAt.getTime() - expectedStartedAt.getTime()) > toleranceMs) return null;
+  return { pid, startedAt: actualStartedAt, verified: true };
+}
+
+/**
+ * 期待値を持たずに、生きている PID の作成時刻をそのまま読む。
+ *
+ * `verifyProcessIdentity` は「この pid は自分が起動したあの プロセスか」を確かめるためのもので、
+ * 突合相手が要る。 対して boot 時の宣言ポート突合は「Excubitor が起動を記録できていない実体」を
+ * 拾うのが目的で、期待作成時刻が存在しない (記録が無いことが問題そのもの)。 そこでは実測値を
+ * そのまま identity として採用する。
+ */
+export async function readProcessIdentity(
+  pid: number,
+  options: ProcessIdentityOptions = {},
+): Promise<VerifiedProcessIdentity | null> {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const startedAt = await readProcessStartedAt(pid, options);
+  return startedAt ? { pid, startedAt, verified: true } : null;
+}
+
+async function readProcessStartedAt(
+  pid: number,
+  options: ProcessIdentityOptions,
+): Promise<Date | null> {
   const platform = options.platform ?? process.platform;
   const run = options.run ?? ((command, args) => execCapture(command, args, process.cwd(), 5_000));
   const result = platform === 'win32'
@@ -46,11 +74,9 @@ export async function verifyProcessIdentity(
       ])
     : await run('ps', ['-p', String(pid), '-o', 'lstart=']);
   if (!result.ok) return null;
-  const actualStartedAt = new Date(result.stdout.trim());
-  if (Number.isNaN(actualStartedAt.getTime())) return null;
-  const toleranceMs = options.toleranceMs ?? START_TIME_TOLERANCE_MS;
-  if (Math.abs(actualStartedAt.getTime() - expectedStartedAt.getTime()) > toleranceMs) return null;
-  return { pid, startedAt: actualStartedAt, verified: true };
+  const startedAt = new Date(result.stdout.trim());
+  if (Number.isNaN(startedAt.getTime())) return null;
+  return startedAt;
 }
 
 /**

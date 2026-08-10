@@ -649,6 +649,73 @@ supervisor からは §17.3 の照合失敗 (`could not be verified after breaka
 (§17.3 と同じ照合なので、PID 再利用を掴まない)。子は Job 外に残るため
 `detached` の有無にかかわらず見つかる。
 
+### 17.4.2 v0.8.3 — cmd.exe は本当に要るときだけ挟む (2026-08-09)
+
+**背景 (実測)**: `shell` の要否を `svc.runtime !== 'app'` で決めていたため、`node ...` が
+入口のサービスまで `cmd.exe /d /s /c "..."` を経由していた。これが 2 つの契約を壊す。
+
+- **pid 契約が破れる。** §17.4 は「`spawnOutsideJob` が返すのは実プロセスの pid」だが、
+  shell を挟むと返るのは cmd.exe の pid になる。cmd.exe は実サービスより先に消えるため
+  §17.3 の identity 照合が「即死した」と判定する。実測 (2026-08-09): supervisor に
+  §17.4.1 を載せた直後の `concordia-control` は worker が確かに起動していたのに
+  (`control worker started` がログに出る)、返り pid はその親の cmd.exe で、既に消滅
+  していた。**起動を試すたびに Excubitor が把握しない worker が 1 本ずつ残った。**
+- **§17.4.1 の構造的な切り離しに乗れない。** cmd.exe は自前のコンソールを確保するので
+  `detached` を付けると窓が出る (§15.1)。shell 経由は猶予待ちで凌ぐしかない。
+
+cmd.exe が本当に必要なのは `.cmd` / `.bat` を入口にするサービス (npm, `start_script`) だけ。
+
+**決定**: 先頭語を実行ファイルへ解決してから spawn する
+(`src/process/executable-resolver.ts`)。
+
+- 解決先が `.cmd` / `.bat` **以外** → 絶対パスで直接起動 (`shell: false`)。
+  §17.4.1 の `detached` 経路に乗り、返り pid は実サービス、窓も出ずログも取れる。
+- 解決先が `.cmd` / `.bat` → 従来どおり `shell: true` (cmd.exe が要る)。このとき絶対パスへ
+  置換すると `Program Files` 等の空白を cmd.exe が誤解析するため、解決は種別判定だけに使い、
+  起動には元の command token を渡す。
+- **解決できない → `shell: true` にフォールバック**。ここで失敗させると、これまで
+  起動できていた入口を落とす。
+- 探索は cwd → PATH の順、拡張子無指定は PATHEXT 順 (CreateProcess と同じ)。
+  env 名は大小文字を問わず引く (Windows の env は case-insensitive)。
+- win32 以外は cmd.exe の話が無いので常に `shell: false`。
+
+`runtime: 'app'` は従来どおり `exec` を直接起動する (解決を通さない)。
+
+### 17.4.3 v0.8.4 — 生き残った pid を捨てない / 宣言ポートで拾い直す (2026-08-10)
+
+**背景 (実測)**: 2026-08-10、`concordia` の起動で Excubitor は `stopped` / `pid=null` を
+報告し続けたが、実体は pid 32456 で 11111 を保持して正常稼働していた。リレーされた pid 6384 は
+§17.4.2 が言う cmd.exe で、その子が実サービスだった。
+
+§17.4.2 はリレーされる pid を正す。だが**記録が失われた後の回復手段が無い**ことが、それとは
+別の欠陥として残っていた。
+
+- `recordSpawnFailure` は状態を `crashed` にすると同時に **pid を NULL で上書き**していた。
+  照合できなかっただけで実体が生きている場合、Excubitor はその実体へ二度と到達できない —
+  停止も再起動も対象を持たず、次の起動は EADDRINUSE でしか失敗を知らせない。
+- `reconcile.ts` は永続 pid の突合しか行わない。pid の記録そのものが消えていれば、boot 時に
+  拾い直す入口が無い。
+
+**決定**: プロセスは Excubitor の子ではない (Job 外に出す設計の必然) が、**pid は必ず
+Excubitor が知っている**状態を保つ。
+
+1. **生存 pid を捨てない**。`recordSpawnFailure(code, err, survivingPid)` は、pid が生きて
+   いれば `crashed` の行にその pid を残す。boot 時の通常の identity 突合は、この
+   `crashed` + pid の行も対象にし、照合できた identity を `running` として再永続化する。
+   起動の失敗と pid の保持は両立させる。
+2. **boot 時に宣言ポートで突合する** (`adoptDeclaredPortOwners`)。永続 pid で再採用できな
+   かった `node` / `dev-process-md` / `app` のうち、catalog で一意に宣言されたポートを生存 pid が
+   握っているものは、その pid を実体として adopt し `running` に戻す。`port` /
+   `frontend_port` / `backend_port` / `ports` は同じ宣言集合として扱う。同じポートを複数サービスが
+   宣言している場合、同じポートに複数の生存 pid がいる場合、または pid が既に別サービスの
+   管理下にある場合は所有者を決められないため採用しない。作成時刻は突合相手が無いため実測値を
+   identity として採り、同じ pid が同じポートを保持していることを再走査で確認してから、pid と
+   identity を永続化する (`readProcessIdentity`)。
+
+宣言ポートを握る生存プロセスを実体として扱うのは、仮にそれが別物でも**起動を妨げる占有**として
+同じく Excubitor が把握すべきものだからで、いずれにせよ「知らない」まま放置してよい pid では
+ない。adopt 後の停止が `taskkill /T /F` である点は §17.5 の留意事項と同じ。
+
 ### 17.5 既知の制約
 
 - `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、または

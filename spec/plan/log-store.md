@@ -83,10 +83,17 @@ Vestigium 形式 60 万行 / 155MB / 3 日分 / 6 サービス。 Windows 11 / N
 
 ### [LOG-STORE-QUERY-JSONL] JSONL 専用クエリ経路
 
-`src/log/query-engine.ts` は対象が JSONL のみなら DuckDB を起動せず、
+`src/log/query-engine.ts` は JSONL を DuckDB に渡さず、
 `readline` によるストリーム読取で Vestigium レコードを検証・絞り込みする。時刻降順の
-結果は `limit` 件だけを保持する。Parquet を含む対象は DuckDB 経路を使うため、異形式の
-結合と Parquet 読取は従来どおり SQL に委ねる。
+結果は `limit` 件だけを保持する。Parquet を含む対象は Parquet 部分だけを DuckDB で読み、
+両経路の上位 `limit` 件をマージして最終的な上位 `limit` 件を返す。
+
+### [SPEC-LOG-QUERY-PARTIAL-JSONL] 追記中 JSONL の部分行
+
+当日 JSONL は末尾レコードの書き込み途中に履歴クエリされうる。JSONL 専用経路は
+Vestigium レコードとして検証できない行を無視する。Parquet と JSONL の混在時も JSONL
+部分には同じストリーム経路を使う。どちらも、それ以前の正常な履歴を末尾の部分行のために
+失敗させず、JSONL ファイル全体をメモリへ読み込まない。
 
 ### process-logs サイズ上限ローテーション (Phase 3 の前半、 実装済み)
 
@@ -158,8 +165,8 @@ Phase 1+2 を 1 PR、 Phase 3 を 1 PR、 Phase 4 は掃除 PR を想定。
 ## 6. リスクと対策
 
 - **書き込み中 JSONL の読み**: 当日ファイルは追記中。JSONL 専用経路は Vestigium
-  レコードとして検証できない末尾不完全行を無視する。DuckDB 経路では
-  `ignore_errors=true` で読む (いずれも欠けるのは書きかけ最終行のみ)
+  レコードとして検証できない末尾不完全行を無視する。Parquet との混在時も JSONL 部分は
+  同じストリーム経路を使う (いずれも欠けるのは書きかけ最終行のみ)
 - **変換とテールの競合**: 変換対象は「前日」ファイルのみ (UTC 境界越え後) で追記は無い。
   tmp → rename の原子的置換 + 変換後の行数照合で破損を検知
 - **@duckdb/node-api 依存**: ネイティブ addon (~60MB)。 遅延生成なので常駐コストは無し。

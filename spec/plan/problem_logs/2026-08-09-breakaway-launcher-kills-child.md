@@ -137,6 +137,21 @@ cmd.exe はコンソールを持たず、その子へ std ハンドルを渡せ�
   修正前は同じ手順で marker も出力も残らなかった。shell 無しが待たずに済んでいることも
   所要時間で確認できる。
 
+## 反映後の実測 (2026-08-09、supervisor 再起動後)
+
+`dist/service-runner.js` を Scheduled Task ごと再起動して §17.4.1 を載せた結果:
+
+- **子は死ななくなった。** `concordia-control` の worker が実際に起動する
+  (`control worker started` がログに出る)。
+- **停止キューが流れた。** `control_jobs` の `queued` 715 → **0**。
+  755 件は期限切れで `failed`、**14 件は stop_process_tree が実行された**。
+- **切り離された子の再採用が効いた。** supervisor を止めて起こし直しても
+  cernere / concordia / memoria-server / ludellus-web / revisor は `running` のまま。
+- **稼働中セッションを巻き添えにしていない。** active/lost セッションは 14 → 13。
+
+ただし `concordia-control` の state は `crashed` のまま残った。**pid 契約の破れ**
+(返り pid が cmd.exe) が別に存在したため。これは §17.4.2 で対処した。
+
 ## Follow-up
 
 - 反映には supervisor (`dist/service-runner.js`) の再起動が必要

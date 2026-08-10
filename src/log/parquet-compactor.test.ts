@@ -44,7 +44,7 @@ describe('Parquet compaction', () => {
         service: 'alpha',
         channel: 'app',
         msg: 'current',
-      })}\n`,
+      })}\n{"ts":`,
       'utf8',
     );
     const logs = await queryLogs(root, {

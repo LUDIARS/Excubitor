@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { verifyProcessIdentity, waitForProcessIdentity } from './identity.js';
+import { readProcessIdentity, verifyProcessIdentity, waitForProcessIdentity } from './identity.js';
 
 describe('process identity verification', () => {
   it('accepts the same PID only when its OS creation time matches', async () => {
@@ -31,6 +31,21 @@ describe('process identity verification', () => {
       run,
       toleranceMs: 1_000,
     })).resolves.toBeNull();
+  });
+
+  it('reads the current identity when no persisted start time exists', async () => {
+    const run = vi.fn(async () => ({
+      ok: true,
+      code: 0,
+      stdout: '2026-08-10T00:00:00.000Z\n',
+      stderr: '',
+    }));
+
+    await expect(readProcessIdentity(32456, { platform: 'win32', run })).resolves.toEqual({
+      pid: 32456,
+      startedAt: new Date('2026-08-10T00:00:00.000Z'),
+      verified: true,
+    });
   });
 
   it('retries a newly created process until its identity becomes readable', async () => {

@@ -55,6 +55,7 @@ import {
   getManagedPid,
   inheritableSupervisorEnv,
   isManaged,
+  isPidManaged,
   killService,
   resumeProcessRestarts,
   shouldDetachSpawn,
@@ -109,6 +110,18 @@ describe('process manager lifecycle hardening', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.useRealTimers();
+  });
+
+  it('reports whether a pid is already owned by an adopted service', async () => {
+    adoptProcess('pid-owner', {
+      pid: 9190,
+      startedAt: new Date('2026-07-12T00:00:00.000Z'),
+      verified: true,
+    });
+
+    expect(isPidManaged(9190)).toBe(true);
+    expect(isPidManaged(9191)).toBe(false);
+    await expect(killService('pid-owner')).resolves.toBe(true);
   });
 
   it('rejects an asynchronous spawn error and cleans process/log state', async () => {
@@ -248,7 +261,8 @@ describe('process manager lifecycle hardening', () => {
     await expect(stopping).resolves.toBe(true);
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     expect(mocks.spawn).toHaveBeenCalledWith(
-      'node',
+      // §17.4.2: 先頭語は実行ファイルへ解決してから渡す (win32 では node.exe の絶対パス)。
+      expect.stringMatching(/(^|[\\/])node(\.exe)?$/),
       ['demo.js'],
       // 期待値は design.md §15.1 の契約を直接書く (実装関数を再利用すると恒真になる)。
       expect.objectContaining({
@@ -260,6 +274,8 @@ describe('process manager lifecycle hardening', () => {
         }),
       }),
     );
+    // 解決できた入口に cmd.exe を挟まない。挟むと返り pid が cmd.exe になり pid 契約が破れる。
+    expect(mocks.spawn.mock.calls[0]![2]).toMatchObject({ shell: false });
   });
 
   it('does not hand the supervisor Infisical credential to the spawned child', async () => {

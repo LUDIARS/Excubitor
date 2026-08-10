@@ -27,26 +27,49 @@ export interface QueriedLogLine {
 
 type LogFileFormat = 'jsonl' | 'parquet';
 
-interface LogFileTarget {
+interface JsonlLogFileTarget {
   code: string;
   files: string[];
-  format: LogFileFormat;
+  format: 'jsonl';
 }
+
+interface ParquetLogFileTarget {
+  code: string;
+  files: string[];
+  format: 'parquet';
+}
+
+type LogFileTarget = JsonlLogFileTarget | ParquetLogFileTarget;
 
 /**
  * @implements LOG-STORE-QUERY-JSONL (spec/plan/log-store.md)
+ * @implements SPEC-LOG-QUERY-PARTIAL-JSONL (spec/plan/log-store.md)
  */
 export async function queryLogs(logsRoot: string, query: LogQuery): Promise<QueriedLogLine[]> {
   const files = resolveLogFiles(logsRoot, query);
   if (files.length === 0) return [];
-  if (files.every((target) => target.format === 'jsonl')) return queryJsonl(files, query);
-  return withDuckDb(async (connection) => executeQuery(connection, files, query));
+  const jsonlFiles = files.filter((target): target is JsonlLogFileTarget => target.format === 'jsonl');
+  const parquetFiles = files.filter((target): target is ParquetLogFileTarget => target.format === 'parquet');
+  if (parquetFiles.length === 0) return queryJsonl(jsonlFiles, query);
+  if (jsonlFiles.length === 0) {
+    return withDuckDb(async (connection) => executeQuery(connection, parquetFiles, query));
+  }
+  const [jsonlResults, parquetResults] = await Promise.all([
+    queryJsonl(jsonlFiles, query),
+    withDuckDb(async (connection) => executeQuery(connection, parquetFiles, query)),
+  ]);
+  return [...jsonlResults, ...parquetResults]
+    .sort((left, right) => right.ts - left.ts)
+    .slice(0, Math.max(0, query.limit));
 }
 
 /**
  * @implements LOG-STORE-QUERY-JSONL (spec/plan/log-store.md)
  */
-async function queryJsonl(files: readonly LogFileTarget[], query: LogQuery): Promise<QueriedLogLine[]> {
+async function queryJsonl(
+  files: readonly JsonlLogFileTarget[],
+  query: LogQuery,
+): Promise<QueriedLogLine[]> {
   const contains = query.contains?.toLowerCase();
   const results: QueriedLogLine[] = [];
   for (const target of files) {
@@ -158,7 +181,7 @@ function resolveLogFiles(logsRoot: string, query: LogQuery): LogFileTarget[] {
 
 async function executeQuery(
   connection: DuckDBConnection,
-  files: readonly LogFileTarget[],
+  files: readonly ParquetLogFileTarget[],
   query: LogQuery,
 ): Promise<QueriedLogLine[]> {
   const scans = files.map((target) => scanSql(target)).join('\nUNION ALL\n');
@@ -183,16 +206,7 @@ async function executeQuery(
   return reader.getRowObjectsJson().map(toQueriedLogLine);
 }
 
-function scanSql(target: LogFileTarget): string {
-  const source = target.format === 'parquet'
-    ? `read_parquet(${duckDbStringList(target.files)}, union_by_name=true)`
-    : `read_json_auto(
-        ${duckDbStringList(target.files)},
-        format='newline_delimited',
-        ignore_errors=true,
-        union_by_name=true,
-        columns={ts:'BIGINT', level:'VARCHAR', channel:'VARCHAR', msg:'VARCHAR'}
-      )`;
+function scanSql(target: ParquetLogFileTarget): string {
   return `
     SELECT
       ${duckDbString(target.code)} AS code,
@@ -200,7 +214,7 @@ function scanSql(target: LogFileTarget): string {
       TRY_CAST(level AS VARCHAR) AS level,
       TRY_CAST(channel AS VARCHAR) AS channel,
       TRY_CAST(msg AS VARCHAR) AS line
-    FROM ${source}
+    FROM read_parquet(${duckDbStringList(target.files)}, union_by_name=true)
   `;
 }
 

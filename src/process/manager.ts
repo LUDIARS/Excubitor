@@ -19,6 +19,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
 import { resolveDevProcessCommand } from './dev-process-md.js';
+import { resolveExecutable } from './executable-resolver.js';
 import { execCapture } from '../shared/exec.js';
 import { ensureProcessLogPaths, startProcessLog, stopProcessLog } from '../log/process-file.js';
 import { runServiceBuild } from './build.js';
@@ -88,6 +89,17 @@ export function adoptProcess(code: string, identity: VerifiedProcessIdentity): v
 /** code が (自前 spawn or 再採用で) 管理下にあるか。 */
 export function isManaged(code: string): boolean {
   return processes.has(code) || adopted.has(code);
+}
+
+/** A PID must never be owned by more than one catalog service. */
+export function isPidManaged(pid: number): boolean {
+  for (const processEntry of processes.values()) {
+    if (processEntry.child.pid === pid) return true;
+  }
+  for (const processEntry of adopted.values()) {
+    if (processEntry.pid === pid) return true;
+  }
+  return false;
 }
 
 /**
@@ -368,12 +380,16 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   if (resolveSpawnStrategy() === 'job-breakaway') {
     // launcher が Node の spawn で起動するため、コマンドは child 戦略と同じ
     // (cmd, args, shell) の形のまま渡す。 文字列へ畳まないので引用の食い違いも起きない。
+    // app は元から exe 直起動。それ以外は先頭語を実行ファイルへ解決し、cmd.exe が
+    // 本当に要る (.cmd / .bat) 場合だけ shell を挟む (§17.4.2)。cmd.exe を挟むと
+    // 返り pid が cmd.exe になって pid 契約が破れ、detached も付けられなくなる。
+    const resolved = svc.runtime === 'app'
+      ? { command: cmd, shell: false }
+      : resolveExecutable(cmd, { cwd: resolvedCwd, env: childEnv });
     return spawnBreakawayService(svc, opts, generation, childEnv, resolvedCwd, {
-      command: cmd,
+      command: resolved.command,
       args,
-      // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
-      // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
-      shell: svc.runtime !== 'app',
+      shell: resolved.shell,
     });
   }
 
@@ -385,14 +401,16 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   let child: ChildProcess;
   let spawnedAt: Date;
   try {
-    child = spawn(cmd, args, {
-    cwd: resolvedCwd,
-    // node/dev-process-md/start_script は npm / .bat 解決のため shell 経由。
-    // app は exe を直接起動する (shell:true だとパスの空白/backslash で壊れる)。
-    shell: svc.runtime !== 'app',
-    env: childEnv,
-    stdio: ['ignore', stdoutFd, stderrFd],
-    detached,
+    // breakaway 戦略と同じ解決を使う (§17.4.2)。cmd.exe が要る入口だけ shell を挟む。
+    const resolvedChild = svc.runtime === 'app'
+      ? { command: cmd, shell: false }
+      : resolveExecutable(cmd, { cwd: resolvedCwd, env: childEnv });
+    child = spawn(resolvedChild.command, args, {
+      cwd: resolvedCwd,
+      shell: resolvedChild.shell,
+      env: childEnv,
+      stdio: ['ignore', stdoutFd, stderrFd],
+      detached,
       windowsHide: true,
     });
     spawnedAt = new Date();
@@ -604,6 +622,10 @@ async function treeKill(pid: number): Promise<void> {
     if (!result.ok && isPidAlive(pid)) {
       throw new Error(`taskkill failed for pid=${pid}: ${result.stderr || `exit_code=${result.code ?? -1}`}`);
     }
+    // taskkill has completed synchronously. Polling the numeric PID after this
+    // point can observe an unrelated process that Windows has already assigned
+    // the same PID to, turning a successful stop into a grace-period timeout.
+    return;
   } else {
     signalDetachedTree(pid, 'SIGTERM');
     if (await waitForDetachedTreeExit(pid, TERMINATION_GRACE_MS)) return;
@@ -784,7 +806,9 @@ async function spawnBreakawayService(
       `service ${svc.code} could not be verified after breakaway spawn (pid=${pid});`
         + ` it exited immediately or its identity was unreadable — check ${stderrPath}`,
     );
-    await recordSpawnFailure(svc.code, failure);
+    // 照合できなかっただけで pid が生きているなら、それは孤児にしてよい実体ではない。
+    // 失敗として返しつつ pid は残し、boot 時の reconcile と宣言ポート突合が拾えるようにする。
+    await recordSpawnFailure(svc.code, failure, pid);
     throw failure;
   }
   // stop / shutdown とのレース: child 戦略の spawn 完了後 recheck と同じ扱い。
@@ -837,7 +861,18 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
   });
 }
 
-async function recordSpawnFailure(code: string, err: unknown): Promise<void> {
+/**
+ * `survivingPid` は「起動は失敗扱いだが、その pid はまだ生きている」場合に渡す。
+ *
+ * pid を捨てて `crashed` にすると、生き残った実体へ Excubitor が二度と到達できなくなる
+ * (停止も再起動も対象を持てず、次の起動は EADDRINUSE でしか失敗しない)。 失敗の記録と
+ * pid の保持は両立させ、boot 時の reconcile が拾えるようにする。
+ */
+async function recordSpawnFailure(
+  code: string,
+  err: unknown,
+  survivingPid?: number | null,
+): Promise<void> {
   processes.delete(code);
   try {
     stopProcessLog(code);
@@ -845,9 +880,12 @@ async function recordSpawnFailure(code: string, err: unknown): Promise<void> {
     logger.error({ code, err: (logErr as Error).message }, 'failed to close process log after spawn failure');
   }
   const message = err instanceof Error ? err.message : String(err);
-  logger.error({ code, err: message }, 'spawn failed');
+  const retained = typeof survivingPid === 'number' && isPidAlive(survivingPid)
+    ? survivingPid
+    : null;
+  logger.error({ code, err: message, retainedPid: retained }, 'spawn failed');
   try {
-    await updateInstanceStatus(code, 'crashed', null);
+    await updateInstanceStatus(code, 'crashed', retained);
   } catch (stateErr) {
     logger.error({ code, err: (stateErr as Error).message }, 'failed to record spawn failure state');
   }
@@ -887,6 +925,12 @@ async function waitForManagedTreeTermination(
   pid: number,
   timeoutMs: number,
 ): Promise<boolean> {
+  // taskkill /T has already synchronously completed on Windows. Checking the
+  // numeric PID again can observe a newly reused PID and unnecessarily hold a
+  // completed ChildProcess shutdown until the grace timeout expires.
+  if (process.platform === 'win32') {
+    return withBooleanTimeout(processEntry.termination, timeoutMs);
+  }
   const [childExited, treeExited] = await Promise.all([
     withBooleanTimeout(processEntry.termination, timeoutMs),
     waitForDetachedTreeExit(pid, timeoutMs),
