@@ -17,9 +17,6 @@
  */
 
 import type { Catalog, Service } from '../catalog/loader.js';
-import { createNamedLogger } from '../shared/logger.js';
-
-const logger = createNamedLogger('excubitor.process.topology');
 
 const DEFAULT_HOST = 'localhost';
 
@@ -62,7 +59,6 @@ export function buildTopologyEnv(catalog: Catalog): Record<string, string> {
 /** boot / catalog reload 時に呼び、 topology をキャッシュする。 */
 export function setTopologyFromCatalog(catalog: Catalog): void {
   cached = buildTopologyEnv(catalog);
-  logger.info({ count: Object.keys(cached).length }, 'topology env built');
 }
 
 /** 注入用 topology env (キャッシュ済み)。 */

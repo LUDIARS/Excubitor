@@ -5,6 +5,10 @@ import { DEFAULT_RUNTIME_CONFIG_PATH, readRuntimeConfig } from './runtime-config
 
 const logger = createNamedLogger('excubitor.catalog.loader');
 
+// 同一 (source, code) の untrusted fragment 警告は catalog reload の度に再出力されるため、
+// 警告に含める識別情報が変わらない間はプロセス内で 1 回だけ出す。
+let warnedUntrustedFragments = new Set<string>();
+
 const HealthSchema = z.object({
   // process: 管理下プロセスの pid 生存で死活を判定 (port を持たないローカルアプリ向け)。
   type: z.enum(['http', 'tcp', 'cmd', 'process']),
@@ -354,6 +358,8 @@ export function loadCatalog(runtimeConfigPath = DEFAULT_RUNTIME_CONFIG_PATH): Ca
   const runtimeConfig = readRuntimeConfig(runtimeConfigPath);
   const servicesByCode = new Map<string, { service: Service; source: string }>();
   const conflictedCodes = new Set<string>();
+  const currentUntrustedFragments = new Set<string>();
+  const warningsSeenThisLoad = new Set(warnedUntrustedFragments);
 
   // 各 service definition の正本は、所有 repository 直下の excubitor.catalog.yaml だけ。
   // 1 source の破損は個別に隔離し、同 code の複数所有は危険なので service 単位で fail-closed にする。
@@ -376,10 +382,15 @@ export function loadCatalog(runtimeConfigPath = DEFAULT_RUNTIME_CONFIG_PATH): Ca
     }
 
     if (!fragment.trusted) {
-      logger.warn(
-        { source: fragment.source, code: validation.data.code },
-        'untrusted catalog fragment service ignored',
-      );
+      const warnKey = `${fragment.source.length}:${fragment.source}:${validation.data.code}`;
+      currentUntrustedFragments.add(warnKey);
+      if (!warningsSeenThisLoad.has(warnKey)) {
+        warningsSeenThisLoad.add(warnKey);
+        logger.warn(
+          { source: fragment.source, code: validation.data.code },
+          'untrusted catalog fragment service ignored',
+        );
+      }
       continue;
     }
 
@@ -408,10 +419,12 @@ export function loadCatalog(runtimeConfigPath = DEFAULT_RUNTIME_CONFIG_PATH): Ca
   if (services.length === 0) {
     logger.warn('no trusted service-owned catalogs discovered');
   }
-  return CatalogSchema.parse({
+  const catalog = CatalogSchema.parse({
     ...runtimeConfig,
     services,
   });
+  warnedUntrustedFragments = currentUntrustedFragments;
+  return catalog;
 }
 
 

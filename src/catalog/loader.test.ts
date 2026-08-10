@@ -107,7 +107,7 @@ describe('catalog source merge', () => {
     );
   });
 
-  it('rejects runnable service definitions from a repository outside the trust allowlist', () => {
+  it('rejects untrusted runnable services and warns only once across reloads', () => {
     const basePath = join(mocks.root, 'excubitor.config.yaml');
     writeYaml(basePath, '{}\n');
     const source = writeFragment('Untrusted', [
@@ -122,6 +122,7 @@ describe('catalog source merge', () => {
     ].join('\n'));
 
     expect(loadCatalog(basePath).services).toEqual([]);
+    expect(loadCatalog(basePath).services).toEqual([]);
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         source: source.replace(/\\/g, '/'),
@@ -129,6 +130,11 @@ describe('catalog source merge', () => {
       }),
       'untrusted catalog fragment service ignored',
     );
+    expect(
+      mocks.warn.mock.calls.filter(
+        ([, message]) => message === 'untrusted catalog fragment service ignored',
+      ),
+    ).toHaveLength(1);
   });
 
   it('accepts privileged fields from an explicitly allowlisted repository', () => {
