@@ -43,6 +43,7 @@ catalog がないサービスは監視・起動・再起動の対象にならず
 | Secret 注入 | Infisical fetch → 子プロセス env に直接渡して `.env` ファイルを残さない |
 | 起動credential | EducationLab等のspawn直前にExがsecret生成 → Cernereへ暗号化記録 → 子envへ注入 |
 | Infisical 遠隔設定 | secret CRUD を Excubitor 1 か所から |
+| パッケージ日次監査 | catalog 対象 + global CLI の更新・脆弱性・release notes を集約し、専用 Discord webhook へ報告 |
 
 ## ローカル制御モデル
 
@@ -106,6 +107,22 @@ Web API は supervisor を自動生成せず 503 で fail-fast する。詳し�
 [`spec/plan/local-control.md`](spec/plan/local-control.md) を参照。
 
 backend の readiness は http://localhost:17332/health で確認する。
+
+## パッケージ日次監査
+
+`npm run packages:audit` は catalog 管理下の Node プロジェクトと `npm ls -g` の実測
+global package を監査する。共通パッケージは利用プロジェクトをまとめ、`npm audit` の
+脆弱性、更新分類、GitHub release notes を同じレポートへ含める。global CLI の必須一覧と
+非 npm installer の対応は `excubitor.config.yaml` の `package_audit:`、詳細設計は
+[`spec/feature/package-update-audit.md`](spec/feature/package-update-audit.md) を参照。
+
+日次 Discord は downtime 通知とは別 webhook で、Config 画面または
+`EXCUBITOR_PACKAGE_AUDIT_DISCORD_WEBHOOK_URL` から設定する。Windows の登録スクリプト:
+
+```powershell
+npm run build
+.\scripts\install-package-audit-task.ps1 -At 09:00
+```
 
 ## ラテン語の名前
 

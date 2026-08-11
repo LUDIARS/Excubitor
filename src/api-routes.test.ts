@@ -225,6 +225,12 @@ vi.mock('./shared/roots.js', () => ({
   domainRoot: () => mocks.domainRoot,
 }));
 vi.mock('./shared/build-version.js', () => ({ resolveBuildVersion: mocks.resolveBuildVersion }));
+vi.mock('./shared/redis-cache.js', () => ({
+  acquireRedisLock: vi.fn(async () => null),
+  readRedisJson: vi.fn(async () => null),
+  redisCacheKey: (name: string) => `excubitor:cache:${name}`,
+  writeRedisJson: vi.fn(async () => undefined),
+}));
 
 vi.mock('./catalog/loader.js', () => ({
   TIER_ORDER: ['saas', 'infra', 'personal', 'local-app'],

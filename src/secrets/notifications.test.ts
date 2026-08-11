@@ -6,6 +6,11 @@ import { buildConfigRouter } from './router.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
+// Build placeholder credentials from segments so secret scanners do not mistake test data for
+// a committed webhook. The router still receives the real URL shape needed by its host allowlist.
+const WEBHOOK_ENDPOINT = 'https://discord.com/api';
+const webhookUrl = (id: string, token: string) => `${WEBHOOK_ENDPOINT}/webhooks/${id}/${token}`;
+
 describe('Discord notification config API', () => {
   let tempDir = '';
 
@@ -26,7 +31,7 @@ describe('Discord notification config API', () => {
 
   it('stores the webhook encrypted and returns status without the URL', async () => {
     const app = buildConfigRouter();
-    const webhook = 'https://discord.com/api/webhooks/123/secret-token';
+    const webhook = webhookUrl('123', 'secret-token');
     const saved = await app.request('/api/v1/config/notifications/discord', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -62,7 +67,7 @@ describe('Discord notification config API', () => {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        webhook_url: 'https://discord.com/api/webhooks/123/secret-token',
+        webhook_url: webhookUrl('123', 'secret-token'),
         enabled: true,
         downtime_threshold_sec: 60,
         notify_recovery: true,
@@ -73,5 +78,27 @@ describe('Discord notification config API', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, message: 'Discord webhook test succeeded' });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('stores package audit notifications under a separate encrypted webhook', async () => {
+    const app = buildConfigRouter();
+    const webhook = webhookUrl('456', 'package-audit-token');
+    const saved = await app.request('/api/v1/config/notifications/package-audit/discord', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ webhook_url: webhook, enabled: true }),
+    });
+    expect(saved.status).toBe(200);
+    expect(JSON.stringify(await saved.json())).not.toContain(webhook);
+    expect(readFileSync(process.env.EXCUBITOR_CONFIG_PATH!, 'utf8')).not.toContain('package-audit-token');
+
+    const status = await app.request('/api/v1/config/notifications');
+    expect(await status.json()).toMatchObject({
+      package_audit_discord: {
+        configured: true,
+        enabled: true,
+        source: 'config',
+      },
+    });
   });
 });

@@ -9,10 +9,13 @@ import {
   fetchNotificationConfig,
   saveDiscordNotificationConfig,
   testDiscordNotification,
+  savePackageAuditDiscordConfig,
+  testPackageAuditDiscord,
   type CatalogService,
   type ConfigInfisical,
   type ServiceInfisical,
   type DiscordNotificationStatus,
+  type PackageAuditDiscordStatus,
 } from '../lib/api';
 
 interface SvcRow extends ServiceInfisical {
@@ -57,6 +60,10 @@ export default function Config() {
   const [discordThreshold, setDiscordThreshold] = useState(60);
   const [discordRecovery, setDiscordRecovery] = useState(true);
   const [discordTest, setDiscordTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [packageAuditDiscord, setPackageAuditDiscord] = useState<PackageAuditDiscordStatus | null>(null);
+  const [packageAuditWebhook, setPackageAuditWebhook] = useState('');
+  const [packageAuditEnabled, setPackageAuditEnabled] = useState(false);
+  const [packageAuditTest, setPackageAuditTest] = useState<{ ok: boolean; message: string } | null>(null);
 
   // services editor
   const [rows, setRows] = useState<SvcRow[]>([]);
@@ -74,10 +81,12 @@ export default function Config() {
     if (c.identity.environment) setEnvironment(c.identity.environment);
     setDomainRootDraft(c.domain_root.value);
     setRows(toRows(c.services));
-    setDiscord(notification);
-    setDiscordEnabled(notification.enabled);
-    setDiscordThreshold(notification.downtime_threshold_sec);
-    setDiscordRecovery(notification.notify_recovery);
+    setDiscord(notification.discord);
+    setDiscordEnabled(notification.discord.enabled);
+    setDiscordThreshold(notification.discord.downtime_threshold_sec);
+    setDiscordRecovery(notification.discord.notify_recovery);
+    setPackageAuditDiscord(notification.package_audit_discord);
+    setPackageAuditEnabled(notification.package_audit_discord.enabled);
   };
 
   useEffect(() => {
@@ -154,6 +163,37 @@ export default function Config() {
       setDiscordTest(await testDiscordNotification());
     } catch (err) {
       setDiscordTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+  const submitPackageAuditDiscord = async () => {
+    setBusy('package-audit-discord');
+    setPackageAuditTest(null);
+    try {
+      await savePackageAuditDiscordConfig({
+        webhook_url: packageAuditWebhook.trim() || undefined,
+        enabled: packageAuditEnabled,
+      });
+      setPackageAuditWebhook('');
+      await load();
+    } catch (err) {
+      setPackageAuditTest({ ok: false, message: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+  const runPackageAuditDiscordTest = async () => {
+    setBusy('package-audit-discord-test');
+    setPackageAuditTest(null);
+    try {
+      setPackageAuditTest(await testPackageAuditDiscord());
+    } catch (err) {
+      setPackageAuditTest({ ok: false, message: (err as Error).message });
     } finally {
       setBusy(null);
     }
@@ -262,6 +302,60 @@ export default function Config() {
           {discordTest && (
             <p className={`muted small ${discordTest.ok ? 'ok' : 'fail'}`}>
               {discordTest.ok ? '✓' : '✗'} {discordTest.message}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>Discord package audit reports</h2>
+        <p className="muted">
+          Sends the daily dependency update and vulnerability report to a dedicated Discord webhook.
+          This webhook is separate from downtime alerts, encrypted at rest, and never returned by the API.
+        </p>
+        <p className="muted small">
+          Current: <strong className={packageAuditDiscord?.configured ? 'ok' : 'fail'}>
+            {packageAuditDiscord?.configured ? 'configured' : 'not configured'}
+          </strong> ({packageAuditDiscord?.source ?? 'unset'}).
+          Saved at <code>{packageAuditDiscord?.storePath ?? id.storePath}</code>.
+        </p>
+        <div className="config-form">
+          <label>
+            Package audit Discord webhook URL
+            <input
+              type="password"
+              value={packageAuditWebhook}
+              onChange={(event) => setPackageAuditWebhook(event.target.value)}
+              placeholder={packageAuditDiscord?.configured
+                ? '(enter only to replace)'
+                : 'https://discord.com/api/webhooks/...'}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={packageAuditEnabled}
+              onChange={(event) => setPackageAuditEnabled(event.target.checked)}
+            /> Enable daily package audit reports
+          </label>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null}
+              onClick={() => void submitPackageAuditDiscord()}
+            >
+              {busy === 'package-audit-discord' ? 'Saving...' : 'Save package audit webhook'}
+            </button>
+            <button
+              disabled={busy !== null || !packageAuditDiscord?.configured || !packageAuditEnabled}
+              onClick={() => void runPackageAuditDiscordTest()}
+            >
+              {busy === 'package-audit-discord-test' ? 'Sending...' : 'Send test'}
+            </button>
+          </div>
+          {packageAuditTest && (
+            <p className={`muted small ${packageAuditTest.ok ? 'ok' : 'fail'}`}>
+              {packageAuditTest.ok ? '✓' : '✗'} {packageAuditTest.message}
             </p>
           )}
         </div>

@@ -51,6 +51,7 @@ interface ExcubitorConfig {
     domainRoot?: string;
     notifications?: {
       discord?: DiscordNotificationConfig;
+      packageAuditDiscord?: PackageAuditDiscordConfig;
     };
   };
 }
@@ -76,6 +77,24 @@ export interface DiscordNotificationInput {
   enabled: boolean;
   downtimeThresholdSec?: number;
   notifyRecovery?: boolean;
+  clearWebhook?: boolean;
+}
+
+export interface PackageAuditDiscordConfig {
+  webhookUrl: string;
+  enabled: boolean;
+}
+
+export interface PackageAuditDiscordStatus {
+  configured: boolean;
+  enabled: boolean;
+  source: 'env' | 'config' | 'unset';
+  storePath: string;
+}
+
+export interface PackageAuditDiscordInput {
+  webhookUrl?: string;
+  enabled: boolean;
   clearWebhook?: boolean;
 }
 
@@ -248,6 +267,68 @@ export function saveDiscordNotificationConfig(input: DiscordNotificationInput): 
   writeConfig(cfg);
   logger.info({ enabled: discord.enabled }, 'saved Discord notification settings');
   return getDiscordNotificationStatus();
+}
+
+/**
+ * パッケージ監査専用 webhook。downtime 通知とは別の URL を暗号化 config に持つ。
+ *
+ * @implements SPEC-PACKAGE-UPDATE-AUDIT
+ */
+export function getPackageAuditDiscordConfig(): PackageAuditDiscordConfig | null {
+  const envUrl = process.env.EXCUBITOR_PACKAGE_AUDIT_DISCORD_WEBHOOK_URL?.trim();
+  const stored = readConfig().settings?.notifications?.packageAuditDiscord;
+  const webhookUrl = envUrl ? normalizeDiscordWebhookUrl(envUrl) : stored?.webhookUrl;
+  if (!webhookUrl) return null;
+  return {
+    webhookUrl: normalizeDiscordWebhookUrl(webhookUrl),
+    enabled: stored?.enabled ?? true,
+  };
+}
+
+/** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+export function getPackageAuditDiscordStatus(): PackageAuditDiscordStatus {
+  const envUrl = process.env.EXCUBITOR_PACKAGE_AUDIT_DISCORD_WEBHOOK_URL?.trim();
+  const config = getPackageAuditDiscordConfig();
+  return {
+    configured: config !== null,
+    enabled: config?.enabled ?? false,
+    source: envUrl ? 'env' : config ? 'config' : 'unset',
+    storePath: configPath(),
+  };
+}
+
+/** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+export function savePackageAuditDiscordConfig(
+  input: PackageAuditDiscordInput,
+): PackageAuditDiscordStatus {
+  const cfg = readConfig();
+  const current = cfg.settings?.notifications?.packageAuditDiscord;
+  const webhookUrl = input.clearWebhook
+    ? ''
+    : input.webhookUrl?.trim()
+      ? normalizeDiscordWebhookUrl(input.webhookUrl)
+      : current?.webhookUrl ?? '';
+  if (
+    input.enabled
+    && !webhookUrl
+    && !process.env.EXCUBITOR_PACKAGE_AUDIT_DISCORD_WEBHOOK_URL?.trim()
+  ) {
+    throw new Error('Package audit Discord webhook URL is required when notifications are enabled');
+  }
+  const packageAuditDiscord: PackageAuditDiscordConfig = {
+    webhookUrl,
+    enabled: input.enabled,
+  };
+  cfg.settings = {
+    ...(cfg.settings ?? {}),
+    notifications: {
+      ...(cfg.settings?.notifications ?? {}),
+      packageAuditDiscord,
+    },
+  };
+  writeConfig(cfg);
+  logger.info({ enabled: packageAuditDiscord.enabled }, 'saved package audit Discord notification settings');
+  return getPackageAuditDiscordStatus();
 }
 
 function normalizeDowntimeThreshold(value: number | undefined): number {

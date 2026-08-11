@@ -36,3 +36,38 @@ log_store:
   ring_lines_per_service: 2000
   ring_lines_global: 20000
   compact_hour_utc: 18
+
+package_audit:
+  # npm ls -g --depth=0 の実測一覧を正本とし、ここでは npm 外インストーラや
+  # 必須 CLI の package/version 対応だけを宣言する。
+  include_unlisted_npm_globals: true
+
+  release_notes:
+    enabled: true
+    # GitHub API の未認証 rate limit を食い尽くさない上限。GITHUB_TOKEN があれば認証利用する。
+    max_packages: 40
+
+  global_cli:
+    - id: codex-security
+      command: codex-security
+      npm_package: "@openai/codex-security"
+      version_args: ["--version"]
+      required: true
+
+    - id: codex
+      command: codex
+      npm_package: "@openai/codex"
+      version_args: ["--version"]
+      required: true
+
+    - id: claude
+      command: claude
+      npm_package: "@anthropic-ai/claude-code"
+      version_args: ["--version"]
+      required: true
+
+    - id: anatomia
+      command: anatomia
+      workspace_package: "${ARS_ROOT}/Anatomia/package.json"
+      version_args: ["--version"]
+      required: true

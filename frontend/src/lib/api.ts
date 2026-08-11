@@ -326,6 +326,18 @@ export interface DiscordNotificationStatus {
   storePath: string;
 }
 
+export interface PackageAuditDiscordStatus {
+  configured: boolean;
+  enabled: boolean;
+  source: 'env' | 'config' | 'unset';
+  storePath: string;
+}
+
+export interface NotificationStatus {
+  discord: DiscordNotificationStatus;
+  package_audit_discord: PackageAuditDiscordStatus;
+}
+
 export interface IdentityInput {
   siteUrl: string;
   environment?: string;
@@ -638,9 +650,8 @@ export function saveDomainRoot(domainRoot: string) {
   });
 }
 
-export function fetchNotificationConfig(): Promise<DiscordNotificationStatus> {
-  return getJSON<{ discord: DiscordNotificationStatus }>('/api/v1/config/notifications')
-    .then((response) => response.discord);
+export function fetchNotificationConfig(): Promise<NotificationStatus> {
+  return getJSON<NotificationStatus>('/api/v1/config/notifications');
 }
 
 export function saveDiscordNotificationConfig(input: {
@@ -658,6 +669,25 @@ export function saveDiscordNotificationConfig(input: {
 export function testDiscordNotification() {
   return postJSON<{ ok: boolean; message: string }>(
     '/api/v1/config/notifications/discord/test',
+    {},
+  );
+}
+
+/** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+export function savePackageAuditDiscordConfig(input: {
+  webhook_url?: string;
+  enabled: boolean;
+}) {
+  return putJSON<{ ok: boolean; discord: PackageAuditDiscordStatus }>(
+    '/api/v1/config/notifications/package-audit/discord',
+    input,
+  );
+}
+
+/** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+export function testPackageAuditDiscord() {
+  return postJSON<{ ok: boolean; message: string }>(
+    '/api/v1/config/notifications/package-audit/discord/test',
     {},
   );
 }

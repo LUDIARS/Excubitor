@@ -1,6 +1,6 @@
 {
   "name": "update",
-  "description": "Git pull update application plus branch/update status reporting per service.",
+  "description": "Git pull/update status workflows plus scheduled package update and vulnerability auditing.",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -44,12 +44,13 @@
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"update\" domain: Git pull update application plus branch/update status reporting per service.",
+  "cardTemplate": "Summarise the \"update\" domain: Git pull/status workflows and scheduled package update, vulnerability, and release-note auditing.",
   "source": "spec-draft",
   "mechanics": [],
   "specRefs": [
-    "構成 / src/update/"
+    "構成 / src/update/",
+    "Package update audit"
   ],
-  "rationale": "src/update (5 files) handles version/git update workflows separate from scanning.",
+  "rationale": "src/update handles version and dependency update workflows separately from periodic health scanning.",
   "updatedAt": "2026-08-02T09:07:03.979Z"
 }

@@ -19,6 +19,9 @@ import {
   getDiscordNotificationConfig,
   getDiscordNotificationStatus,
   saveDiscordNotificationConfig,
+  getPackageAuditDiscordConfig,
+  getPackageAuditDiscordStatus,
+  savePackageAuditDiscordConfig,
 } from './config-store.js';
 import { verifyIdentity } from './infisical.js';
 import { sendDiscordWebhook } from '../notify/discord-webhook.js';
@@ -56,6 +59,12 @@ const NotificationSchema = z.object({
   clear_webhook: z.boolean().optional(),
 });
 
+const PackageAuditNotificationSchema = z.object({
+  webhook_url: z.string().optional(),
+  enabled: z.boolean(),
+  clear_webhook: z.boolean().optional(),
+});
+
 export interface ConfigRouterDeps {
   onDomainRootChanged?: () => unknown | Promise<unknown>;
 }
@@ -71,7 +80,10 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
   app.get('/api/v1/config/domain-root', (c) => c.json({ domain_root: getDomainRootStatus() }));
 
   app.get('/api/v1/config/notifications', (c) =>
-    c.json({ discord: getDiscordNotificationStatus() }),
+    c.json({
+      discord: getDiscordNotificationStatus(),
+      package_audit_discord: getPackageAuditDiscordStatus(),
+    }),
   );
 
   app.put('/api/v1/config/notifications/discord', async (c) => {
@@ -98,6 +110,37 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     try {
       await sendDiscordWebhook(config.webhookUrl, '✅ Excubitor Discord webhook test succeeded.');
       return c.json({ ok: true, message: 'Discord webhook test succeeded' });
+    } catch (err) {
+      return c.json({ ok: false, message: (err as Error).message }, 502);
+    }
+  });
+
+  /** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+  app.put('/api/v1/config/notifications/package-audit/discord', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = PackageAuditNotificationSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      const discord = savePackageAuditDiscordConfig({
+        webhookUrl: parsed.data.webhook_url,
+        enabled: parsed.data.enabled,
+        clearWebhook: parsed.data.clear_webhook,
+      });
+      return c.json({ ok: true, discord });
+    } catch (err) {
+      return c.json({ error: 'invalid_discord_webhook', message: (err as Error).message }, 400);
+    }
+  });
+
+  /** @implements SPEC-PACKAGE-UPDATE-AUDIT */
+  app.post('/api/v1/config/notifications/package-audit/discord/test', async (c) => {
+    const config = getPackageAuditDiscordConfig();
+    if (!config?.enabled) {
+      return c.json({ ok: false, message: 'Package audit Discord notifications are not enabled' }, 400);
+    }
+    try {
+      await sendDiscordWebhook(config.webhookUrl, '✅ Excubitor package audit webhook test succeeded.');
+      return c.json({ ok: true, message: 'Package audit Discord webhook test succeeded' });
     } catch (err) {
       return c.json({ ok: false, message: (err as Error).message }, 502);
     }

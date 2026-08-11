@@ -17,6 +17,8 @@
     "start:service": "node dist/server.js --service",
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",
+    "packages:audit": "tsx src/update/package-audit/cli.ts",
+    "packages:audit:daily": "node dist/update/package-audit/cli.js --discord --json",
     "release": "tsx src/release/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
     "test": "vitest run --pool=threads",
