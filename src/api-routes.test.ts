@@ -179,7 +179,22 @@ const mocks = vi.hoisted(() => ({
   branchStatus: vi.fn(async (svc: { code: string }) => ({ code: svc.code, current: 'main', branches: [] })),
   applyUpdate: vi.fn(async (svc: { code: string }) => ({ ok: true, code: svc.code, steps: [] })),
   discoverServices: vi.fn(async () => ({ candidates: [], missing: [] })),
-  buildPortReport: vi.fn(async () => ({ listeners: [], declared: [], conflicts: [] })),
+  buildPortReport: vi.fn(async () => ({
+    listeners: [{ port: 1234, pids: [4242], processNames: ['node.exe'] }],
+    declaredConflicts: [],
+    services: [{
+      code: 'svc-a',
+      name: 'Service A',
+      role: 'primary',
+      port: 1234,
+      state: 'running',
+      listening: true,
+      pids: [4242],
+      processNames: ['node.exe'],
+      conflict: false,
+    }],
+    hasConflict: false,
+  })),
   listReleaseManifests: vi.fn(() => [{ name: 'demo', path: 'demo.yaml' }]),
   loadReleaseManifest: vi.fn(() => ({
     name: 'demo',
@@ -243,7 +258,10 @@ vi.mock('./catalog/editor.js', () => ({ updateServiceCatalogInfo: mocks.updateSe
 vi.mock('./scanner/loop.js', () => ({ startScannerLoop: mocks.startScannerLoop }));
 vi.mock('./scanner/sync.js', () => ({ syncDockerInstances: mocks.syncDockerInstances }));
 vi.mock('./scanner/health-state.js', () => ({ syncHealthyServiceStates: mocks.syncHealthyServiceStates }));
-vi.mock('./scanner/ports.js', () => ({ buildPortReport: mocks.buildPortReport }));
+vi.mock('./scanner/ports.js', () => ({
+  buildPortReport: mocks.buildPortReport,
+  detectDeclaredConflicts: vi.fn(() => []),
+}));
 
 vi.mock('./local-control/service-adapter.js', () => ({
   controlServiceViaLocalTool: mocks.controlService,
@@ -377,6 +395,10 @@ vi.mock('./federation/client.js', () => ({
 
 vi.mock('./memory/loop.js', () => ({ startMemoryLoop: mocks.startMemoryLoop }));
 
+// Load the substantial router module while Vitest collects this suite.  Loading it
+// inside the first beforeEach can consume that hook's entire timeout on a cold run.
+const observabilityModule = import('./index.js');
+
 function makeCatalog(): AnyCatalog {
   return {
     project_versions: { excubitor: { major: 0, minor: 1 } },
@@ -504,7 +526,7 @@ function seedDb(): void {
 }
 
 async function bootRouter(options?: BootObservabilityOptions): Promise<Hono> {
-  const mod = await import('./index.js');
+  const mod = await observabilityModule;
   const booted = await mod.bootObservability(options);
   return booted.router;
 }
@@ -621,6 +643,58 @@ describe('Excubitor HTTP APIs', () => {
       expect(data).toHaveProperty(c.key);
     });
   }
+
+  // 2026-08-08、 state=crashed なのに health_ok=true という表示のまま、 管理外に落ちた
+  // 旧プロセスが port を握り続けていた。 state と health を並べるだけでは実体が管理外で
+  // あることが読めないので、 占有者の判定を状態そのものに載せる。
+  it('reports who holds the declared port alongside health', async () => {
+    const list = await requestJson<{
+      services: Array<{ code: string; port_owner: string; health_trusted: boolean; port_holder_pids: number[] }>;
+    }>(router, 'GET', '/api/v1/services');
+    expect(list.res.status).toBe(200);
+    expect(list.data.services.find((svc) => svc.code === 'svc-a')).toMatchObject({
+      port_owner: 'managed',
+      health_trusted: true,
+      port_holder_pids: [4242],
+    });
+
+    const detail = await requestJson<{ port_owner: string; health_trusted: boolean; port_owner_reason: string | null }>(
+      router,
+      'GET',
+      '/api/v1/services/svc-a',
+    );
+    expect(detail.res.status).toBe(200);
+    expect(detail.data).toMatchObject({
+      port_owner: 'managed',
+      health_trusted: true,
+      port_owner_reason: null,
+    });
+  });
+
+  it('does not report an unmeasured startup fallback as a free port', async () => {
+    type MockPortReport = Awaited<ReturnType<typeof mocks.buildPortReport>>;
+    let finishScan = (_report: MockPortReport): void => {
+      throw new Error('port scan did not start');
+    };
+    mocks.buildPortReport.mockImplementationOnce(() => new Promise<MockPortReport>((resolve) => {
+      finishScan = resolve;
+    }));
+    const coldRouter = await bootRouter();
+
+    const detail = await requestJson<{ port_owner: string; health_trusted: boolean; port_owner_reason: string | null }>(
+      coldRouter,
+      'GET',
+      '/api/v1/services/svc-a',
+    );
+    expect(detail.res.status).toBe(200);
+    expect(detail.data).toMatchObject({
+      port_owner: 'unknown',
+      health_trusted: true,
+      port_owner_reason: null,
+    });
+
+    finishScan(await mocks.buildPortReport());
+  });
 
   it('serves the runtime version published during boot', async () => {
     const { res, data } = await requestJson<{ runtime_version: string }>(router, 'GET', '/api/v1/system');

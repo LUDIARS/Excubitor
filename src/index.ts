@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { createNamedLogger } from './shared/logger.js';
 import { z } from 'zod';
 
@@ -58,6 +59,8 @@ import { buildLogQueryRouter } from './log/query-router.js';
 import { configureLogRingBuffer, recentServiceLogLines } from './log/ring-buffer.js';
 import { startParquetCompactionLoop } from './log/parquet-compactor.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
+import { createPortReportProvider, type PortReportProvider } from './scanner/port-report-cache.js';
+import { classifyPortOwnership, type PortOwnership } from './process/port-ownership.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
 import type { DowntimeSummary } from './scanner/downtime.js';
 import { DowntimeWorkerClient } from './scanner/downtime-worker-client.js';
@@ -227,7 +230,50 @@ async function publishExcubitorRuntimeVersion(catalog: Catalog): Promise<void> {
   );
 }
 
-function serviceRowView(r: Record<string, unknown>, downtime: DowntimeSummary | null = null): Record<string, unknown> {
+/**
+ * 宣言ポートの占有者を判定する。
+ *
+ * state と health_ok を並べるだけだと、 2026-08-08 のように「state=crashed なのに
+ * health_ok=true」を見た人が「crashed だが生きている」としか読めない。 実際には
+ * Excubitor の管理外に落ちた旧プロセスが port を握って応答していた。
+ */
+async function portOwnershipByCode(
+  provider: PortReportProvider,
+  records: ReadonlyArray<Record<string, unknown>>,
+): Promise<Map<string, PortOwnership>> {
+  const snapshot = await provider.snapshot();
+  const listeners = snapshot.report.listeners;
+  const localHostname = hostname();
+  const byCode = new Map<string, PortOwnership>();
+  for (const r of records) {
+    const code = String(r.code ?? '');
+    if (!code) continue;
+    const host = r.host_hostname == null ? null : String(r.host_hostname);
+    const persistedPid = typeof r.pid === 'number' && Number.isSafeInteger(r.pid) && r.pid > 0
+      ? r.pid
+      : undefined;
+    byCode.set(code, classifyPortOwnership({
+      port: r.port == null ? null : Number(r.port),
+      // Lifecycle は別プロセスの local-control supervisor が所有する。backend 内の
+      // process manager ではなく、supervisor が service_instances に永続化した PID を使う。
+      managedPid: persistedPid,
+      listeners,
+      healthOk: r.health_ok === null || r.health_ok === undefined ? null : Boolean(r.health_ok),
+      // ローカルのリスナー一覧は remote host / docker のサービスについて何も言えない。
+      // 起動直後の fallback も空の実測ではないため、free と断定しない。
+      local: snapshot.listenersObserved
+        && r.docker_id == null
+        && (host === null || host.toLowerCase() === localHostname.toLowerCase()),
+    }));
+  }
+  return byCode;
+}
+
+function serviceRowView(
+  r: Record<string, unknown>,
+  downtime: DowntimeSummary | null = null,
+  ownership: PortOwnership | null = null,
+): Record<string, unknown> {
   const health = parseHealthDetail(r.health_detail_raw);
   return {
     id: r.id,
@@ -249,6 +295,12 @@ function serviceRowView(r: Record<string, unknown>, downtime: DowntimeSummary | 
     health_reason: health.reason,
     health_detail: health.detail,
     health_checked_at: r.health_checked_at ?? null,
+    // 宣言ポートを誰が握っているか。 health_ok をそのまま健全と読んでよいかは
+    // health_trusted で示す (false なら port_owner_reason に理由が入る)。
+    port_owner: ownership?.owner ?? 'unknown',
+    port_holder_pids: ownership?.holderPids ?? [],
+    health_trusted: ownership?.healthTrusted ?? true,
+    port_owner_reason: ownership?.reason ?? null,
     downtime_24h: downtime,
     updated_at: r.updated_at,
   };
@@ -665,8 +717,10 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildLogStreamRouter());
   app.route('/', buildLogQueryRouter());
 
-  // ポート衝突検知 (/api/v1/ports)
-  app.route('/', buildPortsRouter(() => currentCatalog!));
+  // ポート衝突検知 (/api/v1/ports)。 同じリスナー一覧をサービス状態 API も使うので、
+  // provider は 1 つだけ作って共有する (エンドポイントごとの実測を避ける)。
+  const portReports = createPortReportProvider(() => currentCatalog!);
+  app.route('/', buildPortsRouter(portReports));
 
   // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
   app.route('/', buildMemoryRouter(() => currentCatalog!));
@@ -698,7 +752,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const rows = db().all(drizzleSql`
       SELECT
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
-        si.state, si.docker_id, si.last_seen_at,
+        si.state, si.pid, si.docker_id, si.last_seen_at,
         si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
         lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
@@ -717,8 +771,13 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     `);
     const records = rows as unknown as Array<Record<string, unknown>>;
     const downtimeByCode = await readDowntimeSummaries(records.map((r) => String(r.code ?? '')), 24 * 60);
+    const ownership = await portOwnershipByCode(portReports, records);
     return c.json({
-      services: records.map((r) => serviceRowView(r, downtimeByCode.get(String(r.code ?? '')) ?? null)),
+      services: records.map((r) => serviceRowView(
+        r,
+        downtimeByCode.get(String(r.code ?? '')) ?? null,
+        ownership.get(String(r.code ?? '')) ?? null,
+      )),
     });
   });
 
@@ -727,7 +786,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const rows = db().all(drizzleSql`
       SELECT
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
-        si.id AS instance_id, si.state, si.docker_id, si.last_seen_at,
+        si.id AS instance_id, si.state, si.pid, si.docker_id, si.last_seen_at,
         si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
         lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
@@ -747,8 +806,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     if (rows.length === 0) return c.json({ error: 'not_found' }, 404);
     const r = rows[0]!;
     const downtime = (await readDowntimeSummaries([code], 24 * 60)).get(code) ?? null;
+    const ownership = (await portOwnershipByCode(portReports, [r])).get(code) ?? null;
     return c.json({
-      ...serviceRowView(r, downtime),
+      ...serviceRowView(r, downtime, ownership),
       id: r.id,
       instance_id: r.instance_id ?? null,
     });
