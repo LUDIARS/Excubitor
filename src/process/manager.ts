@@ -748,7 +748,26 @@ function resolveSpawnStrategy(): 'child' | 'job-breakaway' {
 // WMI 経由 spawn は powershell と launcher の起動を挟むため、作成時刻の照合は spawn 前後の
 // 時計ずれを許容する (通常の adopt 照合の 5s では負荷時に誤検知しうる)。
 const BREAKAWAY_START_TOLERANCE_MS = 30_000;
-const BREAKAWAY_IDENTITY_WAIT_MS = 3_000;
+/**
+ * 作成時刻の照合を諦めるまでの待ち。
+ *
+ * 照合 1 回のコストは `verifyProcessIdentity` が起動する powershell そのもので、
+ * **アイドルのホストでも 1.0〜2.5 秒**かかる (2026-08-12 実測: 1004 / 1088 / 1903 /
+ * 2498 / 1146 / 1697 ms)。旧値の 3 秒は 1 回分をわずかに超える程度しかなく、
+ * サービス起動と同時に走る他プロセス (npm・CLI・埋め込みのウォームアップ) が
+ * CPU を取ると **1 回目で使い切ってリトライが入らない**。
+ *
+ * その結果、プロセスは正常に起動して port を listen しているのに
+ * `could not be verified after breakaway spawn` で失敗扱いになり、生き残った実体が
+ * adopted に載らないまま孤児として残る (2026-08-12 実測: Genius が起動・応答して
+ * いるのに supervisor は stopped / pid=null)。照合が返す値自体は正しく、
+ * **正しさではなく予算の問題**なので、リトライが数回入る幅を取る。
+ *
+ * 上限は「起動が遅いサービスの体感」と釣り合う範囲に留める。ここを伸ばしても
+ * 即死したサービスの失敗検知が遅れるだけで、成功時の所要は変わらない
+ * (照合できた時点で抜ける)。
+ */
+const BREAKAWAY_IDENTITY_WAIT_MS = 10_000;
 const BREAKAWAY_IDENTITY_RETRY_INTERVAL_MS = 100;
 
 /**
