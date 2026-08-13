@@ -397,7 +397,13 @@ vi.mock('./memory/loop.js', () => ({ startMemoryLoop: mocks.startMemoryLoop }));
 
 // Load the substantial router module while Vitest collects this suite.  Loading it
 // inside the first beforeEach can consume that hook's entire timeout on a cold run.
-const observabilityModule = import('./index.js');
+//
+// Starting the import here was not enough: the first `beforeEach` still awaited whatever
+// was left of it, and on a loaded host that alone exceeded the 10s hook budget — the very
+// first case ("serves Corpus manifest") failed with `Hook timed out in 10000ms` while the
+// other 59 passed (2026-08-13, main). Await it at module scope so the load is charged to
+// collection instead of to a hook, leaving the hook to pay only for bootObservability().
+const observabilityModule = await import('./index.js');
 
 function makeCatalog(): AnyCatalog {
   return {
@@ -526,7 +532,7 @@ function seedDb(): void {
 }
 
 async function bootRouter(options?: BootObservabilityOptions): Promise<Hono> {
-  const mod = await observabilityModule;
+  const mod = observabilityModule;
   const booted = await mod.bootObservability(options);
   return booted.router;
 }
