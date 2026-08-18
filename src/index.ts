@@ -62,6 +62,7 @@ import { buildPortsRouter } from './scanner/ports-router.js';
 import { createPortReportProvider, type PortReportProvider } from './scanner/port-report-cache.js';
 import { classifyPortOwnership, type PortOwnership } from './process/port-ownership.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
+import { reconcileStatus } from './scanner/version-reconcile.js';
 import type { DowntimeSummary } from './scanner/downtime.js';
 import { DowntimeWorkerClient } from './scanner/downtime-worker-client.js';
 import {
@@ -83,7 +84,7 @@ import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
 import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
 import type { StartupNpmIssue } from './startup/npm-install.js';
-import { SERVICE_VERSION_ENV } from './process/service-version.js';
+import { SERVICE_VERSION_ENV, selfReportedVersion } from './process/service-version.js';
 
 const logger = createNamedLogger('concordia.observability');
 const httpLogger = createNamedLogger('excubitor.http');
@@ -289,6 +290,14 @@ function serviceRowView(
     git_hash: r.git_hash ?? null,
     git_dirty: r.git_dirty ?? null,
     package_version: r.package_version ?? null,
+    // 版の突き合わせ (scanner/version-reconcile.ts)。 mismatch は
+    // 「起動後にディスクが進んだ」 = 再起動しないと反映されない状態を指す。
+    disk_version: r.disk_version ?? null,
+    reported_version: r.reported_version ?? null,
+    version_reconcile: reconcileStatus(
+      r.disk_version as string | null,
+      r.reported_version as string | null,
+    ),
     port: r.port ?? null,
     host: r.host_hostname ? { hostname: r.host_hostname, name: r.host_name } : null,
     health_ok: r.health_ok === null || r.health_ok === undefined ? null : Boolean(r.health_ok),
@@ -552,7 +561,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       global: fresh.log_store.ring_lines_global,
     });
     buildVersionCache = null;
-    await publishExcubitorRuntimeVersion(fresh);
+    // runtime version は「このプロセスが起動時に読み込んだ版」なので、catalog reload
+    // では更新しない。ここでディスク上の新版へ進めると、再起動前の旧プロセスが新版を
+    // 名乗り、version reconciliation が偽の match になってしまう。
     refreshBuildVersion(fresh);
     setTopologyFromCatalog(fresh);
     setCatalogServices(fresh.services);
@@ -610,6 +621,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     c.json({
       ok: true,
       service: 'excubitor',
+      // 走っているプロセスが読み込んだ版 (AIFormat `RULE_SRE.md` §2)。
+      version: selfReportedVersion(),
       pid: process.pid,
       instance_token: process.env.EXCUBITOR_INSTANCE_TOKEN ?? null,
       safe_mode: isSafeMode(),
@@ -753,7 +766,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       SELECT
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
         si.state, si.pid, si.docker_id, si.last_seen_at,
-        si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
+        si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.disk_version, si.reported_version, si.port,
         lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
       FROM services s
@@ -787,7 +800,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       SELECT
         s.id, s.code, s.name, s.catalog_snapshot, s.updated_at,
         si.id AS instance_id, si.state, si.pid, si.docker_id, si.last_seen_at,
-        si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.port,
+        si.git_branch, si.git_hash, si.git_dirty, si.package_version, si.disk_version, si.reported_version, si.port,
         lh.ok AS health_ok, lh.probed_at AS health_checked_at, lh.detail AS health_detail_raw,
         h.hostname AS host_hostname, h.name AS host_name
       FROM services s

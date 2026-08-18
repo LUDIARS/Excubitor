@@ -498,10 +498,13 @@ function seedDb(): void {
   `);
   db().run(sql`
     INSERT INTO service_instances
-      (id, service_id, state, pid, last_seen_at, git_branch, git_hash, git_dirty, package_version, port)
+      (id, service_id, state, pid, last_seen_at, git_branch, git_hash, git_dirty,
+       package_version, disk_version, reported_version, port)
     VALUES
-      ('inst-a', 'svc-a-id', 'running', 4242, ${now}, 'main', 'abcdef', 0, '1.2.3', 1234),
-      ('inst-app', 'app-a-id', 'stopped', NULL, ${now - 1000}, NULL, NULL, NULL, NULL, NULL)
+      ('inst-a', 'svc-a-id', 'running', 4242, ${now}, 'main', 'abcdef', 0,
+       '1.2.3', '1.2.3', '1.2.2', 1234),
+      ('inst-app', 'app-a-id', 'stopped', NULL, ${now - 1000}, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL)
   `);
   db().run(sql`
     INSERT INTO liveness_history (service_instance_id, probed_at, ok, latency_ms)
@@ -706,6 +709,41 @@ describe('Excubitor HTTP APIs', () => {
     const { res, data } = await requestJson<{ runtime_version: string }>(router, 'GET', '/api/v1/system');
     expect(res.status).toBe(200);
     expect(data.runtime_version).toBe('0.1.42');
+  });
+
+  it('serves reconciled disk and running-process versions', async () => {
+    const { res, data } = await requestJson<{
+      disk_version: string;
+      reported_version: string;
+      version_reconcile: string;
+    }>(router, 'GET', '/api/v1/services/svc-a');
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({
+      disk_version: '1.2.3',
+      reported_version: '1.2.2',
+      version_reconcile: 'mismatch',
+    });
+  });
+
+  it('keeps the running-process version stable across catalog reloads', async () => {
+    mocks.resolveBuildVersion.mockResolvedValueOnce({
+      project_code: 'excubitor',
+      major: 0,
+      minor: 1,
+      patch: 43,
+      version: '0.1.43',
+      patch_source: 'fallback',
+      git_hash: 'def456',
+    });
+    const calls = mocks.watchRuntimeConfig.mock.calls as unknown as Array<[string, () => Promise<void>]>;
+    const onChange = calls.at(-1)?.[1];
+    expect(onChange).toBeTypeOf('function');
+    await onChange!();
+
+    const health = await requestJson<{ version: string }>(router, 'GET', '/health');
+    const system = await requestJson<{ runtime_version: string }>(router, 'GET', '/api/v1/system');
+    expect(health.data.version).toBe('0.1.42');
+    expect(system.data.runtime_version).toBe('0.1.42');
   });
 
   it('serves downtime summaries for liveness and project cards', async () => {

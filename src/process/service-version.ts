@@ -56,6 +56,21 @@ export async function resolveServiceRuntimeVersion(svc: Service): Promise<Servic
   return { value: '0.0.0+unversioned', source: 'unversioned' };
 }
 
+/**
+ * Excubitor 自身が health で名乗る版 (AIFormat `RULE_SRE.md` §2)。
+ *
+ * 起動元が注入した EXCUBITOR_SERVICE_VERSION を最優先にし、 次に npm が入れる
+ * npm_package_version を見る。 どちらも取れなければ版を偽らず 'unknown' を返す
+ * (ハードコードした版を名乗ると、 ディスク側との突き合わせが無意味になる)。
+ *
+ * @implements SPEC-SERVICE-RUNTIME-VERSION
+ */
+export function selfReportedVersion(): string {
+  return normalizedVersionComponent(process.env[SERVICE_VERSION_ENV])
+    ?? normalizedVersionComponent(process.env.npm_package_version)
+    ?? 'unknown';
+}
+
 /** @implements SPEC-SERVICE-RUNTIME-VERSION */
 function normalizedVersionComponent(value: unknown): string | null {
   if (typeof value !== 'string') return null;

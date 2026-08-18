@@ -210,9 +210,20 @@ process 系 (node / dev-process-md / **app**) と docker 系の両方が対象
   `up` / recreate に追加する。一時ディレクトリは生成失敗・docker 成否の全経路で削除し、
   audit/diagnostic 出力では OS の一時 path を固定ラベルへ置換する。
 - Excubitor 自身も boot 時に同じ runtime contract を `process.env` へ公開し、
-  `/api/v1/system.runtime_version` と header badge はその値を表示する。
+  `/health.version`、`/api/v1/system.runtime_version`、Corpus manifest と header badge は
+  その値を表示する。この値は稼働中プロセスの identity なので catalog reload では
+  更新せず、プロセス再起動時にのみ更新する。
+- health scanner は JSON health body の `version` を上限付きで読み、稼働側の
+  `service_instances.reported_version` として保存する。非 JSON・不正 JSON・過大 body・
+  不正な version は「未報告」として扱い、死活判定自体には影響させない。
+- scanner は管理対象サービスでは起動時注入と同じ runtime resolver、Excubitor 自身では
+  boot 時公開と同じ build resolver で現在のディスク版を得て、
+  `service_instances.disk_version` に保存する。両方が揃えば `match` / `mismatch`、どちらかが
+  欠けるか、どちらかが `unknown` / `0.0.0+unversioned` なら `unknown` としてサービス API に
+  公開する。
 - 単体検証は version source の優先順位、最終 env merge、Compose override の内容と破棄、
-  docker command への override 追加を対象とする。実コンテナへの反映は runtime smoke で確認する。
+  docker command への override 追加、health body の上限制御、版の突き合わせ、catalog reload
+  後の稼働版維持を対象とする。実コンテナへの反映は runtime smoke で確認する。
 
 ## 今後 (このフェーズ外)
 

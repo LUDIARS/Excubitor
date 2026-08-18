@@ -4,11 +4,20 @@ import { managedPortsForService } from '../catalog/ports.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { listListeners, type PortListener } from './ports.js';
 import { listHostProcessImages, matchProcesses } from './host-process.js';
+import { extractReportedVersion } from './health-body.js';
+
+/** @implements SPEC-SERVICE-RUNTIME-VERSION */
 
 export interface ServiceHealthResult {
   ok: boolean;
   reason: 'http' | 'tcp' | 'cmd' | 'process' | 'port' | 'not_configured' | 'failed';
   detail?: string;
+  /**
+   * health ボディの `version` (AIFormat `RULE_SRE.md` §2)。 http probe でのみ取れる。
+   * 名乗っていない / 読めなかったときは null。 ディスク上の版との突き合わせに使う
+   * (scanner/version-reconcile.ts)。
+   */
+  reportedVersion?: string | null;
 }
 
 export interface HealthSnapshot {
@@ -34,10 +43,14 @@ export async function probeServiceHealth(
     if (!health.url) return { ok: false, reason: 'failed', detail: 'http health url missing' };
     try {
       const res = await fetch(health.url, { signal: AbortSignal.timeout(timeoutMs) });
+      // 版の読み取りは死活判定に影響させない (失敗しても null になるだけ)。
+      // 成否にかかわらず probe が所有する body を消費または cancel して接続を解放する。
+      const parsedVersion = await extractReportedVersion(res);
       return {
         ok: res.ok,
         reason: res.ok ? 'http' : 'failed',
         detail: `HTTP ${res.status}`,
+        reportedVersion: res.ok ? parsedVersion : null,
       };
     } catch (err) {
       return { ok: false, reason: 'failed', detail: (err as Error).message };

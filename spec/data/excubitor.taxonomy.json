@@ -113,9 +113,9 @@
         },
         {
           "name": "health-scanning",
-          "description": "Port, docker, git, package, host process, and health-state scanners.",
+          "description": "Port, docker, git, package, host process, bounded health-body parsing, health-state, and runtime-version reconciliation scanners.",
           "paths": [
-            "(^|/)src/scanner/(docker|git|health|health-state|host|host-process|loop|ports|ports-router|sync)\\.ts$"
+            "(^|/)src/scanner/(docker|git|health|health-body|health-state|host|host-process|loop|ports|ports-router|sync|version-reconcile)\\.ts$"
           ]
         },
         {

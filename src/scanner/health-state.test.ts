@@ -50,13 +50,13 @@ describe('syncHealthyServiceStates', () => {
 
   it('marks a service running and records an ok liveness sample when health passes', async () => {
     healthMock.results = new Map([
-      ['concordia', { ok: true, reason: 'http', detail: 'HTTP 200' }],
+      ['concordia', { ok: true, reason: 'http', detail: 'HTTP 200', reportedVersion: '0.1.0' }],
     ]);
 
     const result = await syncHealthyServiceStates(catalog('concordia'));
 
     expect(result.running).toEqual(['concordia']);
-    expect(readInstanceState('concordia')?.state).toBe('running');
+    expect(readInstanceState('concordia')).toMatchObject({ state: 'running', reported_version: '0.1.0' });
     const live = readLatestLiveness('concordia');
     expect(Boolean(live?.ok)).toBe(true);
     expect(JSON.parse(String(live?.detail))).toMatchObject({ source: 'health', reason: 'http' });
@@ -101,13 +101,17 @@ function catalog(code: string): Catalog {
   } as unknown as Catalog;
 }
 
-function readInstanceState(code: string): { state: string; last_seen_at: number | null } | undefined {
+function readInstanceState(code: string): {
+  state: string;
+  last_seen_at: number | null;
+  reported_version: string | null;
+} | undefined {
   return db().get(sql`
-    SELECT si.state, si.last_seen_at
+    SELECT si.state, si.last_seen_at, si.reported_version
     FROM service_instances si
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${code}
-  `) as { state: string; last_seen_at: number | null } | undefined;
+  `) as { state: string; last_seen_at: number | null; reported_version: string | null } | undefined;
 }
 
 function readLatestLiveness(code: string): { ok: unknown; detail: unknown } | undefined {

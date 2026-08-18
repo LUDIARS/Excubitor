@@ -61,6 +61,7 @@ function markServiceHealth(code: string, result: ServiceHealthResult): void {
     UPDATE service_instances
     SET state = ${state},
         last_seen_at = CASE WHEN ${result.ok ? 1 : 0} = 1 THEN unixepoch() * 1000 ELSE last_seen_at END,
+        reported_version = ${result.reportedVersion ?? null},
         updated_at = unixepoch() * 1000
     WHERE service_id IN (SELECT id FROM services WHERE code = ${code})
   `);

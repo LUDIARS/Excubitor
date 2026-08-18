@@ -4,6 +4,7 @@ import { scanHostProcesses } from './host-process.js';
 import { syncHealthyServiceStates } from './health-state.js';
 import { type Catalog } from '../catalog/loader.js';
 import { processDowntimeAlerts } from './downtime-alert.js';
+import { syncDiskVersions } from './version-reconcile.js';
 
 const logger = createNamedLogger('excubitor.scanner');
 
@@ -33,6 +34,14 @@ export function startScannerLoop(catalog: Catalog, intervalMs = HEALTH_SCAN_INTE
         await scanHostProcesses(catalog);
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'host process scan failed');
+      }
+
+      // health が名乗る版と突き合わせる 「ディスク側」 を先に更新しておく。
+      try {
+        const { updated } = await syncDiskVersions(catalog);
+        logger.debug({ updated }, 'disk version sync complete');
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'disk version sync failed');
       }
 
       try {

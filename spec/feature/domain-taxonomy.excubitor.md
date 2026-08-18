@@ -46,8 +46,8 @@ Runtime health, port conflict, memory, CPU, WSL, docker, and liveness monitoring
 
 - **memory-performance**: memory/CPU collection loops, leak detection, budget
   checks, and memory API routes.
-- **health-scanning**: port, docker, git, package, host process, and health-state
-  scanners.
+- **health-scanning**: port, docker, git, package, host process, health-state,
+  bounded health-body parsing, and runtime-version reconciliation scanners.
 - **monitoring-ui**: Monitor/Memory pages.
 
 ## env-management-and-injection

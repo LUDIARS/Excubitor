@@ -13,6 +13,7 @@
 import { Hono } from 'hono';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { selfReportedVersion } from '../process/service-version.js';
 
 export interface ServiceStateRow {
   state?: string | null;
@@ -153,7 +154,7 @@ export function excubitorManifest(version: string): Record<string, unknown> {
   };
 }
 
-export function buildHubRouter(version = process.env.npm_package_version ?? '0.1.0'): Hono {
+export function buildHubRouter(version = selfReportedVersion()): Hono {
   const app = new Hono();
 
   // Corpus discovery 用マニフェスト (認証不要)。

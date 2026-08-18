@@ -51,6 +51,10 @@ export const serviceInstances = sqliteTable('service_instances', {
   git_hash: text('git_hash'),
   git_dirty: integer('git_dirty', { mode: 'boolean' }),
   package_version: text('package_version'),
+  // ディスク上の版 (起動時に注入する EXCUBITOR_SERVICE_VERSION と同じ resolver)。
+  disk_version: text('disk_version'),
+  // health が名乗り返した版 (= いま走っているプロセスが読み込んだもの)。
+  reported_version: text('reported_version'),
   port: integer('port'),
   extra: text('extra', { mode: 'json' }),
   created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
@@ -276,6 +280,9 @@ const ADD_COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: 'remote_peers', column: 'cf_access_secret', ddl: 'cf_access_secret TEXT' },
   { table: 'error_tasks', column: 'issue_dispatch_attempts', ddl: 'issue_dispatch_attempts INTEGER NOT NULL DEFAULT 0' },
   { table: 'error_tasks', column: 'issue_dispatch_next_at', ddl: 'issue_dispatch_next_at INTEGER' },
+  // 版の突き合わせ (scanner/version-reconcile.ts)。 ディスク側と稼働側を別々に持つ。
+  { table: 'service_instances', column: 'disk_version', ddl: 'disk_version TEXT' },
+  { table: 'service_instances', column: 'reported_version', ddl: 'reported_version TEXT' },
 ];
 
 function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {

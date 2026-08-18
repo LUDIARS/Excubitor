@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Service } from '../catalog/loader.js';
 
@@ -11,13 +11,36 @@ vi.mock('../scanner/git.js', () => ({ readGitInfo: mocks.readGitInfo }));
 import {
   injectServiceRuntimeVersion,
   resolveServiceRuntimeVersion,
+  selfReportedVersion,
   SERVICE_VERSION_ENV,
   VITE_SERVICE_VERSION_ENV,
 } from './service-version.js';
 
+const originalServiceVersion = process.env[SERVICE_VERSION_ENV];
+const originalNpmPackageVersion = process.env.npm_package_version;
+
 describe('service runtime version', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    restoreEnv(SERVICE_VERSION_ENV, originalServiceVersion);
+    restoreEnv('npm_package_version', originalNpmPackageVersion);
+  });
+
+  it('reports the injected process identity ahead of npm metadata', () => {
+    process.env[SERVICE_VERSION_ENV] = ' 2.3.4 ';
+    process.env.npm_package_version = '1.0.0';
+
+    expect(selfReportedVersion()).toBe('2.3.4');
+  });
+
+  it('does not publish an unsafe injected identity', () => {
+    process.env[SERVICE_VERSION_ENV] = 'forged\nversion';
+    process.env.npm_package_version = '1.0.0';
+
+    expect(selfReportedVersion()).toBe('1.0.0');
   });
 
   it('prefers a trimmed package version from the catalog source checkout', async () => {
@@ -101,4 +124,9 @@ function service(overrides: Partial<Service> = {}): Service {
     required_env: [],
     ...overrides,
   } as Service;
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
