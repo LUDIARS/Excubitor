@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { createNamedLogger } from './shared/logger.js';
 import { z } from 'zod';
@@ -1142,7 +1143,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // ─── built Web UI (frontend/dist) 配信 ─────────────────────
   // vite dev サーバ常駐 (~130MB) を不要にする。 API ルートに一致しなかった GET だけが
   // ここに落ちる。 dist 未ビルドなら従来どおり 404 (API には影響しない)。
-  app.use('*', serveStatic({ root: './frontend/dist' }));
+  if (existsSync('./frontend/dist')) {
+    app.use('*', serveStatic({ root: './frontend/dist' }));
+  }
 
   return {
     router: app,

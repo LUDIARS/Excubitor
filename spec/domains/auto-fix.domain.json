@@ -1,0 +1,31 @@
+{
+  "name": "auto-fix",
+  "description": "Spawns Claude Code CLI from error tasks to investigate and produce repair PRs, with human-escalation and read-only contract checks.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/auto_fix/"
+    },
+    {
+      "namePattern": "autoFix"
+    },
+    {
+      "namePattern": "runAutoFix"
+    },
+    {
+      "namePattern": "investigate"
+    },
+    {
+      "namePattern": "buildPrompt"
+    },
+    {
+      "namePattern": "trigger"
+    }
+  ],
+  "cardTemplate": "Summarise the \"auto-fix\" domain: Spawns Claude Code CLI from error tasks to investigate and produce repair PRs, with human-escalation and read-only contract checks.",
+  "specRefs": [
+    "構成 / src/auto_fix/"
+  ],
+  "rationale": "src/auto_fix (10 files) is the automated-remediation subsystem, a clear semantic grouping."
+}

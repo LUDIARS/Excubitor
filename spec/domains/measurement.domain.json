@@ -1,0 +1,33 @@
+{
+  "name": "measurement",
+  "description": "Instrumentation and derived metrics: HTTP/startup timing, diagnostic event measurement, liveness/downtime calculations, memory sample storage, and metric visualizations.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/shared/diagnostic-log\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)src/scanner/downtime\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)src/memory/(metrics-sampler|store|types)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/components/(MetricGraph|Sparkline)\\.tsx$"
+    },
+    {
+      "namePattern": "installRequestLogging|readPositiveIntEnv|cacheStorageTtl|serviceFunctionMetricBaseUrl|serviceFunctionMetricPort|copyFunctionMetricQuery|readUpstreamJsonOrText|upstreamErrorMessage"
+    },
+    {
+      "namePattern": "fetchFunctionMetrics|FunctionMetricsPanel|FunctionMetricRow|fmtMetricMs|fmtMetricTime"
+    },
+    {
+      "pathPattern": "(^|/)shared/diagnostic-log(?:\\.test)?\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/(?:pages/FunctionMetrics|components/FunctionMetricsPanel)\\.tsx$"
+    }
+  ],
+  "cardTemplate": "Summarise the measurement domain: instrumentation points, persisted metric samples, derived uptime/downtime values, and metric visualizations."
+}

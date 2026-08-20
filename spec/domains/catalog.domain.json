@@ -1,0 +1,36 @@
+{
+  "name": "catalog",
+  "description": "Aggregates service definitions owned by each repository (excubitor.catalog.yaml), reads Excubitor-only runtime policy (excubitor.config.yaml), syncs to the DB, watches files, and resolves tier/env for each service.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/catalog/"
+    },
+    {
+      "pathPattern": "(^|/)catalog/"
+    },
+    {
+      "namePattern": "[Cc]atalog"
+    },
+    {
+      "namePattern": "loadServices"
+    },
+    {
+      "namePattern": "mergeFragments"
+    },
+    {
+      "namePattern": "serviceTier"
+    },
+    {
+      "namePattern": "ServiceSchema"
+    }
+  ],
+  "cardTemplate": "Summarise the \"catalog\" domain: Aggregates service definitions owned by each repository (excubitor.catalog.yaml), reads Excubitor-only runtime policy (excubitor.config.yaml), syncs to the DB, watches files, and resolves tier/env for each service.",
+  "specRefs": [
+    "構成 / src/catalog/",
+    "catalog/FRAGMENTS.md",
+    "tier"
+  ],
+  "rationale": "src/catalog is a distinct module (18 files) that is the source-of-truth ingestion layer everything else reads from."
+}

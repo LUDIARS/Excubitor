@@ -1,0 +1,34 @@
+{
+  "name": "resource-monitoring",
+  "description": "Memory and CPU sampling across process trees, docker stats, WSL, and host, with time-series and leak detection.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/memory/"
+    },
+    {
+      "namePattern": "memorySummary"
+    },
+    {
+      "namePattern": "cpuRate"
+    },
+    {
+      "namePattern": "leak"
+    },
+    {
+      "namePattern": "sample"
+    },
+    {
+      "namePattern": "rss"
+    },
+    {
+      "pathPattern": "(^|/)src/process-snapshot/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"resource-monitoring\" domain: Memory and CPU sampling across process trees, docker stats, WSL, and host, with time-series and leak detection.",
+  "specRefs": [
+    "構成 / src/memory/"
+  ],
+  "rationale": "src/memory (22 files) covers memory+CPU telemetry and leak analysis, distinct from liveness scanning."
+}

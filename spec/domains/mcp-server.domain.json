@@ -1,0 +1,28 @@
+{
+  "name": "mcp-server",
+  "description": "Stdio MCP server exposing the running backend's logs/liveness/ports/memory plus control/update/branch/federation operations.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/mcp/"
+    },
+    {
+      "namePattern": "[Mm]cp"
+    },
+    {
+      "namePattern": "mcpServer"
+    },
+    {
+      "namePattern": "stdio"
+    },
+    {
+      "pathPattern": "(^|/)src/mcp/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"mcp-server\" domain: Stdio MCP server exposing the running backend's logs/liveness/ports/memory plus control/update/branch/federation operations.",
+  "specRefs": [
+    "構成 / src/mcp/"
+  ],
+  "rationale": "src/mcp (5 files) is a distinct external-interface adapter over the backend."
+}

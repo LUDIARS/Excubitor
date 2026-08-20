@@ -1,0 +1,48 @@
+{
+  "name": "local-control",
+  "description": "Versioned IPC, the persistent supervisor, excubitorctl client, and state persistence — the owner of service lifecycle outside the backend.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/local-control/"
+    },
+    {
+      "pathPattern": "(^|/)src/service-runner"
+    },
+    {
+      "pathPattern": "(^|/)src/control/"
+    },
+    {
+      "pathPattern": "(^|/)src/process/"
+    },
+    {
+      "pathPattern": "(^|/)src/process-snapshot/"
+    },
+    {
+      "namePattern": "[Ss]upervisor"
+    },
+    {
+      "namePattern": "excubitorctl"
+    },
+    {
+      "namePattern": "reconcile"
+    },
+    {
+      "namePattern": "IPC"
+    },
+    {
+      "namePattern": "serviceRunner"
+    },
+    {
+      "pathPattern": "(^|/)src/local-control/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"local-control\" domain: Versioned IPC, the persistent supervisor, excubitorctl client, and state persistence — the owner of service lifecycle outside the backend.",
+  "specRefs": [
+    "構成 / src/local-control/",
+    "起動と制御",
+    "README.md ローカル制御モデル"
+  ],
+  "rationale": "local-control (31 files) plus the control/process spawn primitives form the lifecycle-ownership boundary; grouped coarsely since process/ exists only to serve the supervisor."
+}

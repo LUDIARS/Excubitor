@@ -1,0 +1,31 @@
+{
+  "name": "logging",
+  "description": "Docker/file/process log tailing into a log bus, error detection against rules, and SSE fan-out for single and cross-service log streams.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/log/"
+    },
+    {
+      "namePattern": "[Ll]og"
+    },
+    {
+      "namePattern": "tail"
+    },
+    {
+      "namePattern": "errorDetector"
+    },
+    {
+      "namePattern": "logBus"
+    },
+    {
+      "namePattern": "SSE"
+    }
+  ],
+  "cardTemplate": "Summarise the \"logging\" domain: Docker/file/process log tailing into a log bus, error detection against rules, and SSE fan-out for single and cross-service log streams.",
+  "specRefs": [
+    "構成 / src/log/"
+  ],
+  "rationale": "src/log (25 files) is a self-contained pipeline from log sources to error tasks and SSE."
+}

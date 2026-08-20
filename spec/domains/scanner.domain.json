@@ -1,0 +1,35 @@
+{
+  "name": "scanner",
+  "description": "Periodic scanning of docker, host processes, git, versions, and ports to derive liveness/death state for each service.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/scanner/"
+    },
+    {
+      "namePattern": "[Ss]canner"
+    },
+    {
+      "namePattern": "scanLoop"
+    },
+    {
+      "namePattern": "hostProcess"
+    },
+    {
+      "namePattern": "portsScan"
+    },
+    {
+      "namePattern": "liveness"
+    },
+    {
+      "pathPattern": "(^|/)src/scanner/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"scanner\" domain: Periodic scanning of docker, host processes, git, versions, and ports to derive liveness/death state for each service.",
+  "specRefs": [
+    "構成 / src/scanner/",
+    "scanner/ports.ts"
+  ],
+  "rationale": "src/scanner (21 files) is the observability/health-derivation subsystem, independent of control and logging."
+}

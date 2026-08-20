@@ -1,0 +1,32 @@
+{
+  "name": "release",
+  "description": "Bakes self-contained runnable distribution artifacts from release manifests (build → assemble → launcher → archive).",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/release/"
+    },
+    {
+      "namePattern": "[Rr]elease"
+    },
+    {
+      "namePattern": "assemble"
+    },
+    {
+      "namePattern": "launcher"
+    },
+    {
+      "namePattern": "archive"
+    },
+    {
+      "namePattern": "manifest"
+    }
+  ],
+  "cardTemplate": "Summarise the \"release\" domain: Bakes self-contained runnable distribution artifacts from release manifests (build → assemble → launcher → archive).",
+  "specRefs": [
+    "構成 / src/release/",
+    "spec/release.md"
+  ],
+  "rationale": "src/release (14 files) is the packaging/distribution pipeline, orthogonal to runtime monitoring."
+}

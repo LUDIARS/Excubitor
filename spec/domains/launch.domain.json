@@ -1,0 +1,25 @@
+{
+  "name": "launch",
+  "description": "Launcher plan generation and tier-based filtering for SaaS/infra startup sets.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/launch/"
+    },
+    {
+      "namePattern": "launchPlan"
+    },
+    {
+      "namePattern": "planTier"
+    },
+    {
+      "namePattern": "launch"
+    }
+  ],
+  "cardTemplate": "Summarise the \"launch\" domain: Launcher plan generation and tier-based filtering for SaaS/infra startup sets.",
+  "specRefs": [
+    "tier (GET /api/v1/launch/plan)"
+  ],
+  "rationale": "src/launch (8 files) is the deploy-set planning domain built on tier resolution."
+}

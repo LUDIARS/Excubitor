@@ -1,0 +1,35 @@
+{
+  "name": "http-api",
+  "description": "The Hono backend entrypoint, observability bootstrap, and HTTP routes that proxy local-control IPC and expose all subsystems.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/server"
+    },
+    {
+      "pathPattern": "(^|/)src/index"
+    },
+    {
+      "pathPattern": "(^|/)src/shared/"
+    },
+    {
+      "namePattern": "bootObservability"
+    },
+    {
+      "namePattern": "server"
+    },
+    {
+      "namePattern": "route"
+    },
+    {
+      "namePattern": "hono"
+    }
+  ],
+  "cardTemplate": "Summarise the \"http-api\" domain: The Hono backend entrypoint, observability bootstrap, and HTTP routes that proxy local-control IPC and expose all subsystems.",
+  "specRefs": [
+    "構成 / src/server.ts",
+    "技術スタック"
+  ],
+  "rationale": "The backend entrypoint and shared HTTP layer wire the subsystems into a loopback API surface."
+}

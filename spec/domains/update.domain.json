@@ -1,0 +1,32 @@
+{
+  "name": "update",
+  "description": "Git pull/update status workflows plus scheduled package update and vulnerability auditing.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/update/"
+    },
+    {
+      "namePattern": "[Uu]pdate"
+    },
+    {
+      "namePattern": "gitPull"
+    },
+    {
+      "namePattern": "branches"
+    },
+    {
+      "namePattern": "checkUpdates"
+    },
+    {
+      "pathPattern": "(^|/)src/update/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"update\" domain: Git pull/status workflows and scheduled package update, vulnerability, and release-note auditing.",
+  "specRefs": [
+    "構成 / src/update/",
+    "Package update audit"
+  ],
+  "rationale": "src/update handles version and dependency update workflows separately from periodic health scanning."
+}

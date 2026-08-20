@@ -1,0 +1,35 @@
+{
+  "name": "frontend-ui",
+  "description": "Vite + React Monitor / Catalog / Errors web UI served from the backend, plus the operator-edited config.ts.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)frontend/"
+    },
+    {
+      "namePattern": "[Pp]age"
+    },
+    {
+      "namePattern": "[Cc]omponent"
+    },
+    {
+      "namePattern": "allowedHosts"
+    },
+    {
+      "namePattern": "backendUrl"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/pages/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/components/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"frontend-ui\" domain: Vite + React Monitor / Catalog / Errors web UI served from the backend, plus the operator-edited config.ts.",
+  "specRefs": [
+    "構成 / frontend/",
+    "README.md 起動者が編集する設定"
+  ],
+  "rationale": "frontend/ (pages + components) is the presentation domain, distinct from the backend subsystems it visualizes."
+}

@@ -1,0 +1,38 @@
+{
+  "name": "persistence",
+  "description": "SQLite (better-sqlite3 + drizzle-orm) schema, migrations, and DB client used as the observability store.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/db/"
+    },
+    {
+      "pathPattern": "(^|/)migrations/"
+    },
+    {
+      "namePattern": "drizzle"
+    },
+    {
+      "namePattern": "sqlite"
+    },
+    {
+      "namePattern": "migration"
+    },
+    {
+      "namePattern": "dbClient"
+    },
+    {
+      "namePattern": "schema"
+    },
+    {
+      "pathPattern": "(^|/)src/shared/redis-cache\\.ts$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"persistence\" domain: SQLite (better-sqlite3 + drizzle-orm) schema, migrations, and DB client used as the observability store.",
+  "specRefs": [
+    "技術スタック (SQLite)",
+    "リポ構成 migrations/"
+  ],
+  "rationale": "src/db (5 files) + migrations are the shared data layer, a cross-cutting persistence domain."
+}
