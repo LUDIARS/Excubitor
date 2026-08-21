@@ -1,0 +1,17 @@
+{
+  "name": "cf-tunnel",
+  "description": "Cloudflare Tunnel public hostname route management: narrow broker API (list/add/remove with hostname allowlist) so sessions never hold the CF API token.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/cf-tunnel/"
+    }
+  ],
+  "cardTemplate": "Summarise the \"cf-tunnel\" domain: narrow Cloudflare Tunnel route broker (allowlisted hostnames only) keeping the CF API token inside Excubitor.",
+  "specRefs": [
+    "構成 / src/cf-tunnel/",
+    "spec/feature/cf-tunnel-routes.md"
+  ],
+  "rationale": "External-edge (Cloudflare) route management is a distinct trust boundary: credentials stay in Excubitor, sessions get only narrow allowlisted operations."
+}

@@ -282,6 +282,38 @@ export function buildMcpServer(baseUrl: string): McpServer {
   );
 
   server.tool(
+    'excubitor_cf_tunnel_routes',
+    'Cloudflare Tunnel の public hostname ルートを list / add / remove する (CF トークンは Excubitor が保持)。変更は allowlist 掲載 hostname のみ。',
+    {
+      action: z.enum(['list', 'add', 'remove']).describe('操作'),
+      tunnel: z.string().optional().describe('tunnel の id か name (アカウントに 1 本だけなら省略可)'),
+      hostname: z.string().optional().describe('add / remove 対象の hostname (add/remove で必須)'),
+      service: z.string().optional().describe('add の転送先 (例 http://127.0.0.1:17400)'),
+      path: z.string().optional().describe('パス条件 (CF ingress の path 正規表現)'),
+    },
+    async ({ action, tunnel, hostname, service, path }) => {
+      try {
+        if (action === 'list') {
+          const q = tunnel ? `?tunnel=${encodeURIComponent(tunnel)}` : '';
+          return jsonContent(await apiGet(`/api/v1/cf-tunnel/routes${q}`));
+        }
+        if (!hostname) {
+          return errorContent(new Error(`action=${action} には hostname が必須`));
+        }
+        if (action === 'add') {
+          if (!service) {
+            return errorContent(new Error('action=add には service が必須'));
+          }
+          return jsonContent(await apiPost('/api/v1/cf-tunnel/routes', { tunnel, hostname, service, path }));
+        }
+        return jsonContent(await apiPost('/api/v1/cf-tunnel/routes/remove', { tunnel, hostname, path }));
+      } catch (err) {
+        return errorContent(err);
+      }
+    },
+  );
+
+  server.tool(
     'excubitor_list_peers',
     '登録済みの他拠点 Excubitor ピア一覧 (name / base_url / 疎通状態)。',
     {},

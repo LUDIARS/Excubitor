@@ -76,6 +76,7 @@ import { buildMemoryRouter } from './memory/router.js';
 import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
+import { buildCfTunnelRouter } from './cf-tunnel/router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
 import { arsRoot } from './shared/roots.js';
@@ -742,6 +743,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作)
   app.route('/', buildFederationRouter(() => currentCatalog!));
+
+  // Cloudflare Tunnel ルート管理 (/api/v1/cf-tunnel/* — allowlist 付きの狭い CF ブローカー)
+  app.route('/', buildCfTunnelRouter());
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get(
