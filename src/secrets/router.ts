@@ -22,6 +22,8 @@ import {
   getPackageAuditDiscordConfig,
   getPackageAuditDiscordStatus,
   savePackageAuditDiscordConfig,
+  getCfTunnelStatus,
+  saveCfTunnelSettings,
 } from './config-store.js';
 import { verifyIdentity } from './infisical.js';
 import { sendDiscordWebhook } from '../notify/discord-webhook.js';
@@ -51,6 +53,12 @@ const DomainRootSchema = z.object({
   domain_root: z.string().min(1),
 });
 
+const CfTunnelSchema = z.object({
+  infisical_project_id: z.string().optional(),
+  infisical_environment: z.string().optional(),
+  allowed_hostnames: z.array(z.string()).optional(),
+});
+
 const NotificationSchema = z.object({
   webhook_url: z.string().optional(),
   enabled: z.boolean(),
@@ -74,7 +82,12 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
 
   // identity の状態 (configured / siteUrl / clientId ヒント) + サービスマッピング。
   app.get('/api/v1/config/infisical', (c) =>
-    c.json({ identity: getIdentityStatus(), services: getServiceMap(), domain_root: getDomainRootStatus() }),
+    c.json({
+      identity: getIdentityStatus(),
+      services: getServiceMap(),
+      domain_root: getDomainRootStatus(),
+      cf_tunnel: getCfTunnelStatus(),
+    }),
   );
 
   app.get('/api/v1/config/domain-root', (c) => c.json({ domain_root: getDomainRootStatus() }));
@@ -143,6 +156,28 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
       return c.json({ ok: true, message: 'Package audit Discord webhook test succeeded' });
     } catch (err) {
       return c.json({ ok: false, message: (err as Error).message }, 502);
+    }
+  });
+
+  // cf-tunnel ブローカー設定 (Infisical project/env + hostname allowlist)。
+  // CF トークン値そのものは受け取らない (Infisical に置く)。
+  /** @implements SPEC-CF-TUNNEL-ROUTES */
+  app.get('/api/v1/config/cf-tunnel', (c) => c.json({ cf_tunnel: getCfTunnelStatus() }));
+
+  /** @implements SPEC-CF-TUNNEL-ROUTES */
+  app.put('/api/v1/config/cf-tunnel', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = CfTunnelSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      const status = saveCfTunnelSettings({
+        infisicalProjectId: parsed.data.infisical_project_id,
+        infisicalEnvironment: parsed.data.infisical_environment,
+        allowedHostnames: parsed.data.allowed_hostnames,
+      });
+      return c.json({ ok: true, cf_tunnel: status });
+    } catch (err) {
+      return c.json({ error: 'invalid_cf_tunnel_settings', message: (err as Error).message }, 400);
     }
   });
 

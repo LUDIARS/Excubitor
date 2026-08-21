@@ -5,7 +5,8 @@
  *   GET  /api/v1/cf-tunnel/routes          … ingress 一覧 (?tunnel=<id|name>)
  *   POST /api/v1/cf-tunnel/routes          … 追加 {tunnel?, hostname, service, path?}
  *   POST /api/v1/cf-tunnel/routes/remove   … 削除 {tunnel?, hostname, path?}
- * 変更は EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES の hostname のみ (route-service.ts)。
+ * 変更は allowlist (EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES → 無ければ config store の
+ * cfTunnel.allowedHostnames) の hostname のみ (route-service.ts)。
  *
  * @implements SPEC-CF-TUNNEL-ROUTES (spec/feature/cf-tunnel-routes.md)
  */
@@ -14,6 +15,7 @@ import { Hono } from 'hono';
 import { createNamedLogger } from '../shared/logger.js';
 import { CloudflareTunnelApi, type CfTunnelSummary } from './cloudflare-api.js';
 import { resolveCfCredentials } from './credentials.js';
+import { getCfTunnelSettings } from '../secrets/config-store.js';
 import {
   addRoute,
   describeRoutes,
@@ -32,6 +34,11 @@ function failureStatus(err: unknown): 400 | 502 {
 /** @implements SPEC-CF-TUNNEL-ROUTES */
 async function buildApi(): Promise<CloudflareTunnelApi> {
   return new CloudflareTunnelApi(await resolveCfCredentials());
+}
+
+/** allowlist の解決 (env 優先 → config store)。 @implements SPEC-CF-TUNNEL-ROUTES */
+function currentAllowlist(): string[] {
+  return readAllowedHostnames(process.env, getCfTunnelSettings().allowedHostnames ?? []);
 }
 
 /**
@@ -68,7 +75,7 @@ export function buildCfTunnelRouter(): Hono {
       const api = await buildApi();
       const tunnel = await resolveTunnel(api, c.req.query('tunnel'));
       const config = await api.getConfiguration(tunnel.id);
-      const allowed = readAllowedHostnames();
+      const allowed = currentAllowlist();
       return c.json({
         tunnel: { id: tunnel.id, name: tunnel.name },
         allowed_hostnames: allowed,
@@ -94,7 +101,7 @@ export function buildCfTunnelRouter(): Hono {
       const api = await buildApi();
       const tunnel = await resolveTunnel(api, body.tunnel);
       const config = await api.getConfiguration(tunnel.id);
-      const allowed = readAllowedHostnames();
+      const allowed = currentAllowlist();
       const ingress = addRoute(
         config.ingress ?? [],
         { hostname: body.hostname, service: body.service, path: body.path },
@@ -132,7 +139,7 @@ export function buildCfTunnelRouter(): Hono {
       const api = await buildApi();
       const tunnel = await resolveTunnel(api, body.tunnel);
       const config = await api.getConfiguration(tunnel.id);
-      const allowed = readAllowedHostnames();
+      const allowed = currentAllowlist();
       const ingress = removeRoute(config.ingress ?? [], { hostname: body.hostname, path: body.path }, allowed);
       const updated = await api.putConfiguration(tunnel.id, { ...config, ingress });
       logger.info(

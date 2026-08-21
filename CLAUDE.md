@@ -24,7 +24,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 | `src/memory/` | メモリ + **CPU** 監視。 プロセスツリー RSS / docker stats / WSL / **マシン全体 (host)** を周期サンプリング → 時系列 + leak 検知。 CPU% は累積 tick の tick 間 delta から算出 (`cpu-rate.ts`)。 `/api/v1/memory/summary` (services/wsl/host) |
 | `src/update/` | git pull (更新適用) + アップデート/ブランチ状況確認 (`/api/v1/services/:code/update`・`/branches`・`/api/v1/updates`) |
 | `src/federation/` | **他拠点 Excubitor 連携**。 remote_peers (base_url + agent token) を保持し、 local + 全ピアのサービス/host を集約 (`/api/v1/federation/services`) + リモート操作プロキシ。 公開面 (`/api/v1/federation/node\|control\|update`) は agent token 認証 |
-| `src/cf-tunnel/` | **Cloudflare Tunnel ルート管理ブローカー**。 CF API トークンを外へ出さず public hostname ルート (ingress) を list/add/remove (`/api/v1/cf-tunnel/routes`)。 変更は `EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES` の hostname のみ (fail-closed)、 catch-all は保護。 spec/feature/cf-tunnel-routes.md |
+| `src/cf-tunnel/` | **Cloudflare Tunnel ルート管理ブローカー**。 CF API トークンを外へ出さず public hostname ルート (ingress) を list/add/remove (`/api/v1/cf-tunnel/routes`)。 変更は allowlist (env `EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES` → config store 設定) の hostname のみ (fail-closed)、 catch-all は保護。 Infisical project/allowlist は設定 UI (`/api/v1/config/cf-tunnel`) でも編集可。 spec/feature/cf-tunnel-routes.md |
 | `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポート/メモリCPU を公開 + 制御 (control/update/branch/federation) |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
 | `src/release/` | リリースマニフェスト (`releases/*.yaml`) から自己完結ランナブル配布物を焼く (build→assemble→launcher→archive)。 spec/release.md / `npm run release` |

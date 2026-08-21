@@ -49,6 +49,7 @@ interface ExcubitorConfig {
   services?: Record<string, ServiceInfisical>;
   settings?: {
     domainRoot?: string;
+    cfTunnel?: CfTunnelSettings;
     notifications?: {
       discord?: DiscordNotificationConfig;
       packageAuditDiscord?: PackageAuditDiscordConfig;
@@ -210,6 +211,124 @@ export function getDomainRootStatus(): DomainRootStatus {
     configured: configured !== null,
     env,
     default_value: DEFAULT_DOMAIN_ROOT,
+    storePath: configPath(),
+  };
+}
+
+// ─────────────── CF Tunnel (cf-tunnel ブローカー設定) ───────────────
+
+/**
+ * cf-tunnel ブローカーの config 由来設定。 CF_API_TOKEN そのものは Infisical に置き、
+ * ここには「どの project/env から取るか」と hostname allowlist だけを持つ。
+ * env (EXCUBITOR_CF_*) が設定されていれば常に env が優先される (domainRoot と同じ規則)。
+ */
+export interface CfTunnelSettings {
+  infisicalProjectId?: string;
+  infisicalEnvironment?: string;
+  allowedHostnames?: string[];
+}
+
+export type CfTunnelSource = 'env' | 'config' | 'unset';
+
+export interface CfTunnelStatus {
+  infisical_project_id: string | null;
+  infisical_project_source: CfTunnelSource;
+  infisical_environment: string | null;
+  infisical_environment_source: CfTunnelSource;
+  allowed_hostnames: string[];
+  allowed_hostnames_source: CfTunnelSource;
+  /** EXCUBITOR_CF_API_TOKEN + EXCUBITOR_CF_ACCOUNT_ID の直指定があるか (UI 表示用)。 */
+  direct_env_credentials: boolean;
+  storePath: string;
+}
+
+export interface CfTunnelInput {
+  infisicalProjectId?: string;
+  infisicalEnvironment?: string;
+  allowedHostnames?: string[];
+}
+
+/** hostname は小文字比較で使うため保存時に正規化する。 空要素は捨てる。 */
+function normalizeCfHostnames(hostnames: string[]): string[] {
+  const seen = new Set<string>();
+  for (const raw of hostnames) {
+    const h = raw.trim().toLowerCase();
+    if (!h) continue;
+    if (h.includes('://') || h.includes('/') || h.includes(',') || /\s/.test(h)) {
+      throw new Error(`allowlist hostname が不正: "${raw}" (スキーム・パス・空白は含められない)`);
+    }
+    seen.add(h);
+  }
+  return [...seen];
+}
+
+/** @implements SPEC-CF-TUNNEL-ROUTES */
+export function getCfTunnelSettings(): CfTunnelSettings {
+  return readConfig().settings?.cfTunnel ?? {};
+}
+
+/**
+ * 部分更新: 渡されたフィールドだけを上書きする。 空文字 / 空配列はそのフィールドの
+ * 設定解除 (undefined) として扱う。
+ * @implements SPEC-CF-TUNNEL-ROUTES
+ */
+export function saveCfTunnelSettings(input: CfTunnelInput): CfTunnelStatus {
+  const cfg = readConfig();
+  const current = cfg.settings?.cfTunnel ?? {};
+  const next: CfTunnelSettings = {
+    infisicalProjectId:
+      input.infisicalProjectId !== undefined
+        ? input.infisicalProjectId.trim() || undefined
+        : current.infisicalProjectId,
+    infisicalEnvironment:
+      input.infisicalEnvironment !== undefined
+        ? input.infisicalEnvironment.trim() || undefined
+        : current.infisicalEnvironment,
+    allowedHostnames:
+      input.allowedHostnames !== undefined
+        ? (() => {
+            const normalized = normalizeCfHostnames(input.allowedHostnames);
+            return normalized.length > 0 ? normalized : undefined;
+          })()
+        : current.allowedHostnames,
+  };
+  cfg.settings = { ...(cfg.settings ?? {}), cfTunnel: next };
+  writeConfig(cfg);
+  logger.info(
+    {
+      hasProject: Boolean(next.infisicalProjectId),
+      environment: next.infisicalEnvironment ?? null,
+      allowlistCount: next.allowedHostnames?.length ?? 0,
+    },
+    'saved cf-tunnel settings',
+  );
+  return getCfTunnelStatus();
+}
+
+/** @implements SPEC-CF-TUNNEL-ROUTES */
+export function getCfTunnelStatus(): CfTunnelStatus {
+  const stored = getCfTunnelSettings();
+  const envProject = process.env.EXCUBITOR_CF_INFISICAL_PROJECT_ID?.trim() || null;
+  const envEnvironment = process.env.EXCUBITOR_CF_INFISICAL_ENV?.trim() || null;
+  const envAllowlist = (process.env.EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES ?? '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h.length > 0);
+  const sourceOf = (env: unknown, config: unknown): CfTunnelSource =>
+    env ? 'env' : config ? 'config' : 'unset';
+  return {
+    infisical_project_id: envProject ?? stored.infisicalProjectId ?? null,
+    infisical_project_source: sourceOf(envProject, stored.infisicalProjectId),
+    infisical_environment: envEnvironment ?? stored.infisicalEnvironment ?? null,
+    infisical_environment_source: sourceOf(envEnvironment, stored.infisicalEnvironment),
+    allowed_hostnames: envAllowlist.length > 0 ? envAllowlist : stored.allowedHostnames ?? [],
+    allowed_hostnames_source: sourceOf(
+      envAllowlist.length > 0,
+      stored.allowedHostnames && stored.allowedHostnames.length > 0,
+    ),
+    direct_env_credentials: Boolean(
+      process.env.EXCUBITOR_CF_API_TOKEN?.trim() && process.env.EXCUBITOR_CF_ACCOUNT_ID?.trim(),
+    ),
     storePath: configPath(),
   };
 }

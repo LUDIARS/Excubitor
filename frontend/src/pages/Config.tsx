@@ -6,6 +6,7 @@ import {
   testIdentity,
   saveServices,
   saveDomainRoot,
+  saveCfTunnel,
   fetchNotificationConfig,
   saveDiscordNotificationConfig,
   testDiscordNotification,
@@ -54,6 +55,10 @@ export default function Config() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [domainRootDraft, setDomainRootDraft] = useState('');
+  const [cfProjectDraft, setCfProjectDraft] = useState('');
+  const [cfEnvDraft, setCfEnvDraft] = useState('');
+  const [cfHostnamesDraft, setCfHostnamesDraft] = useState('');
+  const [cfTunnelResult, setCfTunnelResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [discord, setDiscord] = useState<DiscordNotificationStatus | null>(null);
   const [discordWebhook, setDiscordWebhook] = useState('');
   const [discordEnabled, setDiscordEnabled] = useState(false);
@@ -80,6 +85,9 @@ export default function Config() {
     if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
     if (c.identity.environment) setEnvironment(c.identity.environment);
     setDomainRootDraft(c.domain_root.value);
+    setCfProjectDraft(c.cf_tunnel.infisical_project_id ?? '');
+    setCfEnvDraft(c.cf_tunnel.infisical_environment ?? '');
+    setCfHostnamesDraft(c.cf_tunnel.allowed_hostnames.join(', '));
     setRows(toRows(c.services));
     setDiscord(notification.discord);
     setDiscordEnabled(notification.discord.enabled);
@@ -132,6 +140,29 @@ export default function Config() {
     try {
       await saveDomainRoot(domainRootDraft);
       await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitCfTunnel = async () => {
+    setBusy('cf-tunnel');
+    setCfTunnelResult(null);
+    try {
+      await saveCfTunnel({
+        infisical_project_id: cfProjectDraft.trim(),
+        infisical_environment: cfEnvDraft.trim(),
+        allowed_hostnames: cfHostnamesDraft
+          .split(',')
+          .map((h) => h.trim())
+          .filter((h) => h.length > 0),
+      });
+      await load();
+      setCfTunnelResult({ ok: true, message: 'Saved' });
+    } catch (err) {
+      // 保存は hostname 検証で 400 になりうる。 握り潰すと「押しても何も起きない」
+      // 無言失敗になるので理由を出す。
+      setCfTunnelResult({ ok: false, message: (err as Error).message });
     } finally {
       setBusy(null);
     }
@@ -209,6 +240,7 @@ export default function Config() {
 
   const id = cfg.identity;
   const domainRoot = cfg.domain_root;
+  const cfTunnel = cfg.cf_tunnel;
 
   return (
     <div className="config">
@@ -240,6 +272,68 @@ export default function Config() {
               {busy === 'domain-root' ? 'Saving...' : 'Save domain root'}
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="config-card">
+        <h2>CF Tunnel broker</h2>
+        <p className="muted">
+          Cloudflare Tunnel route broker settings. The CF API token itself lives in Infisical
+          (keys <code>CF_API_TOKEN</code> / <code>CF_ACCOUNT_ID</code>) — configure which project and
+          environment to read it from, and which public hostnames the broker may modify (fail-closed
+          when empty).
+        </p>
+        <p className="muted small">
+          Saved at <code>{cfTunnel.storePath}</code>.
+          {cfTunnel.infisical_project_source === 'env'
+            ? <> <code>EXCUBITOR_CF_INFISICAL_PROJECT_ID</code> is set, so env takes precedence.</>
+            : null}
+          {cfTunnel.allowed_hostnames_source === 'env'
+            ? <> <code>EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES</code> is set, so env takes precedence.</>
+            : null}
+          {cfTunnel.direct_env_credentials
+            ? <> Direct env credentials (<code>EXCUBITOR_CF_API_TOKEN</code>) are set and win over Infisical.</>
+            : null}
+        </p>
+        <div className="config-form">
+          <label>
+            Infisical project ID ({cfTunnel.infisical_project_source})
+            <input
+              value={cfProjectDraft}
+              onChange={(e) => setCfProjectDraft(e.target.value)}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            />
+          </label>
+          <label>
+            Infisical environment ({cfTunnel.infisical_environment_source}, default: prod)
+            <input
+              value={cfEnvDraft}
+              onChange={(e) => setCfEnvDraft(e.target.value)}
+              placeholder="prod"
+            />
+          </label>
+          <label>
+            Allowed hostnames ({cfTunnel.allowed_hostnames_source}, comma separated)
+            <input
+              value={cfHostnamesDraft}
+              onChange={(e) => setCfHostnamesDraft(e.target.value)}
+              placeholder="qs-magiclink.example.com, other.example.com"
+            />
+          </label>
+          <div className="config-actions">
+            <button
+              className="primary"
+              disabled={busy !== null}
+              onClick={() => void submitCfTunnel()}
+            >
+              {busy === 'cf-tunnel' ? 'Saving...' : 'Save CF Tunnel settings'}
+            </button>
+          </div>
+          {cfTunnelResult && (
+            <p className={`muted small ${cfTunnelResult.ok ? 'ok' : 'fail'}`}>
+              {cfTunnelResult.ok ? '✓' : '✗'} {cfTunnelResult.message}
+            </p>
+          )}
         </div>
       </section>
 

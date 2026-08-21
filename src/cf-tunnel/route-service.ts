@@ -31,14 +31,21 @@ export interface AddRouteInput extends RouteKey {
 }
 
 /**
- * env のカンマ区切り allowlist を読む。未設定・空は「全 hostname 変更禁止」(fail-closed)。
+ * allowlist を読む。env のカンマ区切りが最優先、無ければ config store 由来の配列
+ * (呼び出し側が渡す — このモジュールは純関数を保つため config store を import しない)。
+ * どちらも空なら「全 hostname 変更禁止」(fail-closed)。
  * @implements SPEC-CF-TUNNEL-ROUTES
  */
-export function readAllowedHostnames(env: NodeJS.ProcessEnv = process.env): string[] {
-  return (env.EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES ?? '')
+export function readAllowedHostnames(
+  env: NodeJS.ProcessEnv = process.env,
+  storedAllowlist: string[] = [],
+): string[] {
+  const fromEnv = (env.EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES ?? '')
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter((h) => h.length > 0);
+  if (fromEnv.length > 0) return fromEnv;
+  return storedAllowlist.map((h) => h.trim().toLowerCase()).filter((h) => h.length > 0);
 }
 
 /** @implements SPEC-CF-TUNNEL-ROUTES */
@@ -49,7 +56,7 @@ export function isHostnameAllowed(hostname: string, allowed: string[]): boolean 
 function assertMutable(hostname: string, allowed: string[]): void {
   if (!isHostnameAllowed(hostname, allowed)) {
     throw new RouteRejectedError(
-      `hostname "${hostname}" は allowlist (EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES) に無いため変更できない`,
+      `hostname "${hostname}" は allowlist (EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES か設定 UI の CF Tunnel) に無いため変更できない`,
     );
   }
 }

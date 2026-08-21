@@ -339,6 +339,27 @@ vi.mock('./secrets/config-store.js', () => ({
     mocks.domainRoot = input.startsWith('.') ? input : `.${input}`;
     return mocks.domainRoot;
   },
+  getCfTunnelSettings: () => ({}),
+  getCfTunnelStatus: () => ({
+    infisical_project_id: null,
+    infisical_project_source: 'unset',
+    infisical_environment: null,
+    infisical_environment_source: 'unset',
+    allowed_hostnames: [],
+    allowed_hostnames_source: 'unset',
+    direct_env_credentials: false,
+    storePath: 'E:\\tmp\\config.enc',
+  }),
+  saveCfTunnelSettings: () => ({
+    infisical_project_id: null,
+    infisical_project_source: 'unset',
+    infisical_environment: null,
+    infisical_environment_source: 'unset',
+    allowed_hostnames: [],
+    allowed_hostnames_source: 'unset',
+    direct_env_credentials: false,
+    storePath: 'E:\\tmp\\config.enc',
+  }),
 }));
 vi.mock('./secrets/infisical.js', () => ({ verifyIdentity: mocks.verifyIdentity }));
 vi.mock('./secrets/agent-token.js', () => ({

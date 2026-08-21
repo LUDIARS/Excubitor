@@ -311,10 +311,22 @@ export interface DomainRootStatus {
   storePath: string;
 }
 
+export interface CfTunnelStatus {
+  infisical_project_id: string | null;
+  infisical_project_source: 'env' | 'config' | 'unset';
+  infisical_environment: string | null;
+  infisical_environment_source: 'env' | 'config' | 'unset';
+  allowed_hostnames: string[];
+  allowed_hostnames_source: 'env' | 'config' | 'unset';
+  direct_env_credentials: boolean;
+  storePath: string;
+}
+
 export interface ConfigInfisical {
   identity: IdentityStatus;
   services: Record<string, ServiceInfisical>;
   domain_root: DomainRootStatus;
+  cf_tunnel: CfTunnelStatus;
 }
 
 export interface DiscordNotificationStatus {
@@ -393,7 +405,9 @@ async function putJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  // getJSON / postJSON と同じく本文の message を拾う。 拾わないと 400 の理由
+  // (allowlist hostname が不正 等) が UI に出ず、無言で失敗したように見える。
+  if (!res.ok) throw new Error(await responseErrorMessage(path, res));
   return (await res.json()) as T;
 }
 
@@ -642,6 +656,14 @@ export function saveServiceEnvConfig(code: string, input: ServiceEnvConfigInput)
     `/api/v1/services/${encodeURIComponent(code)}/env-config`,
     input,
   );
+}
+
+export function saveCfTunnel(input: {
+  infisical_project_id?: string;
+  infisical_environment?: string;
+  allowed_hostnames?: string[];
+}) {
+  return putJSON<{ ok: boolean; cf_tunnel: CfTunnelStatus }>('/api/v1/config/cf-tunnel', input);
 }
 
 export function saveDomainRoot(domainRoot: string) {

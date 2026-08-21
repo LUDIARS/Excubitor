@@ -33,6 +33,19 @@ describe('readAllowedHostnames', () => {
   it('未設定は空 (fail-closed)', () => {
     expect(readAllowedHostnames({} as NodeJS.ProcessEnv)).toEqual([]);
   });
+
+  it('env が無ければ config store 由来の allowlist に fallback する (trim + 小文字化)', () => {
+    expect(readAllowedHostnames({} as NodeJS.ProcessEnv, [' C.example.com ', ''])).toEqual([
+      'c.example.com',
+    ]);
+  });
+
+  it('env があれば config store 由来より env が優先される', () => {
+    const env = { EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES: 'a.example.com' };
+    expect(readAllowedHostnames(env as NodeJS.ProcessEnv, ['c.example.com'])).toEqual([
+      'a.example.com',
+    ]);
+  });
 });
 
 describe('addRoute', () => {
