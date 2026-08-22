@@ -21,6 +21,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 | `src/process/` | supervisor 配下の spawn/stop/reconcile primitives。backend から直接所有しない |
 | `src/log/` | docker-tail / file-tail (Vestigium JSONL, 共有ルート `logs-root.ts` 配下の `<code>/` を全サービス自動発見) / process-bridge → log bus + error-detector + SSE (`/logs` 単一/横断, `/logs/recent`) |
 | `src/scanner/ports.ts` | ポート衝突検知 (netstat/ss/tasklist 解析 → 重複宣言 / LISTEN 占有 / foreign 衝突)。 `/api/v1/ports` |
+| `src/docker/` | Docker Engine API クライアント (子プロセス無し)。 `docker ps` / `docker stats` の置換。 wsl-helper ハンドルリーク対策、 spec/feature/docker-engine-api.md |
 | `src/memory/` | メモリ + **CPU** 監視。 プロセスツリー RSS / docker stats / WSL / **マシン全体 (host)** を周期サンプリング → 時系列 + leak 検知。 CPU% は累積 tick の tick 間 delta から算出 (`cpu-rate.ts`)。 `/api/v1/memory/summary` (services/wsl/host) |
 | `src/update/` | git pull (更新適用) + アップデート/ブランチ状況確認 (`/api/v1/services/:code/update`・`/branches`・`/api/v1/updates`) |
 | `src/federation/` | **他拠点 Excubitor 連携**。 remote_peers (base_url + agent token) を保持し、 local + 全ピアのサービス/host を集約 (`/api/v1/federation/services`) + リモート操作プロキシ。 公開面 (`/api/v1/federation/node\|control\|update`) は agent token 認証 |

@@ -5,10 +5,13 @@
   "templateRules": [],
   "membership": [
     {
-      "pathPattern": "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|docker-sampler|host-sampler|wsl-sampler|units|router)\\.ts$"
+      "pathPattern": "(^|/)src/docker/"
     },
     {
-      "pathPattern": "(^|/)src/scanner/(docker|git|health|health-state|host|host-process|loop|ports|ports-router|sync)\\.ts$"
+      "pathPattern": "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|host-sampler|wsl-sampler|units|router)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)src/scanner/(git|health|health-state|host|host-process|loop|ports|ports-router|sync)\\.ts$"
     },
     {
       "pathPattern": "(^|/)frontend/src/pages/(Monitor|Memory)\\.tsx$"

@@ -1,0 +1,36 @@
+#!/bin/sh
+# Rancher Desktop provisioning script (runs inside the rancher-desktop WSL distro
+# before the docker service starts). Exposes dockerd on tcp://127.0.0.1:2375 so that
+# Excubitor can reach the Engine API via WSL localhost forwarding instead of the
+# wsl-helper docker-proxy named pipe (which leaks handles per connection).
+#
+# Install: copy to %LOCALAPPDATA%\rancher-desktop\provisioning\ (see install-rancher-dockerd-tcp.ps1)
+# Loopback only: 2375 is plaintext/unauthenticated. Never bind 0.0.0.0.
+set -eu
+
+PORT="${EXCUBITOR_DOCKERD_TCP_PORT:-2375}"
+CONF=/etc/conf.d/docker
+
+# PORT is interpolated into the dockerd -H flag, so it must be digits only. Anything
+# else (e.g. "2375 -H tcp://0.0.0.0:2375") would smuggle an extra listener onto an
+# unauthenticated daemon. Refuse rather than bind something unintended.
+case "$PORT" in
+  ''|*[!0-9]*)
+    echo "excubitor-dockerd-tcp: refusing non-numeric EXCUBITOR_DOCKERD_TCP_PORT: $PORT" >&2
+    exit 1
+    ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  echo "excubitor-dockerd-tcp: port out of range: $PORT" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$CONF")"
+touch "$CONF"
+# Strip a previous line written by this script, then append the current one.
+TMP="$CONF.excubitor.tmp"
+trap 'rm -f "$TMP"' EXIT
+grep -v '^DOCKER_OPTS=.*excubitor-dockerd-tcp' "$CONF" > "$TMP" || true
+echo "DOCKER_OPTS=\"\${DOCKER_OPTS:-} -H tcp://127.0.0.1:${PORT}\" # excubitor-dockerd-tcp" >> "$TMP"
+# Preserve the original mode/owner instead of inheriting the tmp file's defaults.
+cat "$TMP" > "$CONF"

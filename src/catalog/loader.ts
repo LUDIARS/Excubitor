@@ -294,6 +294,17 @@ const MemoryGlobalSchema = z.object({
   cpu_alert: CpuAlertSchema.default({}),
 });
 
+/**
+ * Docker Engine API 接続先。 `host` は DOCKER_HOST 互換表記
+ * (`tcp://127.0.0.1:2375` / `npipe:////./pipe/docker_engine` / `unix:///var/run/docker.sock`)。
+ * 未設定なら env DOCKER_HOST → プラットフォーム既定 (Windows は名前付きパイプ)。
+ * Rancher Desktop では名前付きパイプが wsl-helper 経由になりハンドルが残留するため、
+ * WSL 内 dockerd を TCP 公開して tcp:// を指すのが推奨。
+ */
+const DockerEngineSchema = z.object({
+  host: z.string().optional(),
+});
+
 const GlobalSchema = z.object({
   /** 全サービス共通で注入する env。 サービス固有 env / secret より低優先。 */
   env: z.record(z.string(), z.string()).optional(),
@@ -328,6 +339,8 @@ const CatalogSchema = z.object({
   global: GlobalSchema.optional(),
   /** メモリ監視のグローバル設定 (interval / 保持期間 / WSL)。 */
   memory_monitor: MemoryGlobalSchema.default({}),
+  /** Docker Engine API の接続先 (wsl-helper 迂回用)。 */
+  docker: DockerEngineSchema.default({}),
   /** 構造化履歴と Parquet ログの保持期間。 */
   retention: RetentionSchema.default({}),
   /** ログのライブ保持と日次圧縮。 */

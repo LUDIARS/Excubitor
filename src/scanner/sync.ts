@@ -2,7 +2,7 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { listContainers, type DockerContainer } from './docker.js';
+import { listContainers, type DockerContainer } from '../docker/containers.js';
 import { type Catalog, type Service } from '../catalog/loader.js';
 import { readGitInfo, type GitInfo } from './git.js';
 import { getOrCreateLocalHost, heartbeatLocalHost } from './host.js';

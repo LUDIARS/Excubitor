@@ -972,6 +972,10 @@ describe('Excubitor HTTP APIs', () => {
     expect(emergency.data).toMatchObject({ ok: true, action: 'kill-port' });
   });
 
+  // 実 TCP ラウンドトリップを張るため、 ホストが並行セッションで埋まっていると既定 5s に
+  // 収まらない (vitest.config.ts の hookTimeout と同じ負荷起因)。 この 2 本だけ予算を広げる。
+  const CONNECTION_TIMING_TIMEOUT_MS = 20_000;
+
   it('commits self-restart only after the real Node response finishes', async () => {
     const originalImplementation = mocks.requestLocalControl.getMockImplementation();
     const events: string[] = [];
@@ -1016,7 +1020,7 @@ describe('Excubitor HTTP APIs', () => {
       if (originalImplementation) mocks.requestLocalControl.mockImplementation(originalImplementation);
       await closeHttpServer(server);
     }
-  });
+  }, CONNECTION_TIMING_TIMEOUT_MS);
 
   it('does not commit self-restart when the HTTP client disconnects before a response', async () => {
     const originalImplementation = mocks.requestLocalControl.getMockImplementation();
@@ -1075,7 +1079,7 @@ describe('Excubitor HTTP APIs', () => {
       if (originalImplementation) mocks.requestLocalControl.mockImplementation(originalImplementation);
       await closeHttpServer(server);
     }
-  });
+  }, CONNECTION_TIMING_TIMEOUT_MS);
 
   it('mutates launch, env, and catalog APIs', async () => {
     const profile = await requestJson(router, 'PUT', '/api/v1/launch/profile', {

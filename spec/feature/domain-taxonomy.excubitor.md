@@ -46,7 +46,10 @@ Runtime health, port conflict, memory, CPU, WSL, docker, and liveness monitoring
 
 - **memory-performance**: memory/CPU collection loops, leak detection, budget
   checks, and memory API routes.
-- **health-scanning**: port, docker, git, package, host process, health-state,
+- **docker-engine-api**: `src/docker/*` — Engine API endpoint resolution, GET JSON
+  transport, container listing, and stats sampling that replaced the `docker ps` /
+  `docker stats` CLI probes (see `spec/feature/docker-engine-api.md`).
+- **health-scanning**: port, git, package, host process, health-state,
   bounded health-body parsing, and runtime-version reconciliation scanners.
 - **monitoring-ui**: Monitor/Memory pages.
 

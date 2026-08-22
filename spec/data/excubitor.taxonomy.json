@@ -108,14 +108,21 @@
           "name": "memory-performance",
           "description": "Memory and CPU collection loops, leak detection, budget checks, and memory API routes.",
           "paths": [
-            "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|docker-sampler|host-sampler|wsl-sampler|units|router)\\.ts$"
+            "(^|/)src/memory/(collector|loop|leak|cpu-alert|cpu-rate|process-sampler|host-sampler|wsl-sampler|units|router)\\.ts$"
+          ]
+        },
+        {
+          "name": "docker-engine-api",
+          "description": "Docker Engine API client (endpoint resolution, GET JSON transport, container list, and stats) replacing the docker CLI probes.",
+          "paths": [
+            "(^|/)src/docker/(engine-endpoint|engine-client|containers|stats)\\.ts$"
           ]
         },
         {
           "name": "health-scanning",
-          "description": "Port, docker, git, package, host process, bounded health-body parsing, health-state, and runtime-version reconciliation scanners.",
+          "description": "Port, git, package, host process, bounded health-body parsing, health-state, and runtime-version reconciliation scanners.",
           "paths": [
-            "(^|/)src/scanner/(docker|git|health|health-body|health-state|host|host-process|loop|ports|ports-router|sync|version-reconcile)\\.ts$"
+            "(^|/)src/scanner/(git|health|health-body|health-state|host|host-process|loop|ports|ports-router|sync|version-reconcile)\\.ts$"
           ]
         },
         {

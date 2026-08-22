@@ -12,7 +12,7 @@ import { db } from '../db/client.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { sumTreeRss, sumTreeCpu } from './process-sampler.js';
 import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
-import { sampleDockerStats } from './docker-sampler.js';
+import { sampleDockerStats } from '../docker/stats.js';
 import { fetchMemoryMetrics } from './metrics-sampler.js';
 import { sampleWsl } from './wsl-sampler.js';
 import { sampleHost } from './host-sampler.js';

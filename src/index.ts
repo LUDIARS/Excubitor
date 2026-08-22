@@ -87,6 +87,7 @@ import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-versi
 import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
 import type { StartupNpmIssue } from './startup/npm-install.js';
 import { SERVICE_VERSION_ENV, selfReportedVersion } from './process/service-version.js';
+import { configureEngineEndpoint, describeEndpoint, resolveEngineEndpoint } from './docker/engine-endpoint.js';
 
 const logger = createNamedLogger('concordia.observability');
 const httpLogger = createNamedLogger('excubitor.http');
@@ -231,6 +232,23 @@ async function publishExcubitorRuntimeVersion(catalog: Catalog): Promise<void> {
     { version, versionSource: build?.patch_source ?? 'unversioned', gitHash: build?.git_hash ?? null },
     'Excubitor runtime version published',
   );
+}
+
+/**
+ * catalog の `docker.host` を Engine API クライアントへ反映し、 解決結果をログに残す。
+ * 解釈できない値は既定へ落ちるが、 黙って別の daemon を監視し続けないよう warn を出す。
+ */
+function applyEngineEndpoint(configHost: string | undefined): void {
+  const { endpoint, invalid } = resolveEngineEndpoint(configHost);
+  configureEngineEndpoint(configHost);
+  if (invalid) {
+    logger.warn(
+      { invalid, endpoint: describeEndpoint(endpoint) },
+      'unparsable docker host; falling back to default docker engine endpoint',
+    );
+    return;
+  }
+  logger.info({ endpoint: describeEndpoint(endpoint) }, 'docker engine endpoint');
 }
 
 /**
@@ -495,6 +513,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // boot: catalog ↁEDB sync
   currentCatalog = loadCatalog();
+  applyEngineEndpoint(currentCatalog.docker?.host);
   configureLogRingBuffer({
     perService: currentCatalog.log_store.ring_lines_per_service,
     global: currentCatalog.log_store.ring_lines_global,
@@ -558,6 +577,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     const fresh = loadCatalog();
     const result = await syncCatalog(fresh);
     currentCatalog = fresh;
+    applyEngineEndpoint(fresh.docker?.host);
     configureLogRingBuffer({
       perService: fresh.log_store.ring_lines_per_service,
       global: fresh.log_store.ring_lines_global,
@@ -678,11 +698,28 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
           );
         };
         const environment = c.env as unknown as {
-          outgoing?: { once: (event: 'finish', listener: () => void) => unknown };
+          outgoing?: {
+            once: (event: 'finish' | 'close', listener: () => void) => unknown;
+            destroyed?: boolean;
+            writableFinished?: boolean;
+          };
         } | undefined;
         const outgoing = environment?.outgoing;
-        if (outgoing) outgoing.once('finish', commit);
-        else queueMicrotask(commit); // Hono in-memory/test adapter has no Node ServerResponse.
+        if (outgoing) {
+          // 応答が本当にクライアントへ届いた時だけ commit する。 クライアントが先に切断すると
+          // ソケットは destroyed でも end() 完了で 'finish' が発火し得るため、 'close' 側で
+          // 中断を確定させて commit を捨てる (切断した相手のために自分を再起動しない)。
+          let aborted = outgoing.destroyed === true;
+          outgoing.once('close', () => {
+            if (outgoing.writableFinished !== true) aborted = true;
+          });
+          outgoing.once('finish', () => {
+            if (aborted || outgoing.destroyed === true) return;
+            commit();
+          });
+        } else {
+          queueMicrotask(commit); // Hono in-memory/test adapter has no Node ServerResponse.
+        }
       }
       const payload = { ...response, action: parsed.data.action };
       if (response.state === 'accepted') return c.json(payload, 202);

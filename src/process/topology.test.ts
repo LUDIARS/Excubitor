@@ -19,6 +19,7 @@ function svc(p: Partial<Service>): Service {
 function cat(services: Service[]): Catalog {
   return {
     project_versions: {},
+    docker: {},
     services,
     memory_monitor: {
       enabled: true,
