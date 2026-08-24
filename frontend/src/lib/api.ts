@@ -311,6 +311,7 @@ export interface DomainRootStatus {
   storePath: string;
 }
 
+/** @implements SPEC-CF-TUNNEL-ROUTES */
 export interface CfTunnelStatus {
   infisical_project_id: string | null;
   infisical_project_source: 'env' | 'config' | 'unset';
@@ -318,6 +319,12 @@ export interface CfTunnelStatus {
   infisical_environment_source: 'env' | 'config' | 'unset';
   allowed_hostnames: string[];
   allowed_hostnames_source: 'env' | 'config' | 'unset';
+  /** config store の素の保存値 (env で隠れていても実際に保存されている値)。 */
+  stored: {
+    infisical_project_id: string | null;
+    infisical_environment: string | null;
+    allowed_hostnames: string[];
+  };
   direct_env_credentials: boolean;
   storePath: string;
 }

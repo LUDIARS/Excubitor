@@ -46,8 +46,11 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
    Excubitor 設定ストア (`config.enc`、暗号化) にも保存でき、設定 UI (Config → CF Tunnel)
    と `GET/PUT /api/v1/config/cf-tunnel` で編集する。env が設定されていれば常に env が
    優先される (domainRoot と同じ規則)。CF トークン値そのものはこの API で受け取らない
-   (Infisical にのみ置く)。status は各フィールドの解決元 (`env`/`config`/`unset`) を示す。
-   config store 由来の変更は再起動不要で即時反映される (毎リクエスト解決)。
+   (Infisical にのみ置く)。status は各フィールドの解決元 (`env`/`config`/`unset`) と、
+   解決値とは別に config store の素の保存値 (`stored`) を示す。編集 UI は下書きに
+   `stored` を使う — 解決値を下書きにすると env が設定されている間に env の値を保存して
+   既存の config を潰すため。config store 由来の変更は再起動不要で即時反映される
+   (毎リクエスト解決)。
 
 ## 運用
 

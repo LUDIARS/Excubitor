@@ -237,6 +237,16 @@ export interface CfTunnelStatus {
   infisical_environment_source: CfTunnelSource;
   allowed_hostnames: string[];
   allowed_hostnames_source: CfTunnelSource;
+  /**
+   * config store に実際に保存されている値 (env で隠れていても素の値)。
+   * 上の解決済みフィールドは env 優先なので、 編集 UI がこれを使わず解決値を
+   * 下書きに入れると、 env の値をそのまま保存して既存の config を上書きしてしまう。
+   */
+  stored: {
+    infisical_project_id: string | null;
+    infisical_environment: string | null;
+    allowed_hostnames: string[];
+  };
   /** EXCUBITOR_CF_API_TOKEN + EXCUBITOR_CF_ACCOUNT_ID の直指定があるか (UI 表示用)。 */
   direct_env_credentials: boolean;
   storePath: string;
@@ -321,11 +331,17 @@ export function getCfTunnelStatus(): CfTunnelStatus {
     infisical_project_source: sourceOf(envProject, stored.infisicalProjectId),
     infisical_environment: envEnvironment ?? stored.infisicalEnvironment ?? null,
     infisical_environment_source: sourceOf(envEnvironment, stored.infisicalEnvironment),
-    allowed_hostnames: envAllowlist.length > 0 ? envAllowlist : stored.allowedHostnames ?? [],
+    // config cache と同じ配列を渡さない (呼び出し側の mutate が cache を壊す)。
+    allowed_hostnames: envAllowlist.length > 0 ? envAllowlist : [...(stored.allowedHostnames ?? [])],
     allowed_hostnames_source: sourceOf(
       envAllowlist.length > 0,
       stored.allowedHostnames && stored.allowedHostnames.length > 0,
     ),
+    stored: {
+      infisical_project_id: stored.infisicalProjectId ?? null,
+      infisical_environment: stored.infisicalEnvironment ?? null,
+      allowed_hostnames: [...(stored.allowedHostnames ?? [])],
+    },
     direct_env_credentials: Boolean(
       process.env.EXCUBITOR_CF_API_TOKEN?.trim() && process.env.EXCUBITOR_CF_ACCOUNT_ID?.trim(),
     ),

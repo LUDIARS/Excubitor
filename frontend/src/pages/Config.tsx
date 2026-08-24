@@ -85,9 +85,11 @@ export default function Config() {
     if (c.identity.siteUrl) setSiteUrl(c.identity.siteUrl);
     if (c.identity.environment) setEnvironment(c.identity.environment);
     setDomainRootDraft(c.domain_root.value);
-    setCfProjectDraft(c.cf_tunnel.infisical_project_id ?? '');
-    setCfEnvDraft(c.cf_tunnel.infisical_environment ?? '');
-    setCfHostnamesDraft(c.cf_tunnel.allowed_hostnames.join(', '));
+    // 解決値 (env 優先) ではなく config store の素の値を下書きにする。 解決値を入れると
+    // env が設定されている時に env の値をそのまま保存し、 既存の config を潰してしまう。
+    setCfProjectDraft(c.cf_tunnel.stored.infisical_project_id ?? '');
+    setCfEnvDraft(c.cf_tunnel.stored.infisical_environment ?? '');
+    setCfHostnamesDraft(c.cf_tunnel.stored.allowed_hostnames.join(', '));
     setRows(toRows(c.services));
     setDiscord(notification.discord);
     setDiscordEnabled(notification.discord.enabled);
@@ -145,6 +147,7 @@ export default function Config() {
     }
   };
 
+  /** @implements SPEC-CF-TUNNEL-ROUTES */
   const submitCfTunnel = async () => {
     setBusy('cf-tunnel');
     setCfTunnelResult(null);
@@ -284,9 +287,13 @@ export default function Config() {
           when empty).
         </p>
         <p className="muted small">
-          Saved at <code>{cfTunnel.storePath}</code>.
+          Saved at <code>{cfTunnel.storePath}</code>. These fields edit the stored config; when the
+          matching env var is set it takes precedence and the stored value stays unused.
           {cfTunnel.infisical_project_source === 'env'
             ? <> <code>EXCUBITOR_CF_INFISICAL_PROJECT_ID</code> is set, so env takes precedence.</>
+            : null}
+          {cfTunnel.infisical_environment_source === 'env'
+            ? <> <code>EXCUBITOR_CF_INFISICAL_ENV</code> is set, so env takes precedence.</>
             : null}
           {cfTunnel.allowed_hostnames_source === 'env'
             ? <> <code>EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES</code> is set, so env takes precedence.</>
@@ -297,7 +304,7 @@ export default function Config() {
         </p>
         <div className="config-form">
           <label>
-            Infisical project ID ({cfTunnel.infisical_project_source})
+            Infisical project ID (in effect: {cfTunnel.infisical_project_source})
             <input
               value={cfProjectDraft}
               onChange={(e) => setCfProjectDraft(e.target.value)}
@@ -305,7 +312,7 @@ export default function Config() {
             />
           </label>
           <label>
-            Infisical environment ({cfTunnel.infisical_environment_source}, default: prod)
+            Infisical environment (in effect: {cfTunnel.infisical_environment_source}, default: prod)
             <input
               value={cfEnvDraft}
               onChange={(e) => setCfEnvDraft(e.target.value)}
@@ -313,7 +320,7 @@ export default function Config() {
             />
           </label>
           <label>
-            Allowed hostnames ({cfTunnel.allowed_hostnames_source}, comma separated)
+            Allowed hostnames (in effect: {cfTunnel.allowed_hostnames_source}, comma separated)
             <input
               value={cfHostnamesDraft}
               onChange={(e) => setCfHostnamesDraft(e.target.value)}

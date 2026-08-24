@@ -51,6 +51,19 @@ type AnyCatalog = {
   };
 };
 
+/** cf-tunnel 設定は他 API のテストでは素通しなので「全部未設定」を使い回す。 */
+const emptyCfTunnelStatus = vi.hoisted(() => () => ({
+  infisical_project_id: null,
+  infisical_project_source: 'unset' as const,
+  infisical_environment: null,
+  infisical_environment_source: 'unset' as const,
+  allowed_hostnames: [],
+  allowed_hostnames_source: 'unset' as const,
+  stored: { infisical_project_id: null, infisical_environment: null, allowed_hostnames: [] },
+  direct_env_credentials: false,
+  storePath: 'E:\\tmp\\config.enc',
+}));
+
 const mocks = vi.hoisted(() => ({
   reviewRoot: 'E:\\tmp\\excubitor-api-review-root',
   logsRoot: 'E:\\tmp\\excubitor-api-logs',
@@ -340,26 +353,8 @@ vi.mock('./secrets/config-store.js', () => ({
     return mocks.domainRoot;
   },
   getCfTunnelSettings: () => ({}),
-  getCfTunnelStatus: () => ({
-    infisical_project_id: null,
-    infisical_project_source: 'unset',
-    infisical_environment: null,
-    infisical_environment_source: 'unset',
-    allowed_hostnames: [],
-    allowed_hostnames_source: 'unset',
-    direct_env_credentials: false,
-    storePath: 'E:\\tmp\\config.enc',
-  }),
-  saveCfTunnelSettings: () => ({
-    infisical_project_id: null,
-    infisical_project_source: 'unset',
-    infisical_environment: null,
-    infisical_environment_source: 'unset',
-    allowed_hostnames: [],
-    allowed_hostnames_source: 'unset',
-    direct_env_credentials: false,
-    storePath: 'E:\\tmp\\config.enc',
-  }),
+  getCfTunnelStatus: () => emptyCfTunnelStatus(),
+  saveCfTunnelSettings: () => emptyCfTunnelStatus(),
 }));
 vi.mock('./secrets/infisical.js', () => ({ verifyIdentity: mocks.verifyIdentity }));
 vi.mock('./secrets/agent-token.js', () => ({

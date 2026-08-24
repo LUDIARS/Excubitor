@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildConfigRouter } from './router.js';
+import { getCfTunnelStatus } from './config-store.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -111,5 +112,51 @@ describe('CF Tunnel config API', () => {
       allowed_hostnames: ['env.example.com'],
       allowed_hostnames_source: 'env',
     });
+  });
+
+  // env が config を隠している間も、 編集 UI が下書きに使う「素の保存値」は別に見えないと
+  // いけない。 解決値を下書きにすると env の値をそのまま保存して config を潰す。
+  it('env が優先されていても stored は config store の素の値を返す', async () => {
+    const app = buildConfigRouter();
+    await put(app, {
+      infisical_project_id: 'proj-config',
+      infisical_environment: 'dev',
+      allowed_hostnames: ['config.example.com'],
+    });
+    process.env.EXCUBITOR_CF_INFISICAL_PROJECT_ID = 'proj-env';
+    process.env.EXCUBITOR_CF_INFISICAL_ENV = 'staging';
+    process.env.EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES = 'env.example.com';
+
+    const res = await app.request('/api/v1/config/cf-tunnel');
+    const body = (await res.json()) as { cf_tunnel: { stored: Record<string, unknown> } };
+    expect(body.cf_tunnel.stored).toEqual({
+      infisical_project_id: 'proj-config',
+      infisical_environment: 'dev',
+      allowed_hostnames: ['config.example.com'],
+    });
+  });
+
+  it('未設定なら stored は空 (null / 空配列)', async () => {
+    const app = buildConfigRouter();
+    const res = await app.request('/api/v1/config/cf-tunnel');
+    const body = (await res.json()) as { cf_tunnel: { stored: Record<string, unknown> } };
+    expect(body.cf_tunnel.stored).toEqual({
+      infisical_project_id: null,
+      infisical_environment: null,
+      allowed_hostnames: [],
+    });
+  });
+
+  it('返却した hostname 配列の変更は config cache を壊さない', async () => {
+    const app = buildConfigRouter();
+    await put(app, { allowed_hostnames: ['config.example.com'] });
+
+    const first = getCfTunnelStatus();
+    first.allowed_hostnames.push('mutated.example.com');
+    first.stored.allowed_hostnames.push('also-mutated.example.com');
+
+    const second = getCfTunnelStatus();
+    expect(second.allowed_hostnames).toEqual(['config.example.com']);
+    expect(second.stored.allowed_hostnames).toEqual(['config.example.com']);
   });
 });
