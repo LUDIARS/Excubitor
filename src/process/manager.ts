@@ -31,6 +31,8 @@ import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-vers
 import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { clearDeclaredPort } from './port-guard.js';
+import { readServiceRestartCount, writeServiceRestartCount } from './restart-budget.js';
+import { clearResidualServiceProcesses } from './residual-guard.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -181,6 +183,8 @@ export interface SpawnOptions {
   breakaway?: BreakawaySpawnOptions;
   /** テスト用: 宣言ポートの占有解消の差し替え。 */
   clearPort?: typeof clearDeclaredPort;
+  /** テスト用: cwd/command が一致する旧プロセスの回収差し替え。 */
+  clearResiduals?: typeof clearResidualServiceProcesses;
 }
 
 export function markServiceRunning(code: string): number {
@@ -289,16 +293,6 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     throw new Error(`spawnService: unsupported runtime ${svc.runtime}`);
   }
 
-  // 宣言ポートを取りこぼした旧インスタンスが握っていると、新プロセスは EADDRINUSE で
-  // 即死し「再起動したのに古いコードが動き続ける」状態になる (port-guard.ts の背景参照)。
-  // spawn 前に必ず確認し、管理外の占有は止めてから進む。
-  await (opts.clearPort ?? clearDeclaredPort)(
-    svc.code,
-    svc.port,
-    getManagedPid(svc.code),
-    { kill: treeKill },
-  );
-
   let cmd: string;
   let args: string[];
   let hotReloadSource: HotReloadSource;
@@ -340,6 +334,32 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   // ライブログ/エラー検知は process-file がこのファイルを tail して log bus に publish する。
   await assertHotReloadAllowed(svc, hotReloadSource, { allowHotReload: opts.allowHotReload });
 
+  // cwd/command が同じ旧 wrapper は、実アプリが死んで port を持たなくても watch のまま
+  // 生き残る。宣言 port の guard より先に process group ごと回収して多重起動を防ぐ。
+  const resolvedCwd =
+    svc.cwd ??
+    (svc.runtime === 'app' && svc.exec
+      ? dirname(svc.exec)
+      : svc.start_script
+        ? dirname(svc.start_script)
+        : undefined);
+  await (opts.clearResiduals ?? clearResidualServiceProcesses)(
+    svc.code,
+    resolvedCwd,
+    [cmd, ...args].join(' '),
+    getManagedPid(svc.code),
+    { kill: treeKill },
+  );
+
+  // 宣言ポートを取りこぼした旧インスタンスが握っていると、新プロセスは EADDRINUSE で
+  // 即死する。cwd/command で拾えない占有も、spawn 前に必ず解消する。
+  await (opts.clearPort ?? clearDeclaredPort)(
+    svc.code,
+    svc.port,
+    getManagedPid(svc.code),
+    { kill: treeKill },
+  );
+
   // build完了後、実spawnの直前に起動単位credentialを発行する。
   // issuer secretはprepareSpawnEnv内で削除され、子にはtarget credentialだけが渡る。
   const inheritedEnv = inheritableSupervisorEnv(process.env);
@@ -361,15 +381,6 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   if (!isCurrentRunningGeneration(svc.code, generation)) {
     throw new Error(`service ${svc.code} start canceled by a newer lifecycle request`);
   }
-
-  // cwd 既定: catalog cwd → (app) exec の dir → (start_script) スクリプトの dir。
-  const resolvedCwd =
-    svc.cwd ??
-    (svc.runtime === 'app' && svc.exec
-      ? dirname(svc.exec)
-      : svc.start_script
-        ? dirname(svc.start_script)
-        : undefined);
 
   // win32 の supervisor は Scheduled Task の Job Object 内で動き、`detached: true`
   // では子が Job を継承して脱出できない (detached は CREATE_NEW_PROCESS_GROUP /
@@ -466,7 +477,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
 
   // adopted 側に同 code が残っていれば、 自前 spawn が真実なので除去。
   adopted.delete(svc.code);
-  const restartCount = opts.initialRestartCount ?? 0;
+  const restartCount = opts.initialRestartCount ?? readServiceRestartCount(svc.code);
   let resolveTermination = (): void => undefined;
   const termination = new Promise<void>((resolve) => {
     resolveTermination = resolve;
@@ -659,9 +670,13 @@ async function onExit(
 
   if (!shouldRestart) return;
 
-  if (prevRestartCount + 1 > max) {
+  const persistedRestartCount = Math.max(prevRestartCount, readServiceRestartCount(svc.code));
+  const nextRestartCount = persistedRestartCount + 1;
+  writeServiceRestartCount(svc.code, nextRestartCount);
+
+  if (nextRestartCount > max) {
     logger.warn(
-      { code: svc.code, restartCount: prevRestartCount + 1, max },
+      { code: svc.code, restartCount: nextRestartCount, max },
       'restart limit reached  Eopening error_task',
     );
     await raiseRestartLimitError(svc, code ?? -1, signal, max);
@@ -672,13 +687,13 @@ async function onExit(
   const desired = desiredStates.get(svc.code);
   if (!restartSchedulingEnabled || desired?.state !== 'running') return;
   const generation = desired.generation;
-  const delay = Math.min(30_000, 1000 * 2 ** prevRestartCount);
+  const delay = Math.min(30_000, 1000 * 2 ** persistedRestartCount);
   const existingTimer = restartTimers.get(svc.code);
   if (existingTimer) clearTimeout(existingTimer);
   const timer = setTimeout(() => {
     if (restartTimers.get(svc.code) === timer) restartTimers.delete(svc.code);
     if (!isCurrentRunningGeneration(svc.code, generation)) return;
-    void autoRestartService(svc, opts, prevRestartCount, generation).catch((err: unknown) =>
+    void autoRestartService(svc, opts, nextRestartCount, generation).catch((err: unknown) =>
       logger.error({ code: svc.code, err: (err as Error).message }, 'auto-restart failed'),
     );
   }, delay);
@@ -689,7 +704,7 @@ async function onExit(
 async function autoRestartService(
   svc: Service,
   opts: SpawnOptions,
-  prevRestartCount: number,
+  nextRestartCount: number,
   generation: number,
 ): Promise<void> {
   if (!isCurrentRunningGeneration(svc.code, generation)) return;
@@ -706,7 +721,7 @@ async function autoRestartService(
   if (!isCurrentRunningGeneration(svc.code, generation)) return;
   await spawnService(svc, {
       ...opts,
-      initialRestartCount: prevRestartCount + 1,
+      initialRestartCount: nextRestartCount,
       expectedGeneration: generation,
     });
 }

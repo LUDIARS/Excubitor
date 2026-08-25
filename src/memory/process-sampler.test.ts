@@ -3,6 +3,7 @@ import {
   parseWindowsProcList,
   parsePosixProcList,
   parsePosixCpuTime,
+  parsePosixElapsedSeconds,
   sumTreeRss,
   sumTreeCpu,
   type ProcEntry,
@@ -109,6 +110,12 @@ describe('parsePosixCpuTime', () => {
   it('不正は null', () => expect(parsePosixCpuTime('xx')).toBeNull());
 });
 
+describe('parsePosixElapsedSeconds', () => {
+  it('GNU ps の etimes', () => expect(parsePosixElapsedSeconds('90061')).toBe(90_061));
+  it('Darwin/BSD ps の etime', () => expect(parsePosixElapsedSeconds('1-01:01:01')).toBe(90_061));
+  it('不正は null', () => expect(parsePosixElapsedSeconds('unknown')).toBeNull());
+});
+
 describe('parsePosixProcList (TIME 列付き)', () => {
   it('4 列目を cpuMs に載せる', () => {
     expect(parsePosixProcList('100 4 1024 00:10')).toEqual([
@@ -127,6 +134,17 @@ describe('parsePosixProcList (共有 snapshot 列付き)', () => {
       name: 'node',
       startedAt: 70_000,
       commandLine: 'node app.js --flag',
+    }]);
+  });
+  it('Darwin/BSD の etime を開始時刻に変換する', () => {
+    expect(parsePosixProcList('100 4 1024 00:10 01:30 node node app.js', 100_000)).toEqual([{
+      pid: 100,
+      ppid: 4,
+      rss: 1024 * 1024,
+      cpuMs: 10_000,
+      name: 'node',
+      startedAt: 10_000,
+      commandLine: 'node app.js',
     }]);
   });
 });

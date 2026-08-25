@@ -16,6 +16,7 @@ import { resolveInjectEnv } from '../process/inject.js';
 import { runServiceBuild } from '../process/build.js';
 import { assertStartupEnv } from '../process/startup-env.js';
 import { injectServiceRuntimeVersion } from '../process/service-version.js';
+import { resetServiceRestartCount } from '../process/restart-budget.js';
 
 const logger = createNamedLogger('excubitor.control');
 
@@ -106,6 +107,7 @@ async function controlProcess(
         return { ok: true, stdout: 'already running', stderr: '', exit_code: 0, command: '(noop)' };
       }
       const generation = markServiceRunning(svc.code);
+      resetServiceRestartCount(svc.code);
       let env: Record<string, string>;
       try {
         env = { ...(await resolveInjectEnv(svc)), ...envOverride };
@@ -187,6 +189,7 @@ async function controlProcess(
         }
       }
       const generation = markServiceRunning(svc.code);
+      resetServiceRestartCount(svc.code);
       let spawnError: string | null = null;
       const p = await spawnService(svc, { env, expectedGeneration: generation }).catch((err: unknown) => {
         spawnError = err instanceof Error ? err.message : String(err);
@@ -207,6 +210,3 @@ async function controlProcess(
     }
   }
 }
-
-
-
