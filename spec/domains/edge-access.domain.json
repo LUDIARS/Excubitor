@@ -1,0 +1,17 @@
+{
+  "name": "edge-access",
+  "description": "Cloudflare edge-side passphrase access control for external review sites, including login, signed sessions, audit events, and authenticated origin forwarding.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)workers/passphrase-gate/(src/[^/]+\\.js|README\\.md|package\\.json|wrangler\\.toml)$"
+    }
+  ],
+  "cardTemplate": "Summarise the edge-access domain: a fail-closed Cloudflare Worker gate using a shared passphrase, signed session cookies, privacy-minimized audit events, and authenticated origin forwarding.",
+  "specRefs": [
+    "spec/feature/passphrase-gate.md",
+    "workers/passphrase-gate/README.md"
+  ],
+  "rationale": "The Worker runs outside the Excubitor process at a separate trust boundary and should not be classified as the backend HTTP API, frontend UI, or in-process logging pipeline."
+}

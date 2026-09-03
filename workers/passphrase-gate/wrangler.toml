@@ -1,0 +1,22 @@
+name = "passphrase-gate"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+workers_dev = false
+
+# 守りたいホスト名 (cloudflared の public hostname そのまま)。zone_name は運用 zone に合わせる。
+routes = [
+  { pattern = "<HOST>/*", zone_name = "<ZONE>" },
+]
+
+# Workers Logs にリクエストごとの JSON ログを残す (誰が / いつ / どこを見たか)。
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[vars]
+SITE_TITLE = "入場"
+SESSION_TTL_SECONDS = "43200"
+
+# 秘密は `wrangler secret put <NAME>` で投入する (wrangler.toml には書かない):
+#   PASSPHRASE     全員共通のあいことば (平文)。または PASSPHRASE_SHA256 (sha256 hex、こちらが優先)
+#   COOKIE_SECRET  32 文字以上のランダム文字列

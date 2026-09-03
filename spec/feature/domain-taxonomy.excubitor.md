@@ -91,7 +91,7 @@ application, release build orchestration, and service discovery.
 
 Automated tests, test fixtures, and local specs used to verify Excubitor behavior.
 
-- **unit-and-api-tests**: Vitest files under `src`.
+- **unit-and-api-tests**: Vitest files under `src` and Worker-local Node test files.
 - **runtime-smoke-checks**: `scripts/runtime-smoke.mjs`, the out-of-process boot
   smoke described in `spec/setup/runtime-smoke.md`.
 - **spec-and-review-artifacts**: `spec/*` and `review/*` context artifacts.
@@ -110,3 +110,13 @@ visualizations.
   metric shape, and persisted sample series.
 - **metric-visualization**: metric graph, sparkline, and function-metric UI
   helpers for measured series.
+
+## edge-access
+
+Cloudflare edge-side access control that runs outside the Excubitor process:
+the passphrase gate Worker placed in front of tunnel hostnames.
+
+- **passphrase-gate-worker**: `workers/passphrase-gate/*` — login page
+  (name / shared passphrase), HMAC session cookie, pass-through to the origin,
+  and privacy-minimized JSON access logs
+  (see `spec/feature/passphrase-gate.md`).

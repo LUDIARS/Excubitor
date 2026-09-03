@@ -1,0 +1,15 @@
+{
+  "name": "@ludiars/passphrase-gate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Tunnel の公開ホストを、なまえと共有あいことばで保護する edge gate Worker。",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

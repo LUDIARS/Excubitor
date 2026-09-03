@@ -11,6 +11,9 @@
       "pathPattern": "(^|/)src/[^/]+\\.test\\.ts$"
     },
     {
+      "pathPattern": "(^|/)workers/[^/]+/test/[^/]+\\.test\\.js$"
+    },
+    {
       "pathPattern": "(^|/)scripts/runtime-smoke\\.mjs$"
     },
     {
