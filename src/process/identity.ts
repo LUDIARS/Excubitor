@@ -8,9 +8,29 @@ export interface VerifiedProcessIdentity {
   verified: true;
 }
 
+/**
+ * 照合が成立しなかった理由。 対処が正反対なので呼び出し側で分岐できるようにする。
+ *
+ * - `exited`     — pid がもう存在しない。 起動そのものが失敗している。 調べるのは stderr。
+ * - `unreadable` — pid がある、または不在を確認できず、作成時刻を読めない / 一致しない。
+ *                  **プロセスは生き残りうる**ため、孤児として回収対象になる (design.md §17.4)。
+ */
+export type ProcessIdentityFailureReason = 'exited' | 'unreadable';
+
+export type ProcessIdentityOutcome =
+  | { ok: true; identity: VerifiedProcessIdentity }
+  | { ok: false; reason: ProcessIdentityFailureReason };
+
+type StartedAtProbe =
+  | { kind: 'started-at'; startedAt: Date }
+  | { kind: 'exited' }
+  | { kind: 'unreadable' };
+
 export interface ProcessIdentityOptions {
   platform?: NodeJS.Platform;
   run?: (command: string, args: string[]) => Promise<ExecResult>;
+  /** OS query failure時に PID がまだ存在するかを独立に確認する。 */
+  isProcessAlive?: (pid: number) => boolean;
   toleranceMs?: number;
 }
 
@@ -63,6 +83,21 @@ async function readProcessStartedAt(
   pid: number,
   options: ProcessIdentityOptions,
 ): Promise<Date | null> {
+  const probe = await probeProcessStartedAt(pid, options);
+  return probe.kind === 'started-at' ? probe.startedAt : null;
+}
+
+/**
+ * 作成時刻を読むと同時に「読めなかった理由」を返す。
+ *
+ * `Get-Process` / `ps` の失敗には pid 不在だけでなく、timeout・権限・コマンド自体の
+ * 起動失敗も含まれる。したがって非ゼロだけで `exited` と決めず、PID の存在を独立に
+ * 確認する。存在確認まで不確かな場合は、生存プロセスを捨てない側 (`unreadable`) に倒す。
+ */
+async function probeProcessStartedAt(
+  pid: number,
+  options: ProcessIdentityOptions,
+): Promise<StartedAtProbe> {
   const platform = options.platform ?? process.platform;
   const run = options.run ?? ((command, args) => execCapture(command, args, process.cwd(), 5_000));
   const result = platform === 'win32'
@@ -73,10 +108,19 @@ async function readProcessStartedAt(
         `$p=Get-Process -Id ${pid} -ErrorAction Stop; $p.StartTime.ToUniversalTime().ToString('o')`,
       ])
     : await run('ps', ['-p', String(pid), '-o', 'lstart=']);
-  if (!result.ok) return null;
+  if (!result.ok) {
+    const isProcessAlive = options.isProcessAlive ?? hasLivePid;
+    try {
+      return isProcessAlive(pid) ? { kind: 'unreadable' } : { kind: 'exited' };
+    } catch {
+      // 存在確認そのものの失敗は「不在」の証拠にならない。孤児を見失わない側へ倒す。
+      return { kind: 'unreadable' };
+    }
+  }
   const startedAt = new Date(result.stdout.trim());
-  if (Number.isNaN(startedAt.getTime())) return null;
-  return startedAt;
+  // 応答はあったが時刻にならない = pid は居るが読めない。 生存しうるので回収対象。
+  if (Number.isNaN(startedAt.getTime())) return { kind: 'unreadable' };
+  return { kind: 'started-at', startedAt };
 }
 
 /**
@@ -91,6 +135,24 @@ export async function waitForProcessIdentity(
   expectedStartedAt: Date,
   options: ProcessIdentityWaitOptions = {},
 ): Promise<VerifiedProcessIdentity | null> {
+  const outcome = await waitForProcessIdentityOutcome(pid, expectedStartedAt, options);
+  return outcome.ok ? outcome.identity : null;
+}
+
+/**
+ * `waitForProcessIdentity` と同じ待機をしつつ、失敗した理由を返す。
+ *
+ * 呼び出し側の対処が理由で分かれるため (即死なら起動失敗の調査、照合不能なら生存 pid の回収)、
+ * 「照合できなかった」を 1 つの null に潰さない。 期限切れの最終判定は最後に観測した理由を採る。
+ */
+export async function waitForProcessIdentityOutcome(
+  pid: number,
+  expectedStartedAt: Date,
+  options: ProcessIdentityWaitOptions = {},
+): Promise<ProcessIdentityOutcome> {
+  if (!Number.isInteger(pid) || pid <= 0 || Number.isNaN(expectedStartedAt.getTime())) {
+    return { ok: false, reason: 'unreadable' };
+  }
   const timeoutMs = options.timeoutMs ?? 0;
   const retryIntervalMs = options.retryIntervalMs ?? 100;
   const now = options.now ?? Date.now;
@@ -98,15 +160,34 @@ export async function waitForProcessIdentity(
   const deadline = now() + Math.max(0, timeoutMs);
 
   while (true) {
-    const identity = await verifyProcessIdentity(pid, expectedStartedAt, options);
-    if (identity) return identity;
+    const probe = await probeProcessStartedAt(pid, options);
+    if (probe.kind === 'started-at') {
+      const toleranceMs = options.toleranceMs ?? START_TIME_TOLERANCE_MS;
+      const matches = Math.abs(probe.startedAt.getTime() - expectedStartedAt.getTime())
+        <= toleranceMs;
+      if (matches) {
+        return { ok: true, identity: { pid, startedAt: probe.startedAt, verified: true } };
+      }
+    }
+    // 作成時刻は読めたが一致しない場合も、 pid 自体は生きている = 回収対象。
+    const reason: ProcessIdentityFailureReason = probe.kind === 'exited' ? 'exited' : 'unreadable';
 
     const remainingMs = deadline - now();
-    if (remainingMs <= 0) return null;
+    if (remainingMs <= 0) return { ok: false, reason };
     await sleep(Math.min(Math.max(1, retryIntervalMs), remainingMs));
   }
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** `false` は ESRCH (pid 不在) と確定できた場合だけ返す。 */
+function hasLivePid(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code !== 'ESRCH';
+  }
 }

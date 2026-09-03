@@ -716,6 +716,27 @@ Excubitor が知っている**状態を保つ。
 同じく Excubitor が把握すべきものだからで、いずれにせよ「知らない」まま放置してよい pid では
 ない。adopt 後の停止が `taskkill /T /F` である点は §17.5 の留意事項と同じ。
 
+### 17.4.4 照合失敗の 2 種を分けて出す (2026-09-04)
+
+§17.3 の identity 照合が失敗したとき、原因は性質の違う 2 つに分かれる。**対処が正反対**なので、
+エラー文言とログの両方で区別する (`ProcessIdentityFailureReason`)。
+
+| reason | 状態 | 対処 | §17.4.3 の回収対象か |
+|---|---|---|---|
+| `exited` | pid がもう存在しない。起動そのものが失敗した | stderr (`data/process-logs/<code>.err.log`) を読む | **対象外**。回収すべき pid が無い |
+| `unreadable` | pid はある、または不在を確認できず、作成時刻を読めない / 一致しない。**プロセスは生き残りうる** | pid を確認し §17.4.3 の手順で回収する | **対象**。`recordSpawnFailure` が pid を保持し、boot の identity 突合と `adoptDeclaredPortOwners` が拾い直す |
+
+判定は `probeProcessStartedAt` が行う。`Get-Process -ErrorAction Stop` / `ps -p` の非ゼロには
+pid 不在だけでなく、timeout・権限・コマンド起動失敗も含まれうるため、非ゼロ時は
+`process.kill(pid, 0)` で存在を独立に確認する。PID 不在を確認できた場合だけ `exited` とし、
+存在確認も不確かな場合は生存 pid を見失わないよう `unreadable` に倒す。応答があるのに時刻が
+取れない (空出力・解釈不能) 場合と、時刻は取れたが期待値と一致しない場合も `unreadable` とする。
+
+`recordSpawnFailure` による生存 pid の保持と boot 時の再採用方針 (§17.4.3) は両方の reason で
+変えない。生きている pid を渡せるのは `unreadable` の側だけだが、判定を呼び出し側に委ねず
+`spawnReservedService` が一律に pid を渡す形は維持する — 「起動は失敗したが pid は知っている」
+という §17.4.3 の不変条件を、reason の分岐で崩さないため。
+
 ### 17.5 既知の制約
 
 - `Win32_Process.Create` は成功したが PowerShell 応答の受領前に timeout した場合、または

@@ -28,7 +28,7 @@ import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-version.js';
-import { verifyProcessIdentity, waitForProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
+import { verifyProcessIdentity, waitForProcessIdentityOutcome, type VerifiedProcessIdentity } from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { clearDeclaredPort } from './port-guard.js';
 
@@ -808,28 +808,36 @@ async function spawnBreakawayService(
   await updateInstanceStatus(svc.code, 'pending', pid, undefined, spawnedAt);
   // launcher が返す PID は StartTime の可視化より先行しうるため、
   // 作成時刻つき照合だけを短時間リトライする。照合条件を緩めず、期限後は fail-closed。
-  const identity = await waitForProcessIdentity(pid, spawnedAt, {
+  const outcome = await waitForProcessIdentityOutcome(pid, spawnedAt, {
     toleranceMs: BREAKAWAY_START_TOLERANCE_MS,
     timeoutMs: BREAKAWAY_IDENTITY_WAIT_MS,
     retryIntervalMs: BREAKAWAY_IDENTITY_RETRY_INTERVAL_MS,
   });
-  if (!identity) {
-    // verifyProcessIdentity は「即死した」と「照合できなかった」を区別しない。
-    // 後者なら pid は生きたまま残るため、§17.4 の孤児検出手順へ回せるよう pid を
-    // 明示して警告する (成功として扱わないのは共通)。
+  if (!outcome.ok) {
+    // 「即死した」と「照合できなかった」は対処が正反対なので分けて出す。
+    // exited     — pid はもう無い。 起動そのものが失敗しているので stderr を見る。
+    // unreadable — pid は生き残りうる。 §17.4 の孤児検出手順で確認・回収する。
+    const exited = outcome.reason === 'exited';
     logger.warn(
-      { code: svc.code, pid },
-      'breakaway spawn could not be verified; pid may survive as an orphan (see design.md §17.4)',
+      { code: svc.code, pid, reason: outcome.reason },
+      exited
+        ? 'breakaway spawn exited immediately; no orphan pid to reclaim'
+        : 'breakaway spawn identity was unreadable; pid may survive as an orphan (see design.md §17.4)',
     );
     const failure = new Error(
-      `service ${svc.code} could not be verified after breakaway spawn (pid=${pid});`
-        + ` it exited immediately or its identity was unreadable — check ${stderrPath}`,
+      exited
+        ? `service ${svc.code} exited immediately after breakaway spawn (pid=${pid});`
+          + ` the process is gone — check ${stderrPath}`
+        : `service ${svc.code} could not be verified after breakaway spawn (pid=${pid});`
+          + ` its identity was unreadable and the process may still be running —`
+          + ` confirm and reclaim pid ${pid} per design.md §17.4, then check ${stderrPath}`,
     );
     // 照合できなかっただけで pid が生きているなら、それは孤児にしてよい実体ではない。
     // 失敗として返しつつ pid は残し、boot 時の reconcile と宣言ポート突合が拾えるようにする。
     await recordSpawnFailure(svc.code, failure, pid);
     throw failure;
   }
+  const identity = outcome.identity;
   // stop / shutdown とのレース: child 戦略の spawn 完了後 recheck と同じ扱い。
   // treeKill 完了までは pid が真実なので、消えてから 'stopped' へ落とす
   // (先に永続化した pending 行を残さない)。

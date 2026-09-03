@@ -9,13 +9,14 @@ const mocks = vi.hoisted(() => ({
   stopProcessLog: vi.fn(),
   runServiceBuild: vi.fn(),
   verifyProcessIdentity: vi.fn(),
-  waitForProcessIdentity: vi.fn(),
+  waitForProcessIdentityOutcome: vi.fn(),
+  loggerWarn: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('../shared/logger.js', () => ({
-  createNamedLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createNamedLogger: () => ({ info: vi.fn(), warn: mocks.loggerWarn, error: vi.fn() }),
 }));
 vi.mock('../db/client.js', () => ({ db: () => ({ run: mocks.dbRun }) }));
 vi.mock('./dev-process-md.js', () => ({ resolveDevProcessCommand: vi.fn() }));
@@ -47,7 +48,7 @@ vi.mock('./cernere-launch-credential.js', () => ({
 }));
 vi.mock('./identity.js', () => ({
   verifyProcessIdentity: mocks.verifyProcessIdentity,
-  waitForProcessIdentity: mocks.waitForProcessIdentity,
+  waitForProcessIdentityOutcome: mocks.waitForProcessIdentityOutcome,
 }));
 
 import {
@@ -400,7 +401,7 @@ describe('job-breakaway spawn (win32 default)', () => {
 
   it('spawns through the breakaway runner and registers the service pid as adopted', async () => {
     const startedAt = new Date();
-    mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4321, startedAt, verified: true });
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: true, identity: { pid: 4321, startedAt, verified: true } });
     const breakaway = breakawayOptions(999, 4321);
     const runPowerShell = breakaway.runPowerShell;
 
@@ -420,7 +421,7 @@ describe('job-breakaway spawn (win32 default)', () => {
 
   it('hands runtime=app the exec path and args verbatim (no command-line quoting to get wrong)', async () => {
     const startedAt = new Date();
-    mocks.waitForProcessIdentity.mockResolvedValue({ pid: 4323, startedAt, verified: true });
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: true, identity: { pid: 4323, startedAt, verified: true } });
     const breakaway = breakawayOptions(998, 4323);
     const runPowerShell = breakaway.runPowerShell;
     const app = {
@@ -458,12 +459,31 @@ describe('job-breakaway spawn (win32 default)', () => {
     );
   });
 
-  it('fails fast when the created process cannot be verified', async () => {
-    mocks.waitForProcessIdentity.mockResolvedValue(null);
+  it('fails fast and points at the orphan when the identity is unreadable', async () => {
+    // pid は生き残りうるので、 §17.4.3 の回収手順へ回せる文言でなければならない。
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: false, reason: 'unreadable' });
 
     await expect(
       spawnService(service('breakaway-dead'), { breakaway: breakawayOptions(997, 4322) }),
-    ).rejects.toThrow(/could not be verified after breakaway spawn \(pid=4322\)/);
+    ).rejects.toThrow(/could not be verified after breakaway spawn \(pid=4322\)[\s\S]*reclaim pid 4322/);
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(
+      { code: 'breakaway-dead', pid: 4322, reason: 'unreadable' },
+      expect.stringContaining('pid may survive as an orphan'),
+    );
+    expect(isManaged('breakaway-dead')).toBe(false);
+  });
+
+  it('says the process exited when the pid is already gone', async () => {
+    // 回収すべき pid が無い側。 調べるのは stderr であって孤児ではない。
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: false, reason: 'exited' });
+
+    await expect(
+      spawnService(service('breakaway-dead'), { breakaway: breakawayOptions(997, 4322) }),
+    ).rejects.toThrow(/exited immediately after breakaway spawn \(pid=4322\)/);
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(
+      { code: 'breakaway-dead', pid: 4322, reason: 'exited' },
+      expect.stringContaining('no orphan pid to reclaim'),
+    );
     expect(isManaged('breakaway-dead')).toBe(false);
   });
 
