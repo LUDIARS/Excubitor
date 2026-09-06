@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   waitForProcessIdentityOutcome: vi.fn(),
   loggerWarn: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
+  clearResidualServiceProcesses: vi.fn(async () => ({ stoppedPids: [] })),
+  readServiceRestartCount: vi.fn(() => 0),
+  writeServiceRestartCount: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
@@ -49,6 +52,13 @@ vi.mock('./cernere-launch-credential.js', () => ({
 vi.mock('./identity.js', () => ({
   verifyProcessIdentity: mocks.verifyProcessIdentity,
   waitForProcessIdentityOutcome: mocks.waitForProcessIdentityOutcome,
+}));
+vi.mock('./residual-guard.js', () => ({
+  clearResidualServiceProcesses: mocks.clearResidualServiceProcesses,
+}));
+vi.mock('./restart-budget.js', () => ({
+  readServiceRestartCount: mocks.readServiceRestartCount,
+  writeServiceRestartCount: mocks.writeServiceRestartCount,
 }));
 
 import {

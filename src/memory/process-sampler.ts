@@ -67,6 +67,18 @@ export function parsePosixCpuTime(raw: string): number | null {
 }
 
 /**
+ * POSIX `ps` の経過時間列を秒へ変換する。
+ * GNU ps の `etimes` (整数秒) と Darwin/BSD ps の `etime`
+ * (`[[DD-]HH:]MM:SS`) の両方を受け付ける。
+ */
+export function parsePosixElapsedSeconds(raw: string): number | null {
+  const s = raw.trim();
+  if (/^\d+$/.test(s)) return Number(s);
+  const elapsedMs = parsePosixCpuTime(s);
+  return elapsedMs == null ? null : elapsedMs / 1000;
+}
+
+/**
  * Windows PowerShell CIM の CSV 出力を parse (pure)。
  * 旧形式 "pid,ppid,ws" (3 列) も、 CPU 付き "pid,ppid,ws,kernel100ns,user100ns" (5 列) も受ける。
  * 1 行 = 1 プロセス。 数値化できない行は skip。
@@ -118,13 +130,14 @@ export function parseWindowsProcList(raw: string): ProcEntry[] {
 export function parsePosixProcList(raw: string, sampledAt = Date.now()): ProcEntry[] {
   const entries: ProcEntry[] = [];
   for (const line of raw.split(/\r?\n/)) {
-    const extended = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)(?:\s+(.*))?$/);
+    const extended = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$/);
     if (extended) {
       const pid = Number(extended[1]);
       const ppid = Number(extended[2]);
       const rssKb = Number(extended[3]);
       const cpuMs = parsePosixCpuTime(extended[4]!);
-      const ageSec = Number(extended[5]);
+      const ageSec = parsePosixElapsedSeconds(extended[5]!);
+      if (ageSec == null) continue;
       const entry: ProcEntry = {
         pid,
         ppid,
@@ -245,7 +258,9 @@ export function listProcesses(timeoutMs = 15000): Promise<ProcEntry[] | null> {
       (out) => (out == null ? null : parseWindowsProcList(out)),
     );
   }
-  return runCapture('ps', ['-eo', 'pid=,ppid=,rss=,time=,etimes=,comm=,args='], timeoutMs).then((out) =>
+  // Darwin/BSD ps has `etime` but not GNU ps's numeric `etimes` keyword.
+  const elapsedColumn = process.platform === 'darwin' ? 'etime=' : 'etimes=';
+  return runCapture('ps', ['-eo', `pid=,ppid=,rss=,time=,${elapsedColumn},comm=,args=`], timeoutMs).then((out) =>
     out == null ? null : parsePosixProcList(out),
   );
 }

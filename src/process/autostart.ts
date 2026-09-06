@@ -2,6 +2,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
 import { spawnService, isManaged } from './manager.js';
 import { resolveInjectEnv } from './inject.js';
+import { readServiceRestartCount } from './restart-budget.js';
 
 const logger = createNamedLogger('concordia.observability.autostart');
 
@@ -37,10 +38,19 @@ export async function runAutostart(
       skipped.push(svc.code);
       continue;
     }
+    const restartCount = readServiceRestartCount(svc.code);
+    if (restartCount > svc.max_restart) {
+      logger.warn(
+        { code: svc.code, restartCount, maxRestart: svc.max_restart },
+        'autostart skipped: persistent restart limit reached',
+      );
+      skipped.push(svc.code);
+      continue;
+    }
     try {
       const env = await resolveInjectEnv(svc);
       if (shouldStop?.()) break;
-      await spawnService(svc, { env });
+      await spawnService(svc, { env, initialRestartCount: restartCount });
       started.push(svc.code);
     } catch (err) {
       logger.error({ code: svc.code, err: (err as Error).message }, 'autostart failed');
@@ -51,5 +61,3 @@ export async function runAutostart(
   logger.info({ started, skipped, failed }, 'autostart complete');
   return { started, skipped, failed };
 }
-
-
