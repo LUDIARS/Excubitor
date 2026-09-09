@@ -133,6 +133,12 @@ const ServiceSchema = z.object({
   backend_port: z.number().int().optional(),
   ports: z.array(ManagedPortSchema).optional(),
   frontend_url: z.string().optional(),
+  /** Viewer routing is explicit opt-in because embedded apps share Ex's browser origin. */
+  viewer: z.object({
+    enabled: z.boolean().default(false),
+    loopback_required: z.boolean().default(false),
+    entry_path: z.string().regex(/^\/(?!\/)/).default('/'),
+  }).optional(),
   subdomain: z.string().optional(),
   domain: z.string().optional(),
   /**

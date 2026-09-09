@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Villa — Castra Skill Migration Guide</title>
+  <style>
+    :root {
+      --ink: #17222c;
+      --muted: #607180;
+      --paper: #f4f8fa;
+      --surface: #fff;
+      --line: #d8e3e8;
+      --blue: #176b87;
+      --blue-soft: #dceff5;
+      --green: #176b57;
+      --green-soft: #dcf2ea;
+      --amber: #8c5e00;
+      --amber-soft: #fff0c8;
+      --rose: #993a45;
+      --rose-soft: #fbe3e6;
+      --shadow: 0 12px 36px rgba(29, 55, 70, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8f0f4;
+        --muted: #a6bac4;
+        --paper: #10191f;
+        --surface: #17232b;
+        --line: #304550;
+        --blue: #6ac7e1;
+        --blue-soft: #173b47;
+        --green: #7bd3b5;
+        --green-soft: #173a33;
+        --amber: #efc56c;
+        --amber-soft: #463713;
+        --rose: #f1a0a9;
+        --rose-soft: #47252a;
+        --shadow: 0 12px 36px rgba(0, 0, 0, .24);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+      line-height: 1.6;
+    }
+    a { color: var(--blue); }
+    code { font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+    .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 42px 0 30px; border-bottom: 1px solid var(--line); }
+    .eyebrow { margin: 0 0 8px; color: var(--blue); font-size: .76rem; font-weight: 850; letter-spacing: .15em; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.45rem); line-height: 1.1; letter-spacing: -.05em; }
+    .lede { max-width: 54rem; margin: 14px 0 0; color: var(--muted); }
+    .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .pill { padding: 5px 10px; border-radius: 999px; color: var(--blue); background: var(--blue-soft); font-size: .76rem; font-weight: 800; }
+    nav { display: flex; gap: 10px; flex-wrap: wrap; padding: 18px 0 0; }
+    nav a { color: var(--muted); font-size: .82rem; text-decoration: none; }
+    nav a:hover { color: var(--blue); text-decoration: underline; }
+    main { padding: 30px 0 64px; }
+    section { margin-top: 36px; }
+    h2 { margin: 0 0 12px; font-size: 1.35rem; letter-spacing: -.025em; }
+    h3 { margin: 0; font-size: 1rem; }
+    .notice {
+      padding: 18px 20px;
+      border: 1px solid color-mix(in srgb, var(--rose) 30%, var(--line));
+      border-radius: 16px;
+      background: var(--rose-soft);
+    }
+    .notice h2 { color: var(--rose); }
+    .notice ol { margin-bottom: 0; padding-left: 1.25rem; }
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .step, .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .step-number { display: block; margin-bottom: 8px; color: var(--blue); font-size: .75rem; font-weight: 900; letter-spacing: .12em; }
+    .step p, .card p { margin: 7px 0 0; color: var(--muted); font-size: .88rem; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 18px 0 0; }
+    .stat { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .stat strong { display: block; color: var(--blue); font-size: 1.65rem; line-height: 1; }
+    .stat span { color: var(--muted); font-size: .75rem; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .tag { display: inline-flex; margin-top: 10px; padding: 3px 8px; border-radius: 999px; font-size: .7rem; font-weight: 850; }
+    .tag.active { color: var(--green); background: var(--green-soft); }
+    .tag.genius { color: var(--blue); background: var(--blue-soft); }
+    .tag.replaced { color: var(--rose); background: var(--rose-soft); }
+    .tag.archived { color: var(--amber); background: var(--amber-soft); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); background: color-mix(in srgb, var(--surface) 75%, var(--blue-soft)); font-size: .74rem; letter-spacing: .06em; }
+    td { font-size: .86rem; }
+    tr:last-child td { border-bottom: 0; }
+    .path { padding: 16px 18px; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); background: var(--surface); overflow-wrap: anywhere; }
+    footer { padding: 24px 0 38px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+    @media (max-width: 860px) {
+      .flow, .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 620px) {
+      .flow, .stats, .grid { grid-template-columns: 1fr; }
+      header { padding-top: 30px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">VILLA / OPERATIONS DOCUMENT</p>
+      <h1>Castra Skill Migration Guide</h1>
+      <p class="lede">Castra の共有 skill を、Revisor/Cc の現行 workflow に必要な最小面へ整理した内容を人間向けに説明する資料。active から外した内容は削除せず、Genius への判断移管または隔離として追跡する。</p>
+      <div class="meta">
+        <span class="pill">更新 2026-08-04 JST</span>
+        <span class="pill">active 15</span>
+        <span class="pill">quarantined 52</span>
+        <span class="pill">Claude / Codex synced</span>
+      </div>
+      <nav aria-label="ページ内ナビゲーション">
+        <a href="#workflow">現行 workflow</a>
+        <a href="#active">active</a>
+        <a href="#genius">Genius 移管</a>
+        <a href="#replaced">Revisor 置換</a>
+        <a href="#archive">project 固有隔離</a>
+        <a href="#legacy">旧 flat skill</a>
+        <a href="#storage">保存先</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="notice" aria-labelledby="authority-title">
+      <h2 id="authority-title">Villa は正本ではありません</h2>
+      <p>このページは人間が移行状況を把握するための要約です。active / quarantine の正本は Castra、判断カードの正本は Genius、session workflow と local PR の正本は Cc / Revisor の実装・設定です。差異がある場合はそれぞれの正本を優先します。</p>
+    </section>
+
+    <section class="notice" aria-labelledby="github-title">
+      <h2 id="github-title">GitHub は作業面ではない</h2>
+      <ol>
+        <li>GitHub に PR は出さない。</li>
+        <li>GitHub に feature / task branch を push しない。</li>
+        <li>GitHub は release version 管理と release notes の公開以外に使わない。</li>
+        <li>GitHub push と version 管理は Revisor が行う。</li>
+      </ol>
+    </section>
+
+    <section class="notice" aria-labelledby="villa-docs-title">
+      <h2 id="villa-docs-title">Villa ドキュメントは local main へ直接追加</h2>
+      <p>Villa は各プロジェクトが人間向け資料を置く共有表示面である。各プロジェクトは専用の HTML ファイルと route を使い、Villa のローカル <code>main</code> へ直接 commit してよい。Villa のドキュメント追加では feature branch、worktree、local PR を必須にしない。他プロジェクトのページを上書きせず、Villa を情報の正本にはしない。</p>
+    </section>
+
+    <section class="notice" aria-labelledby="castra-main-title">
+      <h2 id="castra-main-title">Castra も local main へ直接 commit</h2>
+      <p>Castra は feature branch、worktree、Revisor local PR を作らず、Cc に実 checkout の <code>main</code> を登録してローカル <code>main</code> へ直接 commit する。共有 checkout に他セッションの差分がある場合は自分の対象 path だけを stage し、同じファイルで重なった場合は相手の差分を退避・上書きせず停止する。GitHub PR と branch push は行わず、release push と version 管理は Revisor に任せる。</p>
+    </section>
+
+    <section id="workflow" aria-labelledby="workflow-title">
+      <h2 id="workflow-title">Revisor + Cc 現行 workflow</h2>
+      <div class="flow">
+        <article class="step"><span class="step-number">01 / CLAIM</span><h3>project を確定</h3><p>project code と実 branch を確認し、Cc 経由で claim。指定 branch と違えば編集しない。</p></article>
+        <article class="step"><span class="step-number">02 / IMPLEMENT</span><h3>local main から隔離</h3><p>通常 repo はローカル main から task worktree を作り、そこでだけ編集・commit する。Castra と Villa は direct-main 例外。</p></article>
+        <article class="step"><span class="step-number">03 / REVIEW</span><h3>local PR を提出</h3><p>Cc から Revisor へ提出。結果は通知されるため、session は状態をポーリングしない。</p></article>
+        <article class="step"><span class="step-number">04 / CONTINUE</span><h3>通知駆動で完了</h3><p>自動修正可能な失敗は直す。Test OK は Revisor auto-merge、必要時だけ人間判断。Goal &amp; Go は600秒。</p></article>
+      </div>
+      <div class="stats" aria-label="移行統計">
+        <div class="stat"><strong>15</strong><span>active operational skills</span></div>
+        <div class="stat"><strong>7</strong><span>Genius judgment routes</span></div>
+        <div class="stat"><strong>4</strong><span>Revisor/Cc replacements</span></div>
+        <div class="stat"><strong>13</strong><span>project-specific archives</span></div>
+        <div class="stat"><strong>21</strong><span>legacy flat skills</span></div>
+      </div>
+    </section>
+
+    <section id="active" aria-labelledby="active-title">
+      <h2 id="active-title">Active — 決定的な運用だけ</h2>
+      <div class="grid">
+        <article class="card"><h3>revisor-cc-workflow</h3><span class="tag active">ACTIVE</span><p>claim、worktree、local PR、通知、auto-merge、600秒 Goal &amp; Go と Castra/Villa 例外の正本。</p></article>
+        <article class="card"><h3>genius-judgment</h3><span class="tag active">ACTIVE</span><p>状況依存の判断を Genius の impl-design / review / ops-lifecycle へ振り分ける。</p></article>
+        <article class="card"><h3>lictor-task-protocol</h3><span class="tag active">ACTIVE</span><p>project code、実 branch、task description を Cc/Lictor に claim する。</p></article>
+        <article class="card"><h3>worktree-hygiene</h3><span class="tag active">ACTIVE</span><p>通常 repo の task worktree と、Castra/Villa の direct-main 例外を定義する。</p></article>
+        <article class="card"><h3>concordia</h3><span class="tag active">ACTIVE</span><p>Lictor sidecar、Cc 通知、Revisor local PR 提出境界を定義する。</p></article>
+        <article class="card"><h3>cc-test</h3><span class="tag active">ACTIVE</span><p>Excubitor、本体 folder、testing claim/release に起動テストを限定する。</p></article>
+        <article class="card"><h3>port-source-rule</h3><span class="tag active">ACTIVE</span><p>service endpoint の正本を Excubitor catalog / ProcessMap に限定する。</p></article>
+        <article class="card"><h3>coding-conventions</h3><span class="tag active">ACTIVE</span><p>SRP、依存方向、resource lifetime、fail-fast など実装の固定規約。</p></article>
+        <article class="card"><h3>project-codes</h3><span class="tag active">ACTIVE</span><p>project claim に使う code を LUDIARS/PROJECT-CODES.md から解決する。</p></article>
+        <article class="card"><h3>lictor-ask-marker</h3><span class="tag active">ACTIVE</span><p>人間判断が必要な時の質問経路を固定する。</p></article>
+        <article class="card"><h3>kana-decode</h3><span class="tag active">ACTIVE</span><p>かな打ちで IME-OFF のまま送られた入力を検出し、JIS配列から解読する。</p></article>
+        <article class="card"><h3>memory-recall</h3><span class="tag active">ACTIVE</span><p>隔離済みの旧 memory を必要な topic だけ検索し、現行ソースで検証する。</p></article>
+        <article class="card"><h3>powershell-utf8</h3><span class="tag active">ACTIVE</span><p>Windows PowerShell の入出力・ファイル・native command 境界を UTF-8 に固定する。</p></article>
+        <article class="card"><h3>record-problem-log</h3><span class="tag active">ACTIVE</span><p>regression / incident の症状、証拠、原因、修正条件を project 内へ事実記録する。</p></article>
+        <article class="card"><h3>web-reflect-without-restart</h3><span class="tag active">ACTIVE</span><p>直接配信・build・process restart の境界を判定し、不要な再起動を避ける。</p></article>
+      </div>
+    </section>
+
+    <section id="genius" aria-labelledby="genius-title">
+      <h2 id="genius-title">Genius へ移管した判断系</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>旧 skill</th><th>移管先</th><th>扱い</th></tr></thead>
+        <tbody>
+          <tr><td><code>decision-grade-research</code></td><td>impl-design / review</td><td>調査結果から採否を決める判断カードへ統合。</td></tr>
+          <tr><td><code>decision-metrics</code></td><td>impl-design</td><td>固定4軸ではなく、現在の判断カードと制約を照合。</td></tr>
+          <tr><td><code>full-set-implementation</code></td><td>impl-design</td><td>実装粒度と分割方針を状況依存判断として取得。</td></tr>
+          <tr><td><code>prototyping-flow</code></td><td>impl-design</td><td>プロトタイプ段階と完成範囲の選択を判断カード化。</td></tr>
+          <tr><td><code>three-out-rule</code></td><td>impl-design</td><td>方式転換の閾値を固定回数ではなく履歴・症状から判断。</td></tr>
+          <tr><td><code>verbose-logging-bootstrap</code></td><td>ops-lifecycle</td><td>観測強度と撤去時期を運用判断へ統合。</td></tr>
+          <tr><td><code>cernere-hub-review</code></td><td>review</td><td>複数観点レビューを Genius と Revisor の review plan へ寄せる。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="replaced" aria-labelledby="replaced-title">
+      <h2 id="replaced-title">Revisor/Cc に置換した旧 workflow</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>旧 skill</th><th>問題</th><th>現在の正本</th></tr></thead>
+        <tbody>
+          <tr><td><code>merge-clean-pr</code></td><td>GitHub CI polling、GitHub merge、main pull を session が実行。</td><td>Revisor local PR、通知、auto-merge。</td></tr>
+          <tr><td><code>codex-delegate</code></td><td>旧 delegation、独自 reviewer、GitHub PR 完了処理を内包。</td><td>Cc spawn session + Revisor review plan。</td></tr>
+          <tr><td><code>ludiars-review</code></td><td>session 独自の横断レビューと GitHub PR 提案。</td><td>Revisor test forum / review pipeline。</td></tr>
+          <tr><td><code>error-watch</code></td><td>session が長時間ポーリングして通知を複製。</td><td>Cc/Revisor のイベント通知。PR 状態はポーリングしない。</td></tr>
+          <tr><td><code>concordia-impl-delegation</code></td><td>旧 delegation template と独自監視をsessionが実行。</td><td>Cc spawn session + Revisor workflow。</td></tr>
+          <tr><td><code>concordia-worktree-branching</code></td><td>feature branch push と本体branch切替を含む。</td><td>local main起点worktree + Revisor local PR。</td></tr>
+          <tr><td><code>ludiars-github-commands</code></td><td>sessionによるGitHub PR・merge・workflow操作。</td><td>release pushとversion管理はRevisor。</td></tr>
+          <tr><td><code>preserve-rewritten-git-history</code></td><td>GitHub repository置換とhistory rewrite。</td><td>通常sessionの作業面から隔離。</td></tr>
+          <tr><td><code>session-end</code></td><td>旧GitHub完了処理・Claude専用memory・Memoria handoffを複合。</td><td>Revisor終局通知 + provider-neutral memory recall。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="archive" aria-labelledby="archive-title">
+      <h2 id="archive-title">Project / task 固有として隔離</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>skill</th><th>元の用途</th><th>復帰条件</th></tr></thead>
+        <tbody>
+          <tr><td><code>ai-note-writing</code></td><td>AIノート執筆</td><td>所有 project へ移して明示利用。</td></tr>
+          <tr><td><code>anatomia-analyze</code></td><td>Anatomia CLI 手順</td><td>Revisor/Anatomia の現 API と再同期。</td></tr>
+          <tr><td><code>figmentum-evolve</code></td><td>Figmentum 対話的進化</td><td>Figmentum project 所有にする。</td></tr>
+          <tr><td><code>llm-crawler-safe-verify</code></td><td>Tirocinium DB 隔離検証</td><td>Tirocinium 側のテスト規約へ移す。</td></tr>
+          <tr><td><code>ludiars-status</code></td><td>全repo進捗スナップショット</td><td>専用 service / scheduled job として所有。</td></tr>
+          <tr><td><code>memoria-foundation-ui</code></td><td>Memoria UI 規約</td><td>Memoria repo の規約へ移す。</td></tr>
+          <tr><td><code>memoria-task</code></td><td>Memoria task/note API</td><td>Memoria connector として再公開。</td></tr>
+          <tr><td><code>mmtask</code></td><td>Memoria task 検索</td><td>Memoria connector として再公開。</td></tr>
+          <tr><td><code>okf-spec</code></td><td>OKF spec 変換</td><td>AIFormat/Praeforma 所有を確定。</td></tr>
+          <tr><td><code>omnipotens</code></td><td>ゲーム総合分析 pipeline</td><td>Omnipotens project skill として配布。</td></tr>
+          <tr><td><code>ludus-data-governance</code></td><td>Ludus公開可否と固有データ分離</td><td>Ludus project / Genius judgment として所有。</td></tr>
+          <tr><td><code>pc-load-survey</code></td><td>Windows負荷調査とMemoria記録</td><td>運用serviceまたは明示利用のproject skillへ移す。</td></tr>
+          <tr><td><code>review-report-html</code></td><td>Anatomia/Memoria形式のHTML report生成</td><td>report生成projectのtoolとして所有。</td></tr>
+          <tr><td><code>window-title-ja</code></td><td>terminal title 更新</td><td>Lictor UI 機能へ統合。</td></tr>
+          <tr><td><code>youtube-comments</code></td><td>YouTube コメント収集</td><td>データ収集 project 所有へ移す。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="legacy" aria-labelledby="legacy-title">
+      <h2 id="legacy-title">旧 flat skill 21件</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>旧ファイル</th><th>分類</th><th>隔離理由</th></tr></thead>
+        <tbody>
+          <tr><td><code>commit.md</code></td><td>Git</td><td>feature branch push を含む旧完了手順。</td></tr>
+          <tr><td><code>create-branch.md</code></td><td>Git</td><td>共有 checkout の branch 作成を許す旧手順。</td></tr>
+          <tr><td><code>detect-revert.md</code></td><td>Git</td><td>GitHub branch push を含む復元手順。</td></tr>
+          <tr><td><code>hotfix-strategy.md</code></td><td>Git</td><td>現行 local PR を経由しない旧 hotfix 判断。</td></tr>
+          <tr><td><code>ludiars-pr-check.md</code></td><td>GitHub</td><td>GitHub PR を前提にした確認手順。</td></tr>
+          <tr><td><code>review-handling.md</code></td><td>GitHub</td><td>旧 review comment 対応。Revisor 通知へ置換。</td></tr>
+          <tr><td><code>integration-test.md</code></td><td>Test</td><td>session 手動 test。Revisor plan / 明示指示へ限定。</td></tr>
+          <tr><td><code>service-restart.md</code></td><td>Operations</td><td>cc-test + Excubitor の active 手順へ統合。</td></tr>
+          <tr><td><code>env-up.md</code></td><td>Operations</td><td>旧環境起動。Excubitor lifecycle と競合。</td></tr>
+          <tr><td><code>bash-convention.md</code></td><td>Code</td><td>旧 flat format。必要規約は project / AIFormat 側で所有。</td></tr>
+          <tr><td><code>code-review.md</code></td><td>Review</td><td>session 独自 review。Revisor review plan へ置換。</td></tr>
+          <tr><td><code>command-script.md</code></td><td>Code</td><td>旧 command 実装規約。global active から分離。</td></tr>
+          <tr><td><code>db-migration.md</code></td><td>Data</td><td>project schema / AIFormat 規約へ所有を移す。</td></tr>
+          <tr><td><code>drizzle-orm.md</code></td><td>Data</td><td>特定 ORM の project 固有ノウハウ。</td></tr>
+          <tr><td><code>npm-scripts-crossplatform.md</code></td><td>Code</td><td>Node project 固有の実装ノウハウ。</td></tr>
+          <tr><td><code>spa-architecture.md</code></td><td>Design</td><td>状況依存設計。Genius / project spec で判断。</td></tr>
+          <tr><td><code>spec-first-investigation.md</code></td><td>Design</td><td>状況依存の調査手順。Genius impl-design へ統合。</td></tr>
+          <tr><td><code>diglog.md</code></td><td>Tool</td><td>単発ログ調査 command の詳細。</td></tr>
+          <tr><td><code>google-drive-access.md</code></td><td>Tool</td><td>外部サービス固有のアクセス手順。</td></tr>
+          <tr><td><code>rancher-desktop-moby.md</code></td><td>Tool</td><td>特定ローカル環境の復旧手順。</td></tr>
+          <tr><td><code>save-session-log.md</code></td><td>Session</td><td>旧 session-end / memory 更新。Cc/Revisor workflow と重複。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="storage" aria-labelledby="storage-title">
+      <h2 id="storage-title">保存先と正本</h2>
+      <p class="path"><strong>Active source:</strong> <code>Castra/.claude/skills/</code><br><strong>Codex discovery mirror:</strong> <code>Castra/.agents/skills/</code><br><strong>Archived skills:</strong> <code>Castra/Archived/skills/</code><br><strong>Historical memory archive:</strong> <code>Castra/Archived/memory/</code><br><strong>Human-readable documentation (non-authoritative):</strong> <code>Villa/skill-migrations.html</code> (<code>/skills</code>)</p>
+      <p><code>.claude/skills</code> を正本として同期scriptが <code>.agents/skills</code> を生成し、Claude/Codexのactive内容を一致させる。非active skillと旧memoryは <code>.claude</code> の外にある <code>Archived/</code> でgit追跡し、通常sessionへ自動注入しない。旧memoryは<code>memory-recall</code>で必要なtopicだけ検索する。隔離物の復帰はproject所有、現行Revisor/Cc workflowとの整合、必要なreview経路を満たして行う。</p>
+    </section>
+  </main>
+
+  <footer><div class="shell">Villa / Castra skill migration guide — human-readable, non-authoritative, external dependencies: none.</div></footer>
+</body>
+</html>

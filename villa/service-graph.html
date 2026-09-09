@@ -1,0 +1,1179 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>LUDIARS サービス相関図</title>
+  <style>
+    :root {
+      --ink: #19232d;
+      --muted: #617181;
+      --paper: #f5f8fa;
+      --surface: #ffffff;
+      --line: #d9e4e8;
+      --accent: #176b87;
+      --accent-soft: #d9f0f6;
+      --shadow: 0 14px 36px rgba(31, 56, 72, .09);
+      --edge: #9fb2bd;
+      --edge-strong: #176b87;
+      --c-core: #176b87;
+      --c-quality: #7a4fa3;
+      --c-platform: #1f7a5a;
+      --c-product: #b06a14;
+      --c-lib: #4a6b80;
+      --c-ext: #b23a48;
+      --c-infra: #6b7280;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8f0f4;
+        --muted: #a7bbc5;
+        --paper: #10191f;
+        --surface: #17232b;
+        --line: #30454f;
+        --accent: #62c6e4;
+        --accent-soft: #143e4b;
+        --shadow: 0 14px 36px rgba(0, 0, 0, .25);
+        --edge: #4a616e;
+        --edge-strong: #62c6e4;
+        --c-core: #62c6e4;
+        --c-quality: #c096e8;
+        --c-platform: #5ed6a8;
+        --c-product: #f0b25c;
+        --c-lib: #93b3c6;
+        --c-ext: #f2848f;
+        --c-infra: #98a5b3;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+      line-height: 1.6;
+    }
+    .shell { width: min(1400px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 48px 0 20px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: .78rem; font-weight: 800; letter-spacing: .14em; }
+    h1 { margin: 0; font-size: clamp(1.8rem, 5vw, 3rem); line-height: 1.15; letter-spacing: -.04em; }
+    .lede { max-width: 56rem; margin: 14px 0 0; color: var(--muted); }
+    .lede code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .88em; }
+
+    .tabs { display: flex; gap: 8px; margin: 26px 0 14px; flex-wrap: wrap; }
+    .tab {
+      padding: 8px 18px; border: 1px solid var(--line); border-radius: 999px;
+      background: var(--surface); color: var(--muted); font: inherit; font-weight: 700;
+      font-size: .9rem; cursor: pointer; transition: .14s ease;
+    }
+    .tab:hover { border-color: var(--accent); color: var(--ink); }
+    .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .panel[hidden] { display: none; }
+
+    /* ---- controls ---- */
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+      padding: 14px 18px; margin-bottom: 12px;
+      border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+    }
+    .controls fieldset { display: contents; border: 0; margin: 0; padding: 0; }
+    .chk { display: inline-flex; align-items: center; gap: 6px; font-size: .86rem; cursor: pointer; user-select: none; }
+    .chk input { accent-color: var(--accent); }
+    .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+    .ctl-sep { width: 1px; align-self: stretch; background: var(--line); }
+    .search {
+      flex: 1 1 190px; min-width: 150px; padding: 7px 12px;
+      border: 1px solid var(--line); border-radius: 9px;
+      background: var(--paper); color: inherit; font: inherit; font-size: .88rem;
+    }
+    .search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .btn {
+      padding: 7px 14px; border: 1px solid var(--line); border-radius: 9px;
+      background: var(--paper); color: inherit; font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ---- graph ---- */
+    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+    @media (max-width: 900px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+
+    .canvas-wrap {
+      position: relative; border: 1px solid var(--line); border-radius: 16px;
+      background: var(--surface); box-shadow: var(--shadow); overflow: hidden;
+    }
+    svg#graph { display: block; width: 100%; height: 74vh; min-height: 300px; touch-action: none; cursor: grab; }
+    svg#graph.dragging { cursor: grabbing; }
+    .hint {
+      position: absolute; left: 12px; bottom: 10px; color: var(--muted);
+      font-size: .74rem; pointer-events: none; background: color-mix(in srgb, var(--surface) 82%, transparent);
+      padding: 2px 8px; border-radius: 6px;
+    }
+
+    .group rect {
+      fill: currentColor; fill-opacity: .07;
+      stroke: currentColor; stroke-opacity: .45; stroke-width: 1.4; stroke-dasharray: 7 5;
+    }
+    .group text {
+      fill: currentColor; font-size: 13px; font-weight: 800; letter-spacing: .02em;
+      paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round;
+    }
+    .group.dim { opacity: .25; }
+
+    /* 狭い画面ではヒントを図に重ねず下に置く */
+    @media (max-width: 900px) {
+      .hint { position: static; margin: 0; padding: 8px 14px 12px; background: none; }
+    }
+
+    .edge { stroke: var(--edge); stroke-width: 1.2; fill: none; opacity: .55; }
+    .edge.k-lib { stroke-dasharray: 5 4; }
+    .edge.k-ops { stroke-dasharray: 2 4; }
+    .edge.k-infra { stroke-dasharray: 1 4; }
+    .edge.hl { stroke: var(--edge-strong); stroke-width: 2.2; opacity: 1; }
+    .edge.dim { opacity: .07; }
+
+    .node { cursor: pointer; }
+    .node circle { stroke: var(--surface); stroke-width: 2; transition: r .12s ease; }
+    .node text {
+      font-size: 11px; font-weight: 700; fill: var(--ink);
+      paint-order: stroke; stroke: var(--surface); stroke-width: 3.5px; stroke-linejoin: round;
+      pointer-events: none;
+    }
+    .node.dim { opacity: .13; }
+    .node.hl circle { stroke: var(--edge-strong); stroke-width: 3; }
+    .node.match circle { stroke: var(--accent); stroke-width: 3.5; }
+    .edge-label {
+      font-size: 9.5px; fill: var(--muted); pointer-events: none;
+      paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
+    }
+    .edge-label.dim { opacity: 0; }
+
+    /* ---- side ---- */
+    .side {
+      border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+      box-shadow: var(--shadow); padding: 18px; max-height: 74vh; overflow: auto;
+    }
+    .side h2 { margin: 0 0 2px; font-size: 1.2rem; }
+    .side .role { margin: 0 0 12px; color: var(--muted); font-size: .88rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .pill {
+      padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line);
+      font-size: .74rem; font-weight: 700; color: var(--muted);
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    .side h3 { margin: 16px 0 6px; font-size: .78rem; letter-spacing: .1em; color: var(--accent); }
+    .rel { list-style: none; margin: 0; padding: 0; }
+    .rel li { padding: 5px 0; border-bottom: 1px dashed var(--line); font-size: .84rem; }
+    .rel li:last-child { border-bottom: 0; }
+    .rel b { font-weight: 800; }
+    .rel span { color: var(--muted); }
+    .side a { color: var(--accent); font-size: .84rem; }
+    .empty { color: var(--muted); font-size: .86rem; }
+
+    /* ---- mermaid / table ---- */
+    pre.code {
+      margin: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px;
+      background: var(--surface); box-shadow: var(--shadow);
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: .8rem; line-height: 1.55; overflow-x: auto; white-space: pre;
+    }
+    .code-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+    .code-head p { margin: 0; color: var(--muted); font-size: .84rem; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+    table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+    th, td { padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { position: sticky; top: 0; background: var(--surface); font-size: .76rem; letter-spacing: .06em; color: var(--accent); }
+    td.wrap { white-space: normal; min-width: 18rem; }
+    tr:last-child td { border-bottom: 0; }
+
+    footer { padding: 26px 0 64px; color: var(--muted); font-size: .8rem; }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">VILLA · SERVICE GRAPH</p>
+    <h1>LUDIARS サービス相関図</h1>
+    <p class="lede">
+      LUDIARS の公開サービス同士の依存と、Discord / Slack / AWS / Gmail などの外部サービス連携を 1 枚で見るページです。
+      辺は各リポの実コード (<code>@ludiars/*</code> 依存・ローカルポート参照・CLI 呼び出し・外部 SDK / API) から抽出し、
+      <code>LUDIARS/ServiceMap.md</code> の役割定義と突き合わせています。
+    </p>
+  </header>
+
+  <main class="shell">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-graph" aria-controls="panel-graph" aria-selected="true">グラフビュー</button>
+      <button class="tab" role="tab" id="tab-mermaid" aria-controls="panel-mermaid" aria-selected="false">Mermaid</button>
+      <button class="tab" role="tab" id="tab-table" aria-controls="panel-table" aria-selected="false">関係一覧</button>
+    </div>
+
+    <section class="panel" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph">
+      <div class="controls" id="controls">
+        <fieldset id="cat-filters"></fieldset>
+        <div class="ctl-sep"></div>
+        <input class="search" id="search" type="search" placeholder="サービス名で絞り込み (例: Concordia)" autocomplete="off">
+        <button class="btn" id="reset">表示をリセット</button>
+      </div>
+
+      <div class="stage">
+        <div class="canvas-wrap">
+          <svg id="graph" role="img" aria-label="LUDIARS サービス相関グラフ"></svg>
+          <p class="hint">ドラッグで移動 / ホイール・ピンチで拡大縮小 / ノードをタップで関係を絞り込み</p>
+        </div>
+        <aside class="side" id="side"></aside>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-mermaid" role="tabpanel" aria-labelledby="tab-mermaid" hidden>
+      <div class="code-head">
+        <button class="btn" id="copy-mermaid">Mermaid ソースをコピー</button>
+        <p>グラフビューのフィルタ状態がそのまま反映されます。Notion / GitHub / VS Code などに貼って使えます。</p>
+      </div>
+      <pre class="code" id="mermaid-src"></pre>
+    </section>
+
+    <section class="panel" id="panel-table" role="tabpanel" aria-labelledby="tab-table" hidden>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>From</th><th>To</th><th>関係</th><th>種別</th></tr></thead>
+          <tbody id="edge-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>
+      根拠: 各リポの <code>package.json</code> の <code>@ludiars/*</code> 依存、ソース内の <code>127.0.0.1:&lt;port&gt;</code> 参照、
+      Anatomia CLI 呼び出し、外部 SDK / API の import。ポートの正本は Excubitor catalog。
+      役割の記述は <code>LUDIARS/ServiceMap.md</code> と各リポ README に基づきます。
+    </footer>
+  </main>
+
+  <script>
+  "use strict";
+
+  /* =====================================================================
+   * データ — ノード
+   * cat: core / quality / platform / product / lib / ext / infra
+   * =================================================================== */
+  const CATEGORIES = [
+    { id: "core",     label: "AI 協調・開発基盤", color: "var(--c-core)" },
+    { id: "quality",  label: "仕様・解析・品質",   color: "var(--c-quality)" },
+    { id: "platform", label: "認証 / 通知 / hub",  color: "var(--c-platform)" },
+    { id: "product",  label: "業務・個人サービス", color: "var(--c-product)" },
+    { id: "lib",      label: "共有ライブラリ",     color: "var(--c-lib)" },
+    { id: "ext",      label: "外部サービス",       color: "var(--c-ext)" },
+    { id: "infra",    label: "インフラ",           color: "var(--c-infra)" }
+  ];
+
+  const NODES = [
+    // ---- core ----
+    { id: "Concordia",   code: "Cc", cat: "core", port: 11111, role: "マルチ AI エージェントのセッション協調 hub。委託・通知・観測ダッシュボード。" },
+    { id: "Lictor",      code: "Li", cat: "core", port: 17330, role: "per-session サイドカー。CLI セッションを包んで Concordia へ中継し、タイトル / 許可 UI を出す。" },
+    { id: "Revisor",     code: "Rv", cat: "core", port: 4240,  role: "ローカル PR 審査サービス。bounded worker で審査し autofix / merge まで回す。" },
+    { id: "Excubitor",   code: "Ex", cat: "core", port: 17332, role: "サービス死活監視・ログ集約・起動制御。ポートと catalog の正本。" },
+    { id: "Satelles",    code: "Sa", cat: "core", port: null,  role: "headless Codex エージェントランナー (JSON-RPC 直結、PTY 無し)。" },
+    { id: "Histrio",     code: "Hi", cat: "core", port: 4260,  role: "ペルソナ + 会話エンジン。Concordia から発話判定・描画を切り出した独立サービス。" },
+    { id: "Villa",       code: "—",  cat: "core", port: 17610, role: "確認用 Web ページ配信面 (このページ)。Castra / Cc / Revisor の情報を読みやすく表示する。" },
+
+    // ---- quality ----
+    { id: "Anatomia",    code: "An", cat: "quality", port: 4200, role: "建築規約オラクル。コード解析 DAG + ドメイン / ルールで supply→verify を回す。" },
+    { id: "Augur",       code: "Ag", cat: "quality", port: 4210, role: "目的駆動のテスト計画オラクル。契約プログラミングで委託成果を受け入れ判定する。" },
+    { id: "Thaleia",     code: "Th", cat: "quality", port: null, role: "企画↔実装トレーサビリティ。Praeforma (仕様) と Anatomia (解析) を突合する。" },
+    { id: "Praeforma",   code: "Pf", cat: "quality", port: 8889, role: "仕様書 ↔ 実装連携。構造化 spec + アセット束縛をプロジェクト単位で持つ。" },
+    { id: "Foedus",      code: "Fd", cat: "quality", port: 8787, role: "Cernere ↔ Hub 連結契約の横断静的チェッカー。dev server を起動せず解析のみ。" },
+    { id: "Conciliator", code: "Cn", cat: "quality", port: 17340, role: "バイナリ / 非マージファイルの作業衝突を事前検知する。lock せず通知とマージ支援。" },
+    { id: "Custos",      code: "Cs", cat: "quality", port: 7676, role: "遠隔テストランナー。build / run / kill と WebRTC 画面ストリーミング。" },
+    { id: "Discutere",   code: "Di", cat: "quality", port: 3110, role: "Chat-to-Task 自動化と多モデル議論 (dialectic)。Discord / Slack が入口。" },
+    { id: "Curia",       code: "Cy", cat: "quality", port: null, role: "Voluptas + Discutere 統合デスクトップスイート (Electron 起動メニュー)。" },
+    { id: "AIFormat",    code: "Af", cat: "quality", port: null, role: "レビュー / 設計フォーマットの標準と harness ゲート。全リポの構造チェック床。" },
+
+    // ---- platform ----
+    { id: "Cernere",   code: "Cr", cat: "platform", port: 8080, role: "認証基盤。JWT / PASETO / WS セッション / OIDC IdP。全サービスの認証正本。" },
+    { id: "Corpus",    code: "Co", cat: "platform", port: 5185, role: "汎用 hub フレームワーク。各サービスを 1 画面に集約する (第一号は VantanHub)。" },
+    { id: "Nuntius",   code: "Nt", cat: "platform", port: 3100, role: "統合通知・メッセージング基盤。Web / Slack / Discord / LINE / Email / SMS へ配信。" },
+    { id: "Ostiarius", code: "Os", cat: "platform", port: 17590, role: "会場 LAN のチェックインゲートウェイ (Wi-Fi 内出席 + 顔照合サイドカー)。" },
+    { id: "Legatus",   code: "Lg", cat: "platform", port: null, role: "個人 PC 常駐のサービス代理人。外部デバイスの信号を各サービスへ代理実行する。" },
+    { id: "Synergos",  code: "Sy", cat: "platform", port: 4250, role: "P2P リアルタイムコラボ基盤 (Rust / QUIC)。非同期配送 Exchange も持つ。" },
+
+    // ---- product ----
+    { id: "Memoria",      code: "Mm", cat: "product", port: 5180, role: "個人ログ基盤。ブックマーク / 日記 / タスク / レビュー閲覧。Cc のタスク正本。" },
+    { id: "Quaestor",     code: "Qs", cat: "product", port: 17400, role: "個人会計データ基盤。レシート AR スキャン / クレカ・銀行突合 / 請求書。" },
+    { id: "Actio",        code: "At", cat: "product", port: null, role: "タスク管理基盤 (SaaS 系)。Schedula モジュール群を取り込む。" },
+    { id: "Schedula",     code: "Sc", cat: "product", port: null, role: "予定 / カレンダー基盤。モジュール SDK で Actio 等に機能を提供する。" },
+    { id: "Aedilis",      code: "Ae", cat: "product", port: 17502, role: "施設予約 + 出席チェックイン。" },
+    { id: "Bibliotheca",  code: "Bb", cat: "product", port: 17501, role: "本 / 機材の貸出台帳。" },
+    { id: "Peregrinatio", code: "Pe", cat: "product", port: 8090, role: "旅のしおり PWA。荷物 / 季節 / 交通プランを個人旅行データから組む。" },
+    { id: "Tirocinium",   code: "Tr", cat: "product", port: 8084, role: "面接練習 AI (多モデル合議面接官)。企業 / 求人データを取り込む。" },
+    { id: "Calliope",     code: "—",  cat: "product", port: 8891, role: "PM 秘書オーケストレータ。Actio / Schedula / Memoria を統括する。" },
+    { id: "Susurrus",     code: "Su", cat: "product", port: 17370, role: "ローカル先行チャット。active は WebRTC、休眠時は Synergos の P2P async 配送。" },
+    { id: "Signum",       code: "Si", cat: "product", port: 8083, role: "画像アウトライン → SVG 生成。" },
+    { id: "Volputas",     code: "Vo", cat: "product", port: 8892, role: "感情 / 対話系サービス (sentiment-core 利用)。Curia に同梱される。" },
+    { id: "Manus",        code: "Mn", cat: "product", port: 5390, role: "手作業支援サービス。" },
+
+    // ---- lib ----
+    { id: "Lapilli",    code: "Lp", cat: "lib", port: null, role: "共有パッケージ群 — llm-gateway / encrypted-config / blackbox / log-weaver / mail-inbox / mail-watch / memory / sentiment-core / aop-metrics。" },
+    { id: "Vestigium",  code: "Vg", cat: "lib", port: null, role: "サービス横断ログ収集ライブラリ。JSONL を吐き Concordia が file-tail で拾う。" },
+    { id: "Canalis",    code: "Ci", cat: "lib", port: null, role: "共有データ取込パイプライン (crawl → clean → save)。Notion 等の adapter を持つ。" },
+    { id: "Lector",     code: "Lc", cat: "lib", port: null, role: "文書読み取りライブラリ。" },
+    { id: "Famulus",    code: "Fa", cat: "lib", port: null, role: "ローカル LLM spawner + モデル switcher。" },
+    { id: "Fundamentum",code: "Fm", cat: "lib", port: 4220, role: "共通基盤ライブラリ。" },
+    { id: "Ergo",       code: "Eg", cat: "lib", port: 5170, role: "C++ モジュラーフレームワーク。" },
+    { id: "Pictor",     code: "Pc", cat: "lib", port: null, role: "Data-Driven Rendering Pipeline (C++20 / Vulkan)。" },
+
+    // ---- ext ----
+    { id: "Discord",     cat: "ext", role: "Bot / Webhook。チャット、通知、委託指示、議論チャンネルの主入口。" },
+    { id: "Slack",       cat: "ext", role: "Bot / Webhook。通知と Chat-to-Task の第 2 入口。" },
+    { id: "GitHub",      cat: "ext", role: "PR / push / Issue / Dependabot。公開リリース管理の正本。" },
+    { id: "Gmail",       cat: "ext", role: "メール受信監視 (請求書・CI 失敗・Dependabot alert の取り込み)。" },
+    { id: "Google Cloud Pub/Sub", cat: "ext", role: "Gmail のリアルタイム push 通知を受ける経路 (@ludiars/mail-watch)。" },
+    { id: "AWS",         cat: "ext", role: "SES / SESv2 (メール送信)、SNS、S3、RDS Data API、SSM。" },
+    { id: "Cloudflare",  cat: "ext", role: "Tunnel による公開、Access による認証バイパス、Workers。" },
+    { id: "Notion",      cat: "ext", role: "ドキュメント取り込み元 / 記事出力先。" },
+    { id: "Anthropic",   cat: "ext", role: "Claude。API キーを持たず claude CLI (claude -p) 経由で呼ぶ。" },
+    { id: "OpenAI",      cat: "ext", role: "GPT / embedding。多モデル合議・分類で使う。" },
+    { id: "Ollama",      cat: "ext", role: "ローカル LLM ランタイム (:11434)。埋め込みと軽量推論。" },
+    { id: "Infisical",   cat: "ext", role: "シークレット / リモート設定の配布 (Excubitor 経由)。" },
+    { id: "Docker",      cat: "ext", role: "Engine API 直叩きでコンテナ制御 (Excubitor)。" },
+
+    // ---- infra ----
+    { id: "PostgreSQL", cat: "infra", role: "共有 PostgreSQL 17。サービスごとに DB 分離。" },
+    { id: "Redis",      cat: "infra", role: "Redis 7。セッション / キュー。" },
+    { id: "MQTT",       cat: "infra", role: "Mosquitto。デバイス信号 (OwnTracks 等) の受け口。" }
+  ];
+
+  /* =====================================================================
+   * データ — 辺
+   * kind: call (HTTP/API) / lib (パッケージ依存) / auth (認証) /
+   *       notify (通知) / ops (監視・制御) / ext (外部連携) / infra
+   * =================================================================== */
+  const EDGES = [
+    // ---- AI 協調のコア環 ----
+    ["Lictor", "Concordia", "セッション中継・許可 UI", "call"],
+    ["Concordia", "Lictor", "タイトル / 質問注入", "call"],
+    ["Concordia", "Revisor", "local PR 提出・審査依頼", "call"],
+    ["Revisor", "Concordia", "審査結果・自動修正の通知", "call"],
+    ["Concordia", "Anatomia", "supply→verify (実装前後のゲート)", "call"],
+    ["Revisor", "Anatomia", "差分のドメイン / 構造ゲート", "call"],
+    ["Concordia", "Memoria", "タスク / ノートの読み書き", "call"],
+    ["Concordia", "Excubitor", "サービス起動・再起動の要求", "ops"],
+    ["Excubitor", "Concordia", "障害通知・自動修正の依頼", "ops"],
+    ["Concordia", "Histrio", "persona / 発話判定・描画", "call"],
+    ["Concordia", "Villa", "確認ページの表示面", "call"],
+    ["Satelles", "Concordia", "Codex ランナーとしてセッション報告", "call"],
+    ["Concordia", "Conciliator", "ファイル衝突の突合", "call"],
+
+    // ---- 品質・仕様 ----
+    ["Augur", "Anatomia", "テスト計画のためのコード解析", "call"],
+    ["Augur", "Revisor", "契約テスト結果の受け渡し", "call"],
+    ["Thaleia", "Anatomia", "実装側の構造を取得", "call"],
+    ["Thaleia", "Praeforma", "仕様側の正本を取得", "call"],
+    ["Thaleia", "Discutere", "施策の多モデル議論", "call"],
+    ["Praeforma", "Anatomia", "spec ↔ 実装の突合", "call"],
+    ["Curia", "Anatomia", "解析ビューを同梱", "call"],
+    ["Curia", "Praeforma", "仕様ビューを同梱", "call"],
+    ["Curia", "Discutere", "議論画面を同梱", "call"],
+    ["Curia", "Volputas", "統合デスクトップスイートとして同梱", "call"],
+    ["Foedus", "Cernere", "registry 契約を静的突合", "call"],
+    ["Foedus", "Corpus", "hub 連結設定を静的突合", "call"],
+    ["Foedus", "Conciliator", "衝突検知結果を参照", "call"],
+    ["Discutere", "Anatomia", "議論素材としてコード構造を参照", "call"],
+    ["Discutere", "Lictor", "セッション状態を参照", "call"],
+    ["Discutere", "Histrio", "議論ペーパーの persona / 描画", "call"],
+    ["AIFormat", "Anatomia", "harness ゲートの規約を供給", "call"],
+
+    // ---- 監視・運用 (Excubitor) ----
+    ["Excubitor", "Cernere", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Memoria", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Quaestor", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Peregrinatio", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Tirocinium", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Villa", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Revisor", "監視 / 起動制御", "ops"],
+    ["Excubitor", "Discutere", "監視 / 起動制御", "ops"],
+
+    // ---- 認証 (Cernere) ----
+    ["Actio", "Cernere", "認証", "auth"],
+    ["Schedula", "Cernere", "認証", "auth"],
+    ["Memoria", "Cernere", "認証", "auth"],
+    ["Aedilis", "Cernere", "認証", "auth"],
+    ["Bibliotheca", "Cernere", "認証", "auth"],
+    ["Ostiarius", "Cernere", "認証", "auth"],
+    ["Nuntius", "Cernere", "認証", "auth"],
+    ["Signum", "Cernere", "認証", "auth"],
+    ["Synergos", "Cernere", "認証", "auth"],
+    ["Custos", "Cernere", "認証", "auth"],
+    ["Susurrus", "Cernere", "認証 (個人データ非保管)", "auth"],
+    ["Praeforma", "Cernere", "認証", "auth"],
+    ["Discutere", "Cernere", "認証", "auth"],
+    ["Corpus", "Cernere", "認証", "auth"],
+    ["Legatus", "Cernere", "ユーザセッションを保持して代理実行", "auth"],
+    ["Ergo", "Cernere", "認証", "auth"],
+    ["Volputas", "Cernere", "認証", "auth"],
+
+    // ---- hub 集約 ----
+    ["Corpus", "Aedilis", "hub 集約", "call"],
+    ["Corpus", "Bibliotheca", "hub 集約", "call"],
+    ["Corpus", "Memoria", "hub 集約", "call"],
+
+    // ---- 業務サービス間 ----
+    ["Actio", "Schedula", "schedula-sdk / モジュール群", "lib"],
+    ["Actio", "Memoria", "個人ログ連携", "call"],
+    ["Actio", "Nuntius", "通知要求", "notify"],
+    ["Schedula", "Nuntius", "通知要求", "notify"],
+    ["Discutere", "Nuntius", "議論結果の通知", "notify"],
+    ["Aedilis", "Ostiarius", "出席チェックイン", "call"],
+    ["Legatus", "Memoria", "代理実行", "call"],
+    ["Legatus", "Actio", "代理実行", "call"],
+    ["Legatus", "Nuntius", "代理実行", "notify"],
+    ["Susurrus", "Memoria", "メモ連携", "call"],
+    ["Susurrus", "Synergos", "P2P async 配送", "call"],
+    ["Calliope", "Actio", "PM 秘書として統括", "call"],
+    ["Calliope", "Schedula", "PM 秘書として統括", "call"],
+    ["Calliope", "Memoria", "PM 秘書として統括", "call"],
+    ["Calliope", "Concordia", "セッション状況を参照", "call"],
+    ["Calliope", "Nuntius", "通知要求", "notify"],
+    ["Volputas", "Memoria", "個人ログ連携", "call"],
+    ["Volputas", "Concordia", "セッション連携", "call"],
+    ["Volputas", "Anatomia", "解析利用", "call"],
+    ["Memoria", "Lictor", "セッション状態を参照", "call"],
+    ["Pictor", "Ergo", "C++ フレームワークを利用", "lib"],
+    ["Tirocinium", "Canalis", "Notion からの企業 / 求人取込", "lib"],
+    ["Tirocinium", "Lector", "文書読み取り", "lib"],
+
+    // ---- 共有ライブラリ ----
+    ["Concordia", "Lapilli", "aop-metrics / blackbox / memory", "lib"],
+    ["Memoria", "Lapilli", "blackbox", "lib"],
+    ["Quaestor", "Lapilli", "mail-inbox / mail-watch / blackbox", "lib"],
+    ["Discutere", "Lapilli", "llm-gateway / sentiment-core / blackbox", "lib"],
+    ["Tirocinium", "Lapilli", "encrypted-config / blackbox", "lib"],
+    ["Peregrinatio", "Lapilli", "encrypted-config", "lib"],
+    ["Volputas", "Lapilli", "sentiment-core", "lib"],
+    ["Famulus", "Lapilli", "blackbox", "lib"],
+    ["Anatomia", "Vestigium", "横断ログ出力", "lib"],
+    ["Concordia", "Vestigium", "横断ログ出力", "lib"],
+    ["Cernere", "Vestigium", "横断ログ出力", "lib"],
+    ["Corpus", "Vestigium", "横断ログ出力", "lib"],
+    ["Aedilis", "Vestigium", "横断ログ出力", "lib"],
+    ["Bibliotheca", "Vestigium", "横断ログ出力", "lib"],
+    ["Discutere", "Vestigium", "横断ログ出力", "lib"],
+    ["Actio", "Vestigium", "横断ログ出力", "lib"],
+    ["Manus", "Vestigium", "横断ログ出力", "lib"],
+    ["Fundamentum", "Vestigium", "横断ログ出力", "lib"],
+    ["Lictor", "Vestigium", "横断ログ出力", "lib"],
+    ["Discutere", "Canalis", "取込パイプライン", "lib"],
+    ["Signum", "Cernere", "cernere-id-service / id-cache", "lib"],
+
+    // ---- 外部サービス ----
+    ["Concordia", "Discord", "Bot: チャット / 通知 / 委託指示", "ext"],
+    ["Concordia", "Slack", "Bot: 通知", "ext"],
+    ["Concordia", "Anthropic", "claude CLI でセッション spawn / 要約", "ext"],
+    ["Concordia", "Ollama", "ローカル推論", "ext"],
+    ["Concordia", "Cloudflare", "Tunnel 公開", "ext"],
+    ["Discutere", "Discord", "議論チャンネル / Chat-to-Task", "ext"],
+    ["Discutere", "Slack", "Chat-to-Task", "ext"],
+    ["Discutere", "Anthropic", "多モデル議論", "ext"],
+    ["Discutere", "OpenAI", "多モデル議論", "ext"],
+    ["Discutere", "Ollama", "ローカル推論", "ext"],
+    ["Discutere", "GitHub", "Issue / PR 連携", "ext"],
+    ["Discutere", "AWS", "S3", "ext"],
+    ["Memoria", "Discord", "通知 / 棚卸しレビュー配信", "ext"],
+    ["Memoria", "GitHub", "リポジトリ更新の取り込み", "ext"],
+    ["Memoria", "OpenAI", "要約 / 分類 / 埋め込み", "ext"],
+    ["Memoria", "MQTT", "デバイス信号", "ext"],
+    ["Memoria", "Cloudflare", "Tunnel 公開", "ext"],
+    ["Memoria", "Infisical", "リモート設定", "ext"],
+    ["Quaestor", "Gmail", "受信メール監視 (請求 / 領収)", "ext"],
+    ["Quaestor", "Google Cloud Pub/Sub", "Gmail リアルタイム push", "ext"],
+    ["Quaestor", "AWS", "SES で請求書メール送信", "ext"],
+    ["Quaestor", "Cloudflare", "請求書マジックリンクの公開面", "ext"],
+    ["Quaestor", "Anthropic", "レシート / 明細の解釈", "ext"],
+    ["Quaestor", "Discord", "通知", "ext"],
+    ["Revisor", "GitHub", "PR / push / タグ公開", "ext"],
+    ["Revisor", "Discord", "審査結果の通知", "ext"],
+    ["Excubitor", "Infisical", "シークレット / リモート設定", "ext"],
+    ["Excubitor", "Cloudflare", "Tunnel ブローカー", "ext"],
+    ["Excubitor", "Discord", "障害通知", "ext"],
+    ["Excubitor", "GitHub", "自動修正 PR", "ext"],
+    ["Excubitor", "Docker", "Engine API でコンテナ制御", "ext"],
+    ["Cernere", "AWS", "SES / SESv2 / SNS", "ext"],
+    ["Cernere", "Cloudflare", "Access / Tunnel", "ext"],
+    ["Cernere", "Infisical", "リモート設定", "ext"],
+    ["Cernere", "GitHub", "OIDC / 連携", "ext"],
+    ["Nuntius", "Discord", "通知チャネル", "ext"],
+    ["Nuntius", "Slack", "通知チャネル", "ext"],
+    ["Nuntius", "AWS", "SNS / S3", "ext"],
+    ["Legatus", "MQTT", "OwnTracks 等のデバイス信号", "ext"],
+    ["Tirocinium", "Notion", "企業 / 求人データの取込元", "ext"],
+    ["Tirocinium", "Anthropic", "多モデル合議面接官", "ext"],
+    ["Tirocinium", "OpenAI", "多モデル合議面接官", "ext"],
+    ["Tirocinium", "Discord", "通知", "ext"],
+    ["Canalis", "Notion", "NotionSource adapter", "ext"],
+    ["Canalis", "Ollama", "分類 / 埋め込み", "ext"],
+    ["Lapilli", "Google Cloud Pub/Sub", "mail-watch のリアルタイム受信", "ext"],
+    ["Lapilli", "Anthropic", "llm-gateway", "ext"],
+    ["Lapilli", "OpenAI", "llm-gateway", "ext"],
+    ["Anatomia", "Anthropic", "解析補助", "ext"],
+    ["Anatomia", "Ollama", "埋め込み", "ext"],
+    ["Famulus", "Ollama", "ローカル LLM を spawn", "ext"],
+    ["Famulus", "Anthropic", "モデル switcher", "ext"],
+    ["Synergos", "Cloudflare", "シグナリング / 中継", "ext"],
+    ["Actio", "AWS", "RDS Data API / SSM", "ext"],
+    ["Actio", "Infisical", "リモート設定", "ext"],
+    ["Schedula", "AWS", "RDS Data API / SSM", "ext"],
+    ["Schedula", "Infisical", "リモート設定", "ext"],
+    ["AIFormat", "GitHub", "構造チェックの CI 床", "ext"],
+    ["Ostiarius", "Cloudflare", "外部公開", "ext"],
+    ["Volputas", "Anthropic", "対話生成", "ext"],
+    ["Histrio", "Anthropic", "発話描画 (Haiku)", "ext"],
+
+    // ---- インフラ ----
+    ["Cernere", "PostgreSQL", "", "infra"],
+    ["Cernere", "Redis", "", "infra"],
+    ["Actio", "PostgreSQL", "", "infra"],
+    ["Actio", "Redis", "", "infra"],
+    ["Schedula", "PostgreSQL", "", "infra"],
+    ["Schedula", "Redis", "", "infra"],
+    ["Nuntius", "PostgreSQL", "", "infra"],
+    ["Nuntius", "Redis", "", "infra"],
+    ["Signum", "PostgreSQL", "", "infra"],
+    ["Signum", "Redis", "", "infra"],
+    ["Praeforma", "PostgreSQL", "", "infra"],
+    ["Tirocinium", "PostgreSQL", "", "infra"],
+    ["Canalis", "PostgreSQL", "", "infra"],
+    ["Volputas", "PostgreSQL", "", "infra"],
+    ["Memoria", "PostgreSQL", "", "infra"],
+    ["Concordia", "Redis", "", "infra"],
+    ["Legatus", "MQTT", "", "infra"]
+  ];
+
+  /* =====================================================================
+   * 前処理
+   * =================================================================== */
+  const nodeById = new Map(NODES.map((n) => [n.id, n]));
+  const edges = EDGES
+    .filter((e) => nodeById.has(e[0]) && nodeById.has(e[1]))
+    .map((e, i) => ({ i, from: e[0], to: e[1], label: e[2], kind: e[3] }));
+
+  // 無効な辺があれば早期に気付けるようコンソールに出す
+  const missing = EDGES.filter((e) => !nodeById.has(e[0]) || !nodeById.has(e[1]));
+  if (missing.length) console.warn("未定義ノードを参照する辺:", missing);
+
+  const degree = new Map(NODES.map((n) => [n.id, 0]));
+  for (const e of edges) {
+    degree.set(e.from, degree.get(e.from) + 1);
+    degree.set(e.to, degree.get(e.to) + 1);
+  }
+
+  const catColor = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.color]));
+  const KIND_LABEL = {
+    call: "API 呼び出し", lib: "パッケージ依存", auth: "認証",
+    notify: "通知", ops: "監視・制御", ext: "外部連携", infra: "インフラ"
+  };
+
+  const state = {
+    active: new Set(CATEGORIES.map((c) => c.id)),
+    selected: null,
+    query: ""
+  };
+
+  /* =====================================================================
+   * フィルタ UI
+   * =================================================================== */
+  const catBox = document.getElementById("cat-filters");
+  for (const c of CATEGORIES) {
+    const label = document.createElement("label");
+    label.className = "chk";
+    label.innerHTML =
+      '<input type="checkbox" checked data-cat="' + c.id + '">' +
+      '<span class="swatch" style="background:' + c.color + '"></span>' +
+      "<span>" + c.label + "</span>";
+    catBox.appendChild(label);
+  }
+  catBox.addEventListener("change", (ev) => {
+    const cat = ev.target.dataset.cat;
+    if (!cat) return;
+    if (ev.target.checked) state.active.add(cat); else state.active.delete(cat);
+    if (state.selected && !state.active.has(nodeById.get(state.selected).cat)) state.selected = null;
+    render();
+  });
+
+  document.getElementById("search").addEventListener("input", (ev) => {
+    state.query = ev.target.value.trim().toLowerCase();
+    render();
+  });
+
+  document.getElementById("reset").addEventListener("click", () => {
+    state.active = new Set(CATEGORIES.map((c) => c.id));
+    state.selected = null;
+    state.query = "";
+    document.getElementById("search").value = "";
+    catBox.querySelectorAll("input").forEach((i) => { i.checked = true; });
+    view = { x: 0, y: 0, k: 1 };
+    lastFitKey = "";
+    render();
+  });
+
+  function visibleNodes() { return NODES.filter((n) => state.active.has(n.cat)); }
+  function visibleEdges() {
+    const ok = new Set(visibleNodes().map((n) => n.id));
+    return edges.filter((e) => ok.has(e.from) && ok.has(e.to));
+  }
+
+  /* =====================================================================
+   * レイアウト — カテゴリ別アンカーへ寄せる力学レイアウト (決定的)
+   * =================================================================== */
+  const W = 1500, H = 1000;
+
+  // 決定的な擬似乱数 (毎回同じ配置にする)
+  function seeded(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  }
+
+  /**
+   * 2 段構えのレイアウト。
+   *  1. カテゴリごとに閉じた力学レイアウトを回し、グループ内で固める
+   *  2. グループ同士を「辺の本数で引き合い / 重なったら押し合う」で配置する
+   * これでグループが混ざらず、そのまま矩形で囲える。
+   */
+  function layout() {
+    const rnd = seeded(20260907);
+    const cats = CATEGORIES.map((c) => c.id).filter((id) => NODES.some((n) => n.cat === id));
+
+    /* ---- 1. グループ内レイアウト (中心を原点とする相対座標) ---- */
+    const local = new Map();
+    const groupRadius = new Map();
+
+    for (const cat of cats) {
+      const list = NODES.filter((n) => n.cat === cat);
+      const ids = new Set(list.map((n) => n.id));
+      const ring = 30 + Math.sqrt(list.length) * 26;
+      const pts = list.map((n, i) => {
+        const a = (i / list.length) * Math.PI * 2;
+        return { id: n.id, x: Math.cos(a) * ring + (rnd() - 0.5) * 12, y: Math.sin(a) * ring + (rnd() - 0.5) * 12, vx: 0, vy: 0 };
+      });
+      const idx = new Map(pts.map((p, i) => [p.id, i]));
+      const links = edges
+        .filter((e) => ids.has(e.from) && ids.has(e.to))
+        .map((e) => ({ a: idx.get(e.from), b: idx.get(e.to) }));
+
+      for (let step = 0; step < 420; step++) {
+        const cool = 1 - step / 420;
+        for (let i = 0; i < pts.length; i++) {
+          for (let j = i + 1; j < pts.length; j++) {
+            const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+            let d2 = dx * dx + dy * dy;
+            if (d2 < 1) d2 = 1;
+            const d = Math.sqrt(d2), f = 9500 / d2;
+            pts[i].vx += (dx / d) * f; pts[i].vy += (dy / d) * f;
+            pts[j].vx -= (dx / d) * f; pts[j].vy -= (dy / d) * f;
+          }
+        }
+        for (const l of links) {
+          const p = pts[l.a], q = pts[l.b];
+          const dx = q.x - p.x, dy = q.y - p.y;
+          const d = Math.max(Math.hypot(dx, dy), 1);
+          const f = (d - 125) * 0.02;
+          p.vx += (dx / d) * f; p.vy += (dy / d) * f;
+          q.vx -= (dx / d) * f; q.vy -= (dy / d) * f;
+        }
+        for (const p of pts) {
+          p.vx += -p.x * 0.026; p.vy += -p.y * 0.026;   // グループ中心へ寄せる
+          p.x += p.vx * 0.5 * cool; p.y += p.vy * 0.5 * cool;
+          p.vx *= 0.70; p.vy *= 0.70;
+        }
+      }
+
+      // 重心を原点へ戻し、外接半径を測る
+      const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
+      const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+      let rMax = 0;
+      for (const p of pts) {
+        p.x -= cx; p.y -= cy;
+        rMax = Math.max(rMax, Math.hypot(p.x, p.y));
+      }
+      for (const p of pts) local.set(p.id, { x: p.x, y: p.y });
+      groupRadius.set(cat, rMax + 52);   // ノード半径 + ラベル + 枠の余白ぶん
+    }
+
+    /* ---- 2. グループ配置 ---- */
+    const between = new Map();
+    for (const e of edges) {
+      const a = nodeById.get(e.from).cat, b = nodeById.get(e.to).cat;
+      if (a === b) continue;
+      const key = a < b ? a + "|" + b : b + "|" + a;
+      between.set(key, (between.get(key) || 0) + 1);
+    }
+
+    const ringR = 300 + cats.reduce((a, c) => a + groupRadius.get(c), 0) / cats.length;
+    const gs = cats.map((cat, i) => {
+      const a = (i / cats.length) * Math.PI * 2 - Math.PI / 2;
+      return { cat, x: Math.cos(a) * ringR, y: Math.sin(a) * ringR, vx: 0, vy: 0, r: groupRadius.get(cat) };
+    });
+    const gByCat = new Map(gs.map((g) => [g.cat, g]));
+
+    for (let step = 0; step < 700; step++) {
+      // 辺の本数に応じて引き合う
+      for (const [key, count] of between) {
+        const [ca, cb] = key.split("|");
+        const p = gByCat.get(ca), q = gByCat.get(cb);
+        if (!p || !q) continue;
+        const dx = q.x - p.x, dy = q.y - p.y;
+        const d = Math.max(Math.hypot(dx, dy), 1);
+        const want = p.r + q.r + 90;
+        const f = (d - want) * Math.min(count, 30) * 0.0009;
+        p.vx += (dx / d) * f; p.vy += (dy / d) * f;
+        q.vx -= (dx / d) * f; q.vy -= (dy / d) * f;
+      }
+      // 重なりの解消 (これが効くのでグループ同士は必ず離れる)
+      for (let i = 0; i < gs.length; i++) {
+        for (let j = i + 1; j < gs.length; j++) {
+          const p = gs[i], q = gs[j];
+          const dx = q.x - p.x, dy = q.y - p.y;
+          const d = Math.max(Math.hypot(dx, dy), 1);
+          const gap = p.r + q.r + 74;
+          if (d < gap) {
+            const push = (gap - d) * 0.5;
+            p.vx -= (dx / d) * push; p.vy -= (dy / d) * push;
+            q.vx += (dx / d) * push; q.vy += (dy / d) * push;
+          }
+        }
+      }
+      for (const g of gs) {
+        g.vx += -g.x * 0.004; g.vy += -g.y * 0.004;   // 全体を中央へ
+        g.x += g.vx * 0.42; g.y += g.vy * 0.42;
+        g.vx *= 0.66; g.vy *= 0.66;
+      }
+    }
+
+    /* ---- 3. 合成 ---- */
+    const out = new Map();
+    for (const n of NODES) {
+      const g = gByCat.get(n.cat), l = local.get(n.id);
+      out.set(n.id, { x: W / 2 + g.x + l.x, y: H / 2 + g.y + l.y });
+    }
+    return out;
+  }
+
+  const pos = layout();
+
+  /* =====================================================================
+   * 描画
+   * =================================================================== */
+  const svg = document.getElementById("graph");
+  const NS = "http://www.w3.org/2000/svg";
+  let view = { x: 0, y: 0, k: 1 };
+
+  const gRoot = document.createElementNS(NS, "g");
+  const gGroups = document.createElementNS(NS, "g");
+  const gEdges = document.createElementNS(NS, "g");
+  const gLabels = document.createElementNS(NS, "g");
+  const gNodes = document.createElementNS(NS, "g");
+  gRoot.append(gGroups, gEdges, gLabels, gNodes);
+  svg.appendChild(gRoot);
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+
+  /** 表示中のノードが収まるように viewBox を合わせる (フィルタ変更時のみ) */
+  function fitView(nodes) {
+    if (!nodes.length) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      const p = pos.get(n.id), r = radius(n) + 26;
+      minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
+      minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r);
+    }
+    // グループ枠とその見出しのぶんを足す
+    minX -= GROUP_PAD.x; maxX += GROUP_PAD.x;
+    minY -= GROUP_PAD.top; maxY += GROUP_PAD.bottom;
+    const pad = 24;
+    const bw = maxX - minX + pad * 2;
+    const bh = maxY - minY + pad * 2;
+    svg.setAttribute("viewBox", (minX - pad) + " " + (minY - pad) + " " + bw + " " + bh);
+
+    // 縦長のスマホで上下に大きな余白が出ないよう、図の縦横比に高さを合わせる
+    const w = svg.clientWidth || svg.getBoundingClientRect().width;
+    if (w) {
+      const wanted = w * (bh / bw);
+      svg.style.height = Math.round(Math.max(320, Math.min(wanted, window.innerHeight * 0.78))) + "px";
+    }
+    lastFitNodes = nodes;
+  }
+  let lastFitKey = "";
+  let lastFitNodes = null;
+
+  // 回転・リサイズで縦横比が変わったら高さを取り直す
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (lastFitNodes) fitView(lastFitNodes); }, 150);
+  });
+
+  function radius(n) { return 7 + Math.min(degree.get(n.id), 24) * 0.55; }
+
+  function neighborsOf(id) {
+    const set = new Set([id]);
+    for (const e of visibleEdges()) {
+      if (e.from === id) set.add(e.to);
+      if (e.to === id) set.add(e.from);
+    }
+    return set;
+  }
+
+  const GROUP_PAD = { x: 34, top: 40, bottom: 34 };
+
+  /** カテゴリごとに、表示中のノードを囲う矩形と見出しを描く */
+  function renderGroups(vNodes, near) {
+    for (const c of CATEGORIES) {
+      const ns = vNodes.filter((n) => n.cat === c.id);
+      if (!ns.length) continue;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of ns) {
+        const p = pos.get(n.id), r = radius(n);
+        minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
+        minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r + 14);
+      }
+
+      const g = document.createElementNS(NS, "g");
+      const active = !near || ns.some((n) => near.has(n.id));
+      g.setAttribute("class", "group" + (active ? "" : " dim"));
+      g.setAttribute("color", c.color);
+
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", minX - GROUP_PAD.x);
+      rect.setAttribute("y", minY - GROUP_PAD.top);
+      rect.setAttribute("width", maxX - minX + GROUP_PAD.x * 2);
+      rect.setAttribute("height", maxY - minY + GROUP_PAD.top + GROUP_PAD.bottom);
+      rect.setAttribute("rx", 22);
+      g.appendChild(rect);
+
+      const label = document.createElementNS(NS, "text");
+      label.setAttribute("x", minX - GROUP_PAD.x + 16);
+      label.setAttribute("y", minY - GROUP_PAD.top + 24);
+      label.textContent = c.label + " (" + ns.length + ")";
+      g.appendChild(label);
+
+      gGroups.appendChild(g);
+    }
+  }
+
+  function render() {
+    const vNodes = visibleNodes();
+    const vEdges = visibleEdges();
+    const near = state.selected ? neighborsOf(state.selected) : null;
+    const q = state.query;
+
+    gGroups.textContent = ""; gEdges.textContent = ""; gLabels.textContent = ""; gNodes.textContent = "";
+
+    renderGroups(vNodes, near);
+
+    const fitKey = [...state.active].sort().join(",");
+    if (fitKey !== lastFitKey) { lastFitKey = fitKey; fitView(vNodes); }
+
+    for (const e of vEdges) {
+      const a = pos.get(e.from), b = pos.get(e.to);
+      const line = document.createElementNS(NS, "line");
+      const on = !near || (e.from === state.selected || e.to === state.selected);
+      line.setAttribute("class", "edge k-" + e.kind + (near ? (on ? " hl" : " dim") : ""));
+      line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+      line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+      gEdges.appendChild(line);
+
+      if (on && near && e.label) {
+        // ハブ側に集中しないよう、選択ノードから遠い側へラベルを寄せる
+        const f = e.from === state.selected ? 0.68 : 0.32;
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("class", "edge-label");
+        t.setAttribute("x", a.x + (b.x - a.x) * f);
+        t.setAttribute("y", a.y + (b.y - a.y) * f - 4);
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = e.label;
+        gLabels.appendChild(t);
+      }
+    }
+
+    for (const n of vNodes) {
+      const p = pos.get(n.id);
+      const g = document.createElementNS(NS, "g");
+      const isMatch = q && n.id.toLowerCase().includes(q);
+      let cls = "node";
+      if (near) cls += near.has(n.id) ? (n.id === state.selected ? " hl" : "") : " dim";
+      if (isMatch) cls += " match";
+      else if (q) cls += " dim";
+      g.setAttribute("class", cls);
+      g.setAttribute("transform", "translate(" + p.x + "," + p.y + ")");
+
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("r", radius(n));
+      c.setAttribute("fill", catColor[n.cat]);
+      g.appendChild(c);
+
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", 0);
+      t.setAttribute("y", radius(n) + 12);
+      t.setAttribute("text-anchor", "middle");
+      t.textContent = n.id;
+      g.appendChild(t);
+
+      const title = document.createElementNS(NS, "title");
+      title.textContent = n.id + " — " + n.role;
+      g.appendChild(title);
+
+      g.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        state.selected = state.selected === n.id ? null : n.id;
+        render();
+      });
+      gNodes.appendChild(g);
+    }
+
+    applyView();
+    renderSide();
+    renderMermaid();
+    renderTable();
+  }
+
+  function applyView() {
+    gRoot.setAttribute("transform", "translate(" + view.x + "," + view.y + ") scale(" + view.k + ")");
+  }
+
+  /* ---- パン / ピンチズーム (マウス・タッチ共通) ---- */
+  const pointers = new Map();      // pointerId -> {x, y}
+  let gesture = null;              // 1 本目=パン / 2 本目以降=ピンチ
+
+  /** クライアント座標を viewBox 座標へ */
+  function toLocal(cx, cy) {
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const scale = Math.max(vb.width / rect.width, vb.height / rect.height);
+    return {
+      x: vb.x + (cx - rect.left - (rect.width - vb.width / scale) / 2) * scale,
+      y: vb.y + (cy - rect.top - (rect.height - vb.height / scale) / 2) * scale
+    };
+  }
+
+  function beginGesture() {
+    const pts = [...pointers.values()];
+    if (!pts.length) { gesture = null; return; }
+    if (pts.length === 1) {
+      gesture = { mode: "pan", start: toLocal(pts[0].x, pts[0].y), view: { ...view } };
+    } else {
+      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      gesture = {
+        mode: "pinch",
+        dist: Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1),
+        start: toLocal(mid.x, mid.y),
+        view: { ...view }
+      };
+    }
+  }
+
+  /** p (viewBox 座標) を画面上に固定したまま倍率を k にする */
+  function zoomAround(p, k, base) {
+    const kk = Math.max(0.3, Math.min(4, k));
+    view.x = p.x - (p.x - base.x) * (kk / base.k);
+    view.y = p.y - (p.y - base.y) * (kk / base.k);
+    view.k = kk;
+    applyView();
+  }
+
+  svg.addEventListener("pointerdown", (ev) => {
+    if (ev.target.closest(".node")) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    svg.setPointerCapture(ev.pointerId);
+    svg.classList.add("dragging");
+    beginGesture();
+  });
+
+  svg.addEventListener("pointermove", (ev) => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (!gesture) return;
+    const pts = [...pointers.values()];
+
+    if (gesture.mode === "pan" && pts.length === 1) {
+      const now = toLocal(pts[0].x, pts[0].y);
+      view.x = gesture.view.x + (now.x - gesture.start.x) * view.k;
+      view.y = gesture.view.y + (now.y - gesture.start.y) * view.k;
+      applyView();
+      return;
+    }
+
+    if (gesture.mode === "pinch" && pts.length >= 2) {
+      const dist = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1);
+      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      const now = toLocal(mid.x, mid.y);
+      // 拡縮しつつ、2 本指の中点の移動ぶんだけ平行移動もする
+      const base = { ...gesture.view };
+      base.x += (now.x - gesture.start.x) * base.k;
+      base.y += (now.y - gesture.start.y) * base.k;
+      zoomAround(now, gesture.view.k * (dist / gesture.dist), base);
+    }
+  });
+
+  function releasePointer(ev) {
+    if (!pointers.delete(ev.pointerId)) return;
+    if (!pointers.size) { gesture = null; svg.classList.remove("dragging"); }
+    else beginGesture();          // 指が減ったらジェスチャを組み直す
+  }
+  svg.addEventListener("pointerup", releasePointer);
+  svg.addEventListener("pointercancel", releasePointer);
+
+  svg.addEventListener("click", (ev) => {
+    if (ev.target.closest(".node")) return;
+    if (state.selected) { state.selected = null; render(); }
+  });
+
+  svg.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const p = toLocal(ev.clientX, ev.clientY);
+    zoomAround(p, view.k * (ev.deltaY < 0 ? 1.12 : 1 / 1.12), { ...view });
+  }, { passive: false });
+
+  // ページ側のピンチ (ブラウザの拡大) に持っていかれないようにする
+  for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+    svg.addEventListener(type, (ev) => ev.preventDefault());
+  }
+
+  /* =====================================================================
+   * サイドパネル
+   * =================================================================== */
+  const side = document.getElementById("side");
+
+  function renderSide() {
+    if (!state.selected) {
+      const counts = CATEGORIES
+        .filter((c) => state.active.has(c.id))
+        .map((c) => '<li><b>' + c.label + '</b> <span>' + NODES.filter((n) => n.cat === c.id).length + " 件</span></li>")
+        .join("");
+      side.innerHTML =
+        "<h2>凡例と使い方</h2>" +
+        '<p class="role">ノードをクリックすると、そのサービスの役割と入出力の関係だけを残して表示します。もう一度クリックで解除します。</p>' +
+        "<h3>線の種類</h3>" +
+        '<ul class="rel">' +
+        "<li><b>実線</b> <span>API 呼び出し / 認証 / 通知</span></li>" +
+        "<li><b>破線 (長)</b> <span>パッケージ依存 (@ludiars/*)</span></li>" +
+        "<li><b>点線</b> <span>監視・起動制御 (Excubitor)</span></li>" +
+        "<li><b>細点線</b> <span>インフラ (PostgreSQL / Redis / MQTT)</span></li>" +
+        "</ul>" +
+        "<h3>表示中のカテゴリ</h3>" +
+        '<ul class="rel">' + counts + "</ul>";
+      return;
+    }
+
+    const n = nodeById.get(state.selected);
+    const out = visibleEdges().filter((e) => e.from === n.id);
+    const inn = visibleEdges().filter((e) => e.to === n.id);
+    const cat = CATEGORIES.find((c) => c.id === n.cat);
+
+    const pills = [];
+    pills.push('<span class="pill" style="color:' + cat.color + '">' + cat.label + "</span>");
+    if (n.code && n.code !== "—") pills.push('<span class="pill">' + n.code + "</span>");
+    if (n.port) pills.push('<span class="pill">:' + n.port + "</span>");
+
+    const list = (arr, dir) => arr.length
+      ? '<ul class="rel">' + arr.map((e) =>
+          "<li><b>" + (dir === "out" ? e.to : e.from) + "</b> <span>" +
+          (e.label || KIND_LABEL[e.kind]) + " · " + KIND_LABEL[e.kind] + "</span></li>").join("") + "</ul>"
+      : '<p class="empty">なし</p>';
+
+    const repo = n.cat === "ext" || n.cat === "infra"
+      ? ""
+      : '<p><a href="https://github.com/LUDIARS/' + n.id + '" target="_blank" rel="noopener">github.com/LUDIARS/' + n.id + " ↗</a></p>";
+
+    side.innerHTML =
+      "<h2>" + n.id + "</h2>" +
+      '<div class="meta">' + pills.join("") + "</div>" +
+      '<p class="role">' + n.role + "</p>" +
+      repo +
+      "<h3>参照している (→)</h3>" + list(out, "out") +
+      "<h3>参照されている (←)</h3>" + list(inn, "in");
+  }
+
+  /* =====================================================================
+   * Mermaid ソース生成
+   * =================================================================== */
+  const ARROW = { call: "-->", auth: "-->", notify: "-->", lib: "-.->", ops: "-.->", infra: "-.->", ext: "-->" };
+
+  function mmid(id) { return id.replace(/[^A-Za-z0-9]/g, "_"); }
+  function mmtext(s) { return String(s).replace(/"/g, "'"); }
+
+  function renderMermaid() {
+    const vNodes = visibleNodes();
+    const vEdges = visibleEdges();
+    const lines = ["graph LR"];
+    lines.push("  %% LUDIARS サービス相関図 — Villa /service-graph で生成");
+
+    for (const c of CATEGORIES) {
+      const ns = vNodes.filter((n) => n.cat === c.id);
+      if (!ns.length) continue;
+      lines.push('  subgraph ' + mmid(c.id) + '["' + mmtext(c.label) + '"]');
+      for (const n of ns) {
+        const cap = n.port ? n.id + "<br/>:" + n.port : n.id;
+        const shape = (c.id === "ext" || c.id === "infra") ? ['(["', '"])'] : ['["', '"]'];
+        lines.push("    " + mmid(n.id) + shape[0] + mmtext(cap) + shape[1]);
+      }
+      lines.push("  end");
+    }
+
+    for (const e of vEdges) {
+      const arrow = ARROW[e.kind];
+      const label = e.label ? "|" + mmtext(e.label) + "|" : "";
+      lines.push("  " + mmid(e.from) + " " + arrow + label + " " + mmid(e.to));
+    }
+
+    lines.push("");
+    for (const c of CATEGORIES) {
+      const ns = vNodes.filter((n) => n.cat === c.id);
+      if (!ns.length) continue;
+      lines.push("  classDef " + c.id + " stroke-width:2px;");
+      lines.push("  class " + ns.map((n) => mmid(n.id)).join(",") + " " + c.id + ";");
+    }
+
+    document.getElementById("mermaid-src").textContent = lines.join("\n");
+  }
+
+  document.getElementById("copy-mermaid").addEventListener("click", async (ev) => {
+    const text = document.getElementById("mermaid-src").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      ev.target.textContent = "コピーしました";
+    } catch {
+      ev.target.textContent = "コピーできませんでした (手動で選択してください)";
+    }
+    setTimeout(() => { ev.target.textContent = "Mermaid ソースをコピー"; }, 1800);
+  });
+
+  /* =====================================================================
+   * 関係一覧テーブル
+   * =================================================================== */
+  function renderTable() {
+    const rows = visibleEdges().map((e) =>
+      "<tr><td>" + e.from + "</td><td>" + e.to + '</td><td class="wrap">' +
+      (e.label || "—") + "</td><td>" + KIND_LABEL[e.kind] + "</td></tr>").join("");
+    document.getElementById("edge-rows").innerHTML = rows;
+  }
+
+  /* =====================================================================
+   * タブ
+   * =================================================================== */
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((t) => {
+        const on = t === tab;
+        t.setAttribute("aria-selected", String(on));
+        document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+      });
+    });
+  });
+
+  render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "viewer",
+  "description": "Viewer-only service navigation, catalog-based HTTP/WebSocket routing and browser namespace compatibility. Contract: spec/feature/unified-viewer.md.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/viewer/" },
+    { "pathPattern": "(^|/)frontend/src/viewer/" },
+    { "pathPattern": "(^|/)frontend/public/viewer/" }
+  ],
+  "specRefs": ["spec/feature/unified-viewer.md"],
+  "rationale": "The Viewer domain owns catalog-gated browser embedding and its HTTP, WebSocket, URL-rewrite, storage, and cookie boundaries."
+}

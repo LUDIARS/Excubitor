@@ -44,6 +44,9 @@ import { runInvestigation } from './auto_fix/investigate.js';
 import { startConcordiaDispatchLoop } from './auto_fix/concordia-dispatch-loop.js';
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
+import { buildViewerRouter } from './viewer/router.js';
+import { viewerTarget, type ViewerTarget } from './viewer/catalog.js';
+import { readCorpusPrefs } from './launch/corpus-prefs.js';
 import { buildLaunchRouter } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
@@ -122,6 +125,7 @@ const EmergencyBodySchema = z.object({
 interface ObservabilityHandle {
   router: Hono;
   shutdown: () => Promise<void>;
+  resolveViewerTarget: (code: string) => ViewerTarget | null;
 }
 
 export interface BootObservabilityOptions {
@@ -742,6 +746,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // Corpus multi-hub backend (/api/hub/*)
   app.route('/', buildHubRouter());
+  app.route('/', buildViewerRouter(() => currentCatalog!, readCorpusPrefs));
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)
   app.route('/', buildLaunchRouter(
@@ -1190,6 +1195,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   return {
     router: app,
+    resolveViewerTarget: (code) => currentCatalog ? viewerTarget(currentCatalog, readCorpusPrefs(), code) : null,
     shutdown: async () => {
       // 監視・スキャン系のみ停止する。 spawn したサービスは detached なので
       // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。

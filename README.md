@@ -6,6 +6,10 @@
 
 LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラー検知 / 自動修正** を集約する、統合運用 UI。
 
+`/viewer/` の **Ex Viewer** から catalog で明示許可したサービスを切り替えて閲覧できる。Viewer 経由の場合だけ
+共通メニューを表示し、ループバック必須・Corpus系は対象外。Villa の資料は Ex 内の
+`villa/` が所有する。URI対応と配備条件は [Viewer仕様](spec/feature/unified-viewer.md) を参照。
+
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
   <a href="https://github.com/LUDIARS/Excubitor/actions"><img src="https://github.com/LUDIARS/Excubitor/actions/workflows/harness.yml/badge.svg" alt="CI" /></a>

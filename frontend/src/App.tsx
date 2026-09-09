@@ -67,6 +67,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Excubitor</h1>
+        <a href="/viewer/">Viewer</a>
         <span
           className="badge"
           title={buildVersion?.git_hash ? `patch: ${buildVersion.patch_source}, git: ${buildVersion.git_hash}` : undefined}

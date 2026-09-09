@@ -1,5 +1,7 @@
 import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { runStartupNpmInstallAndAudit } from './startup/npm-install.js';
+import type { Server } from 'node:http';
+import { installViewerWebSockets } from './viewer/websocket.js';
 
 const port = Number(process.env.EXCUBITOR_PORT ?? 17332);
 
@@ -33,6 +35,7 @@ let shutdown: (() => Promise<void>) | null = null;
 let closeDbFn: (() => void) | null = null;
 let stopping = false;
 let activeServer: CloseableServer | null = null;
+let closeViewerSockets: (() => void) | null = null;
 let connectionLogTimer: NodeJS.Timeout | null = null;
 const activeSockets = new Set<SocketLike>();
 const processStartedAt = Date.now();
@@ -121,6 +124,7 @@ try {
 
   const server = serve({ fetch: booted.router.fetch, port, hostname: '127.0.0.1' }) as CloseableServer;
   activeServer = server;
+  closeViewerSockets = installViewerWebSockets(server as Server, booted.resolveViewerTarget);
   server.ref?.();
   server.requestTimeout = requestTimeoutMs;
   server.headersTimeout = headersTimeoutMs;
@@ -172,6 +176,7 @@ async function shutdownAndExit(exitCode: number, reason: string): Promise<void> 
   logger.info({ reason, exitCode }, 'stopping Excubitor server');
   writeDiagnostic('server.stopping', { reason, exitCode });
   await shutdown?.();
+  closeViewerSockets?.();
   activeServer?.close();
   if (connectionLogTimer) clearInterval(connectionLogTimer);
   activeSockets.clear();

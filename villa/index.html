@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Villa — ページ一覧</title>
+  <style>
+    :root {
+      --ink: #19232d;
+      --muted: #617181;
+      --paper: #f5f8fa;
+      --surface: #ffffff;
+      --line: #d9e4e8;
+      --accent: #176b87;
+      --accent-soft: #d9f0f6;
+      --shadow: 0 14px 36px rgba(31, 56, 72, .09);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8f0f4;
+        --muted: #a7bbc5;
+        --paper: #10191f;
+        --surface: #17232b;
+        --line: #30454f;
+        --accent: #62c6e4;
+        --accent-soft: #143e4b;
+        --shadow: 0 14px 36px rgba(0, 0, 0, .25);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+      line-height: 1.6;
+    }
+    .shell { width: min(920px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 72px 0 32px; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .14em;
+    }
+    h1 { margin: 0; font-size: clamp(2rem, 7vw, 3.6rem); line-height: 1.15; letter-spacing: -.045em; }
+    .lede { max-width: 42rem; margin: 14px 0 0; color: var(--muted); }
+    main { padding: 12px 0 72px; }
+    .pages { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+    .page {
+      display: flex;
+      min-height: 190px;
+      flex-direction: column;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      color: inherit;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      text-decoration: none;
+      transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+    }
+    .page:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 18px 42px rgba(31, 56, 72, .14); }
+    .page:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .page-label { color: var(--accent); font-size: .76rem; font-weight: 800; letter-spacing: .1em; }
+    .page h2 { margin: 8px 0 6px; font-size: 1.35rem; line-height: 1.35; }
+    .page p { margin: 0; color: var(--muted); font-size: .94rem; }
+    .path {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: auto;
+      padding-top: 20px;
+      color: var(--accent);
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: .86rem;
+      font-weight: 700;
+    }
+    .path::after { content: "→"; font-family: inherit; }
+    footer { padding-top: 22px; color: var(--muted); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">VILLA · WEB PAGE HUB</p>
+    <h1>ページ一覧</h1>
+    <p class="lede">Villa で公開している確認用ページです。用途に合わせて開いてください。</p>
+  </header>
+
+  <main class="shell">
+    <nav class="pages" aria-label="Villa の公開ページ">
+      <a class="page" href="/manual-sample">
+        <span class="page-label">MANUAL SAMPLE</span>
+        <h2>Concordia マニュアル確認</h2>
+        <p>説明書を各画面のオーバーレイで見せる場合の、見た目と操作を確認するサンプルです。</p>
+        <span class="path">/manual-sample</span>
+      </a>
+
+      <a class="page" href="/skills">
+        <span class="page-label">SKILL GUIDE</span>
+        <h2>Castra skill 移行ガイド</h2>
+        <p>共有 skill の現行構成、Genius への判断移管、隔離済み資料を人間向けに確認します。</p>
+        <span class="path">/skills</span>
+      </a>
+
+      <a class="page" href="/service-graph">
+        <span class="page-label">SERVICE GRAPH</span>
+        <h2>LUDIARS サービス相関図</h2>
+        <p>公開サービス同士の依存と、Discord / Slack / AWS / Gmail など外部サービス連携をグラフと Mermaid で確認します。</p>
+        <span class="path">/service-graph</span>
+      </a>
+
+      <a class="page" href="/session-costs/methodology">
+        <span class="page-label">COST METHODOLOGY</span>
+        <h2>消費レポートの算式</h2>
+        <p>JSONL の集計方法、等価 API コストの式、Claude / Codex の代理スケールと近似の制約を確認します。</p>
+        <span class="path">/session-costs/methodology</span>
+      </a>
+
+      <a class="page" href="/magicchronicle-omnipotens/">
+        <span class="page-label">RESEARCH REPORT</span>
+        <h2>MagicChronicle Omnipotens 最終解析</h2>
+        <p>MagicChronicle の最終レポート本体と、Stage 99 の最終レビューを確認します。</p>
+        <span class="path">/magicchronicle-omnipotens/</span>
+      </a>
+
+      <a class="page" href="/symphony-kill-chord-omnipotens/">
+        <span class="page-label">RESEARCH REPORT</span>
+        <h2>Symphony Kill Chord Omnipotens 最終解析</h2>
+        <p>Symphony Kill Chord の最終レポート本体と、Stage 00 の最終まとめを確認します。</p>
+        <span class="path">/symphony-kill-chord-omnipotens/</span>
+      </a>
+    </nav>
+
+    <footer>Villa はパスごとに独立した役割の Web ページを配信します。</footer>
+  </main>
+</body>
+</html>

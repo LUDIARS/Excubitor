@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>セッション消費レポート — 算式と近似</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --ink: #19232d;
+      --muted: #617181;
+      --paper: #f5f8fa;
+      --surface: #ffffff;
+      --line: #d9e4e8;
+      --accent: #176b87;
+      --accent-soft: #d9f0f6;
+      --code: #102a35;
+      --code-ink: #e8f6fa;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8f0f4;
+        --muted: #a7bbc5;
+        --paper: #10191f;
+        --surface: #17232b;
+        --line: #30454f;
+        --accent: #62c6e4;
+        --accent-soft: #143e4b;
+        --code: #0d151a;
+        --code-ink: #e8f0f4;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+      line-height: 1.7;
+    }
+    .shell { width: min(980px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 50px 0 28px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: .78rem; font-weight: 800; letter-spacing: .12em; }
+    h1 { margin: 0; font-size: clamp(2rem, 6vw, 3.4rem); line-height: 1.2; letter-spacing: -.04em; }
+    h2 { margin: 42px 0 14px; font-size: 1.45rem; line-height: 1.35; }
+    h3 { margin: 28px 0 8px; font-size: 1.08rem; }
+    p, li { max-width: 78ch; }
+    .lede { max-width: 68ch; margin: 16px 0 0; color: var(--muted); font-size: 1.06rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    .button {
+      display: inline-block;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--accent);
+      background: var(--surface);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .button:hover, .button:focus-visible { border-color: var(--accent); outline: 0; }
+    main { padding: 4px 0 64px; }
+    .callout {
+      margin: 22px 0;
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: var(--accent-soft);
+    }
+    .panel {
+      margin: 18px 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .9em; }
+    pre {
+      overflow: auto;
+      margin: 14px 0;
+      padding: 14px;
+      border-radius: 10px;
+      color: var(--code-ink);
+      background: var(--code);
+      line-height: 1.55;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .86rem; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .muted { color: var(--muted); }
+    footer { padding-top: 30px; color: var(--muted); font-size: .84rem; }
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 24px, 980px); }
+      th, td { padding: 8px; font-size: .9rem; }
+      .table-wrap { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">COST REPORT · METHODOLOGY</p>
+    <h1>セッション消費レポートの<br>算式と近似</h1>
+    <p class="lede">Villa のセッション消費レポートが、ネイティブ JSONL の token 使用量をどのように等価 API コストへ換算するかを説明します。</p>
+    <div class="actions">
+      <a class="button" href="/session-costs">消費レポートを開く</a>
+      <a class="button" href="/">Villa の一覧へ戻る</a>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="callout">
+      <strong>これは実請求額ではありません。</strong> Claude / Codex ともサブスクリプション利用のため、表示する USD はモデル間・セッション間の利用量を比較するための<strong>等価 API コスト</strong>です。20x 枠の消費率や枯渇時刻は別途追跡すべき運用指標です。
+    </div>
+
+    <h2>1. 集計対象と共通ルール</h2>
+    <div class="panel">
+      <ul>
+        <li>対象期間はレポートに表示した JST の7日間です。</li>
+        <li>セッション・モデル / effort・日付別の表は、同じ元データから集計します。推定 USD は3つの表で必ず合計が一致するよう検証します。</li>
+        <li>未単価モデルを無言で $0 として扱いません。代理スケールを設定した場合は、表の「コスト根拠」に明示します。</li>
+        <li>価格スケールの正本は Concordia の <code>src/cost/price-table.ts</code> です。この資料はその人間向け説明であり、価格の正本ではありません。</li>
+      </ul>
+    </div>
+
+    <h2>2. Claude Code の集計</h2>
+    <h3>入力ログと重複除去</h3>
+    <p>Claude Code のネイティブ JSONL にある <code>message.usage</code> を読みます。同じ応答を二重に数えないため、まず <code>message.id</code>、無い場合だけ行の <code>uuid</code> で重複を除きます。</p>
+
+    <h3>トークンと式</h3>
+    <p>次の token 内訳を使います。単価は USD / 100万 tokens です。</p>
+    <pre>USD = (
+  input × inputPrice
+  + output × outputPrice
+  + cacheRead × inputPrice × 0.1
+  + cacheWrite5m × inputPrice × 1.25
+  + cacheWrite1h × inputPrice × 2.0
+) / 1,000,000</pre>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Claude のモデル群</th><th class="num">入力</th><th class="num">出力</th><th>扱い</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Fable / Mythos 5</td><td class="num">$10</td><td class="num">$50</td><td>既存の等価 API スケール</td></tr>
+          <tr><td>Opus 4.5–4.8</td><td class="num">$5</td><td class="num">$25</td><td>既存の等価 API スケール</td></tr>
+          <tr><td>旧 Opus 4.0–4.1 / 3</td><td class="num">$15</td><td class="num">$75</td><td>既存の等価 API スケール</td></tr>
+          <tr><td>Sonnet 5 / 4</td><td class="num">$3</td><td class="num">$15</td><td>既存の等価 API スケール</td></tr>
+          <tr><td>Haiku 4.5</td><td class="num">$1</td><td class="num">$5</td><td>既存の等価 API スケール</td></tr>
+          <tr><td>Opus 5</td><td class="num">$5</td><td class="num">$25</td><td><strong>Opus 4.8 scale の推定</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Opus 5 は直接の価格表にないため、現行 Opus 4.8 と同じ入力・出力・cache 係数で推定します。実際の課金単価を示すものではありません。</p>
+
+    <h2>3. Codex の集計</h2>
+    <h3>入力ログと期間確定値</h3>
+    <p>Codex のネイティブ JSONL にある <code>event_msg.payload.type = "token_count"</code> の <code>info.total_token_usage</code> を使います。ここにはスレッド累積の <code>input_tokens</code>、<code>cached_input_tokens</code>、<code>output_tokens</code>、<code>total_tokens</code> が入ります。</p>
+    <p>同じ Codex JSONL はレポート作成後にも追記されます。そのため、期間内の総 tokens はレポート確定時の値を正本にし、後から読める JSONL は入力・出力・cache の<strong>比率</strong>を得るためだけに使います。</p>
+
+    <h3>トークンと式</h3>
+    <pre>uncachedInput = max(input - cachedInput, 0)
+
+USD = (
+  uncachedInput × inputPrice
+  + cachedInput × inputPrice × 0.1
+  + output × outputPrice
+) / 1,000,000
+
+sessionUSD = USD(log の内訳) × reportTokens / logTokens</pre>
+    <p>Codex ログでは cache 書き込みの保持時間内訳がないため、Claude の cache write 係数は適用しません。キャッシュ入力は代理入力単価の 0.1 倍とします。</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Codex モデル</th><th>代理スケール</th><th class="num">入力</th><th class="num">出力</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>GPT-5.6 Sol</td><td>Fable 5</td><td class="num">$10</td><td class="num">$50</td><td>20x 枠を短期間で消費する前提を反映した最高位の比較スケール</td></tr>
+          <tr><td>GPT-5.6 Terra</td><td>Opus 4.8</td><td class="num">$5</td><td class="num">$25</td><td>Sol より一段下の比較スケール</td></tr>
+          <tr><td>codex-auto-review</td><td>Sonnet 5</td><td class="num">$3</td><td class="num">$15</td><td>軽量レビュー用途だが Haiku より上の比較スケール</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>JSONL が残っていないセッション</h3>
+    <p>期間確定後にローカル JSONL がなくなった Codex セッションは、同じ <code>model</code> と <code>effort</code> で内訳を取れたセッションの平均 <code>USD / token</code> を適用します。レポートでは「同 model/effort 平均」と表示します。現在の集計では 7 セッションがこの補完に該当します。</p>
+
+    <h2>4. 日付別への配賦</h2>
+    <p>Codex はスレッド累積値であり、セッションが日をまたぐことがあります。セッション・モデル / effort 別の確定概算を日付別に表示する際は、レポートの確定済み日別 token 構成比で配賦します。これにより、日付別の合計もセッション別・モデル別の合計と一致します。</p>
+
+    <h2>5. どう読むか</h2>
+    <div class="panel">
+      <ul>
+        <li><strong>比較には使える:</strong> 同じ期間内で、どの provider / model / effort が利用量を大きく占めたかを比較できます。</li>
+        <li><strong>請求書には使えない:</strong> サブスクの実支払額、API の実請求、20x 枠の残量をこの USD から逆算してはいけません。</li>
+        <li><strong>20x 運用には別指標:</strong> 20x の消費率、現在の残枠、枯渇予測時刻は、サービスが提供する quota / usage の一次情報で別に管理します。</li>
+        <li><strong>近似は更新可能:</strong> 実価格やモデル階層について新しい一次情報が得られたら、代理スケールを更新し、レポートとこの資料の両方へ反映します。</li>
+      </ul>
+    </div>
+
+    <footer>このページは Villa の人間向け説明資料です。数値の正本は各 provider のネイティブ JSONL と、価格スケールの正本です。</footer>
+  </main>
+</body>
+</html>

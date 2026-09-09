@@ -1,0 +1,12 @@
+{
+  "name": "villa",
+  "description": "Ex-owned human-readable document publication, validated HTML routes and reload-on-read storage. Business sources remain owned by each project.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/villa/" },
+    { "pathPattern": "^villa/" }
+  ],
+  "specRefs": ["spec/feature/unified-viewer.md"],
+  "rationale": "Villa owns the explicitly routed, repository-contained HTML publication set; source projects retain ownership of business data."
+}
