@@ -1,19 +1,18 @@
 import { Hono } from 'hono';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { Catalog } from '../catalog/loader.js';
+import type { ViewerDirectory } from './manifest.js';
 import { readVillaDocument } from '../villa/documents.js';
-import { viewerEntries, viewerTarget } from './catalog.js';
 import { proxyViewer } from './proxy.js';
 import { rewriteHtml } from './rewrite.js';
 
-export function buildViewerRouter(getCatalog: () => Catalog, getCorpusPrefs: () => Map<string, boolean>): Hono {
+export function buildViewerRouter(directory: ViewerDirectory): Hono {
   const app = new Hono();
-  app.get('/api/v1/viewer/services', (c) => c.json({ services: viewerEntries(getCatalog(), getCorpusPrefs()) }));
+  app.get('/api/v1/viewer/services', (c) => c.json({ services: directory.entries() }));
   app.get('/viewer', (c) => c.redirect('/viewer/', 308));
   app.get('/viewer/', async (c) => {
     try {
-      return c.html(await readFile(resolve('frontend/dist/index.html'), 'utf8'));
+      return c.html(await readFile(resolve('frontend/dist-dmz/index.html'), 'utf8'));
     } catch { return c.text('Viewerのフロントエンドをビルドしてください。', 503); }
   });
   app.get('/viewer/:script', async (c) => {
@@ -21,13 +20,14 @@ export function buildViewerRouter(getCatalog: () => Catalog, getCorpusPrefs: () 
     if (!['runtime.js', 'storage.js'].includes(script)) return c.notFound();
     c.header('content-type', 'text/javascript; charset=utf-8');
     c.header('cache-control', 'no-store');
-    return c.body(await readFile(resolve('frontend/dist/viewer', script), 'utf8'));
+    return c.body(await readFile(resolve('frontend/dist-dmz/viewer', script), 'utf8'));
   });
   app.get('/villa', (c) => c.redirect('/villa/', 308));
   app.get('/villa/*', (c) => c.redirect('/viewer/apps/villa/' + c.req.path.slice('/villa/'.length)
     + new URL(c.req.url).search, 308));
   app.all('/viewer/apps/:code', (c) => c.redirect(c.req.path + '/' + new URL(c.req.url).search, 308));
   app.all('/viewer/apps/:code/*', async (c) => {
+    directory.entries(); // Villa also fails closed when the publication lease expires.
     const code = c.req.param('code');
     if (code === 'villa') {
       if (!['GET', 'HEAD'].includes(c.req.method)) return c.text('Method not allowed', 405);
@@ -42,7 +42,7 @@ export function buildViewerRouter(getCatalog: () => Catalog, getCorpusPrefs: () 
         return new Response(c.req.method === 'HEAD' ? null : body, { headers });
       } catch { return c.text('Villaの資料またはURL対応表を読み込めません。', 503); }
     }
-    const target = viewerTarget(getCatalog(), getCorpusPrefs(), code);
+    const target = directory.target(code);
     if (!target) return c.text('このサービスはViewerの対象外、またはWeb入口が未登録です。', 404);
     return proxyViewer(c, target);
   });

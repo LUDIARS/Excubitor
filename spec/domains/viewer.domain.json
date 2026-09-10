@@ -1,13 +1,15 @@
 {
   "name": "viewer",
-  "description": "Viewer-only service navigation, catalog-based HTTP/WebSocket routing and browser namespace compatibility. Contract: spec/feature/unified-viewer.md.",
+  "description": "Viewer-only service navigation, DMZ publication, catalog-based HTTP/WebSocket routing and browser namespace compatibility. Contracts: spec/feature/unified-viewer.md and spec/feature/viewer-dmz.md.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
     { "pathPattern": "(^|/)src/viewer/" },
     { "pathPattern": "(^|/)frontend/src/viewer/" },
-    { "pathPattern": "(^|/)frontend/public/viewer/" }
+    { "pathPattern": "(^|/)frontend/public/viewer/" },
+    { "pathPattern": "(^|/)frontend/dmz/" },
+    { "pathPattern": "(^|/)frontend/vite\\.dmz\\.config\\.ts$" }
   ],
-  "specRefs": ["spec/feature/unified-viewer.md"],
-  "rationale": "The Viewer domain owns catalog-gated browser embedding and its HTTP, WebSocket, URL-rewrite, storage, and cookie boundaries."
+  "specRefs": ["spec/feature/unified-viewer.md", "spec/feature/viewer-dmz.md"],
+  "rationale": "The Viewer domain owns manifest publication, the isolated DMZ worker and bundle, catalog-gated browser embedding, and its HTTP, WebSocket, URL-rewrite, storage, and cookie boundaries."
 }

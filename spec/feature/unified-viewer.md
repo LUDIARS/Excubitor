@@ -5,7 +5,11 @@ status: implemented-unverified
 
 # Ex Viewer と Villa
 
-複数のサービスのブラウザタブを探す手間を減らす。Ex の `/viewer/` が共通の外枠を
+2026-09-10: 公開・配備境界は [DMZワーカー仕様](viewer-dmz.md) に更新。
+以下のViewer経路はEx管理プロセスではなく `excubitor-viewer-dmz` が提供する。
+旧Villaホストからのredirectは不要。末尾の旧切替手順よりDMZ仕様を優先する。
+
+複数のサービスのブラウザタブを探す手間を減らす。DMZ の `/viewer/` が共通の外枠を
 所有し、検索付きのサービス切り替えメニューと iframe を表示する。直接サービスを
 開いたときにはボタンも互換スクリプトも追加しない。
 
@@ -14,7 +18,8 @@ status: implemented-unverified
 - `/viewer/?service=<catalog-code>`: サービス選択。ブラウザの戻る/進むに対応。
 - `/viewer/apps/<catalog-code>/*`: HTTP 中継。転送先は信頼済みサービス catalog の
   `frontend_port` / `port` のみ。利用者入力の URL や port を転送先に採用しない。
-- `/api/v1/viewer/services`: 閲覧候補と対象外理由。worker / native / infra は省く。
+- `/api/v1/viewer/services`: 公開許可済みの閲覧候補だけを返す。対象外の名前や理由、
+  worker / native / infra はDMZへ渡さない。
 - `/viewer/apps/villa/*`: Ex の `villa/` から資料を直接配信。Villa プロセスへの中継はしない。
 - `/villa/`: Villa 閲覧経路への互換入口。メニューボタンは Viewer の外枠にのみ存在する。
 
@@ -65,9 +70,9 @@ X-Frame-Options と frame-ancestors は削除せず、埋込禁止のサービ�
 - Origin は偽装しない。loopback origin を要求するサービスを proxy で迂回しない。
 - Service Worker は Viewer 内で登録させない。既存登録の一覧も渡さず他サービスの解除を防ぐ。
 - HTML/CSS/JS は UTF-8、書換上限16 MiB。要求と書換読込は30秒で打切り。
-  SSE/バイナリは全体を蓄積せず転送。WebSocket は両端切断・Ex終了時に解放する。
+  SSE/バイナリは全体を蓄積せず転送。WebSocket は両端切断・DMZワーカー終了時に解放する。
 - 同一 origin のパス分割は、悪意あるコードに対するセキュリティ境界ではない。
-  この Viewer は同じ信頼範囲の内部サービス用。公開範囲は Ex の既存入口認証を維持する。
+  この Viewer は同じ信頼範囲の内部サービス用。DMZ入口のCloudflare Accessを適切に設定する前提。
 
 ## Villa の所有と移行
 
@@ -80,7 +85,7 @@ HTML と routes.json は毎要求で読み直す。ルート外・symlink での
 配備時に Ex と Cc/Pf/Pe の変更を反映し、既存 Villa の直近差分を確認して移行先に同期する。
 旧ホストの転送先を Ex の `/villa/` に切り替え、閲覧確認後に Ex 経由で旧 Villa を停止し
 旧 catalog を無効化する。停止前は旧 Villa の公開を維持するため戻し先として利用できる。
-配布物には `villa/` と `frontend/dist/` を含める。
+配布物には `villa/` とViewer専用の `frontend/dist-dmz/` を含める。
 
 ## 検証
 

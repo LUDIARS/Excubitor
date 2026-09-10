@@ -44,8 +44,7 @@ import { runInvestigation } from './auto_fix/investigate.js';
 import { startConcordiaDispatchLoop } from './auto_fix/concordia-dispatch-loop.js';
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
-import { buildViewerRouter } from './viewer/router.js';
-import { viewerTarget, type ViewerTarget } from './viewer/catalog.js';
+import { startViewerManifestPublisher } from './viewer/manifest-publisher.js';
 import { readCorpusPrefs } from './launch/corpus-prefs.js';
 import { buildLaunchRouter } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
@@ -125,7 +124,6 @@ const EmergencyBodySchema = z.object({
 interface ObservabilityHandle {
   router: Hono;
   shutdown: () => Promise<void>;
-  resolveViewerTarget: (code: string) => ViewerTarget | null;
 }
 
 export interface BootObservabilityOptions {
@@ -746,7 +744,12 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // Corpus multi-hub backend (/api/hub/*)
   app.route('/', buildHubRouter());
-  app.route('/', buildViewerRouter(() => currentCatalog!, readCorpusPrefs));
+  // Viewer HTTP and WebSocket traffic belongs exclusively to the DMZ worker.
+  app.all('/viewer', (c) => c.notFound());
+  app.all('/viewer/*', (c) => c.notFound());
+  app.all('/villa', (c) => c.notFound());
+  app.all('/villa/*', (c) => c.notFound());
+  app.all('/api/v1/viewer/*', (c) => c.notFound());
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)
   app.route('/', buildLaunchRouter(
@@ -1193,10 +1196,14 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     app.use('*', serveStatic({ root: './frontend/dist' }));
   }
 
+  const stopViewerPublication = startViewerManifestPublisher(
+    'data/viewer-manifest.json', () => currentCatalog!, readCorpusPrefs,
+    () => logger.warn('Viewer directory publication failed; DMZ lease will expire'),
+  );
   return {
     router: app,
-    resolveViewerTarget: (code) => currentCatalog ? viewerTarget(currentCatalog, readCorpusPrefs(), code) : null,
     shutdown: async () => {
+      stopViewerPublication();
       // 監視・スキャン系のみ停止する。 spawn したサービスは detached なので
       // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。
       // 明示停止は stop API / launcher stop からのみ行う。

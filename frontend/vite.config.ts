@@ -20,8 +20,6 @@ export default defineConfig({
     allowedHosts: resolveViteAllowedHosts(),
     proxy: {
       '/api': config.backendUrl,
-      '/viewer/apps': { target: config.backendUrl, ws: true },
-      '/villa': config.backendUrl,
     },
   },
 });

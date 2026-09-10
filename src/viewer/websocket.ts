@@ -11,7 +11,9 @@ export function installViewerWebSockets(server: Server, resolveTarget: (code: st
     const path = incoming.url ?? '';
     const match = /^\/viewer\/apps\/([a-zA-Z0-9_-]+)\//.exec(path);
     if (!match?.[1]) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
-    const target = resolveTarget(match[1]);
+    let target: ViewerTarget | null;
+    try { target = resolveTarget(match[1]); }
+    catch { socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'); return; }
     if (!target) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     let url: URL;
     try { url = upstreamRequestUrl('http://viewer.invalid' + path, target); }

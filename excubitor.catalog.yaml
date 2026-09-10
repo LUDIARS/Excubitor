@@ -1,0 +1,21 @@
+services:
+  - code: excubitor-viewer-dmz
+    name: Ex Viewer DMZ
+    description: Access保護下の統合ビューと中継ワーカー。Ex管理APIは提供しない。
+    project_code: Ex
+    component: web
+    tier: personal
+    runtime: node
+    repo: LUDIARS/Excubitor
+    cwd: ${ARS_ROOT}/Excubitor
+    command: node dist/viewer/worker.js
+    port: 17334
+    autostart: false
+    restart_policy: on-failure
+    viewer:
+      enabled: false
+    health:
+      type: http
+      url: http://127.0.0.1:17334/health
+      interval_sec: 30
+      grace_period_sec: 30

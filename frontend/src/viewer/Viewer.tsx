@@ -54,7 +54,6 @@ export default function Viewer() {
       <strong>{active?.name ?? 'Ex Viewer'}</strong>
       <span className="viewer-load" role="status">{loading && active ? '読み込み中…' : ''}</span>
       {active && <button onClick={() => { setLoading(true); setFrameKey((key) => key + 1); }}>再読込</button>}
-      <a href="/">Ex Monitor</a>
     </header>
     <div className="viewer-body">
       {menuOpen && <aside className="viewer-menu" id="viewer-services" aria-label="サービス切り替え">
