@@ -56,6 +56,8 @@ export default function Viewer() {
       {active && <button onClick={() => { setLoading(true); setFrameKey((key) => key + 1); }}>再読込</button>}
     </header>
     <div className="viewer-body">
+      {menuOpen && <button className="viewer-menu-backdrop" aria-label="サービスメニューを閉じる"
+        onClick={closeMenu} />}
       {menuOpen && <aside className="viewer-menu" id="viewer-services" aria-label="サービス切り替え">
         <label>サービスを探す<input ref={searchInput} type="search" value={query}
           onChange={(event) => setQuery(event.target.value)} placeholder="名前で検索" /></label>

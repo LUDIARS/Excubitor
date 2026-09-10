@@ -1,20 +1,35 @@
-.viewer { height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
-.viewer-toolbar { min-height: 52px; display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+html, body, #root { margin: 0; height: 100%; }
+/* The DMZ entry does not load Monitor CSS: its palette and layers are owned here. */
+.viewer { --bg: #0e0f12; --bg-elev: #15171c; --border: #30343d; --fg-muted: #a7aeb9;
+  height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: #edf0f5;
+  font-family: system-ui, sans-serif; isolation: isolate; overflow: hidden; }
+.viewer, .viewer * { box-sizing: border-box; }
+.viewer button, .viewer input { font: inherit; color: inherit; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; }
+.viewer button { cursor: pointer; }
+.viewer button:disabled { cursor: default; opacity: .55; }
+.viewer button:focus-visible, .viewer input:focus-visible { outline: 2px solid #84b9ff; outline-offset: 2px; }
+.viewer-menu > button.active { background: #253f63; }
+.viewer-toolbar { position: relative; z-index: 2; flex-shrink: 0; background: var(--bg);
+  min-height: 52px; display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 .viewer-toolbar strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-toolbar a { white-space: nowrap; }
 .viewer-menu-button { padding: 7px 12px; white-space: nowrap; }
 .viewer-load { margin-left: auto; color: var(--fg-muted); font-size: 12px; }
-.viewer-body { display: flex; flex: 1; min-height: 0; position: relative; }
+.viewer-body { display: flex; flex: 1; min-height: 0; position: relative; isolation: isolate; z-index: 0; }
 .viewer-menu { width: 280px; flex-shrink: 0; padding: 16px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg-elev); }
 .viewer-menu label { display: block; color: var(--fg-muted); }
 .viewer-menu input { width: 100%; margin: 8px 0 16px; padding: 10px; font-size: 16px; }
 .viewer-menu > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 10px; margin: 5px 0; text-align: left; }
 .viewer-menu small { margin-top: 4px; }
-.viewer-content { flex: 1; min-width: 0; }
+.viewer-content { flex: 1; min-width: 0; position: relative; z-index: 0; isolation: isolate; }
+.viewer-menu-backdrop { display: none; }
 .viewer-content iframe { border: 0; width: 100%; height: 100%; display: block; background: white; }
 .viewer-empty { max-width: 560px; margin: 12vh auto; padding: 24px; }
 @media (max-width: 640px) {
   .viewer-menu { position: absolute; inset: 0 auto 0 0; width: min(88vw, 320px); z-index: 2; box-shadow: 8px 0 30px #0008; }
+  .viewer .viewer-menu-backdrop { display: block; position: absolute; inset: 0; z-index: 1;
+    border: 0; border-radius: 0; padding: 0; background: #0009; }
+  .viewer-menu { overscroll-behavior: contain; }
   .viewer-toolbar { gap: 8px; }
   .viewer-load { display: none; }
   .viewer-toolbar a { margin-left: auto; font-size: 12px; }
