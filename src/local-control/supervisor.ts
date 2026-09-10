@@ -10,6 +10,7 @@ import {
 } from '../process/manager.js';
 import { runEmergencyAction } from '../ops/emergency.js';
 import { createNamedLogger } from '../shared/logger.js';
+import { androidStatus } from '../android/control.js';
 import { AdoptedProcessReaper } from './adopted-process-reaper.js';
 import { SupervisorCatalogRuntime } from './catalog-runtime.js';
 import { localControlEndpoint } from './endpoint.js';
@@ -432,7 +433,9 @@ export class LocalControlSupervisor {
     }
 
     if (request.action === 'status') {
-      const status = await serviceStatus(service.code, service.runtime);
+      const status = service.runtime === 'android'
+        ? await androidStatus(service)
+        : await serviceStatus(service.code, service.runtime);
       return completedResponse(request.operation_id, status);
     }
     if (service.disabled && request.action !== 'stop') {
@@ -440,6 +443,9 @@ export class LocalControlSupervisor {
     }
 
     if (request.action === 'kill-port' || request.action === 'claude-port-fix') {
+      if (service.runtime === 'android') {
+        return failedResponse(request.operation_id, 'OPERATION_FAILED', 'Host port operations do not apply to Android services');
+      }
       // Emergency kill/fix is an explicit stop intent. Cancel automatic
       // process recovery before touching a listener so it cannot immediately
       // resurrect the process behind the operator's back.

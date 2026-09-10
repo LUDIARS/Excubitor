@@ -1110,6 +1110,19 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     return c.json({ ok: true, id });
   });
 
+  app.get('/api/v1/services/:code/android-status', async (c) => {
+    const service = findService(c.req.param('code'));
+    if (!service) return c.json({ error: 'not_found' }, 404);
+    if (service.runtime !== 'android') return c.json({ error: 'not_android_service' }, 400);
+    try {
+      const response = await requestLocalControl({ target: { kind: 'service', code: service.code }, action: 'status', actor: 'excubitor-api' });
+      if (response.payload?.kind === 'service-status') return c.json(response.payload);
+      return c.json({ error: 'android_status_unavailable', detail: response.error?.message }, 502);
+    } catch (error) {
+      return c.json({ error: 'local_control_unavailable', detail: error instanceof Error ? error.message : String(error) }, 503);
+    }
+  });
+
   app.post('/api/v1/services/:code/control', async (c) => {
     const code = c.req.param('code');
     const svc = findService(code);

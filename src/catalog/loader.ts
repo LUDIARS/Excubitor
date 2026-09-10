@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AndroidAppSchema } from '../android/config.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readFragmentServicesRaw } from './fragments.js';
 import { DEFAULT_RUNTIME_CONFIG_PATH, readRuntimeConfig } from './runtime-config.js';
@@ -154,7 +155,8 @@ const ServiceSchema = z.object({
    *   (Tauri / Electron / native exe / CLI バイナリ)。 `exec` で起動し、 死活は
    *   プロセス生存で判定、 既定では自動 respawn しない (GUI を勝手に再起動しない)。
    */
-  runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md', 'app']),
+  runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md', 'app', 'android']),
+  android: AndroidAppSchema.optional(),
   cwd: z.string().optional(),
   command: z.string().optional(),
   /**

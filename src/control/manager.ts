@@ -16,6 +16,7 @@ import { resolveInjectEnv } from '../process/inject.js';
 import { runServiceBuild } from '../process/build.js';
 import { assertStartupEnv } from '../process/startup-env.js';
 import { injectServiceRuntimeVersion } from '../process/service-version.js';
+import { controlAndroid } from '../android/control.js';
 
 const logger = createNamedLogger('excubitor.control');
 
@@ -36,7 +37,9 @@ export async function controlService(
 ): Promise<ControlResult> {
   let result: ControlResult;
 
-  if (svc.runtime === 'docker-compose') {
+  if (svc.runtime === 'android') {
+    result = await controlAndroid(svc, action);
+  } else if (svc.runtime === 'docker-compose') {
     logger.info({ code: svc.code, action, actor }, 'control invoke (compose)');
     let composeEnv: Record<string, string> = env;
     if (action === 'start' || action === 'restart') {
