@@ -54,6 +54,7 @@ describe('service runtime version', () => {
     await expect(resolveServiceRuntimeVersion(service())).resolves.toEqual({
       value: '2.3.4',
       source: 'package',
+      gitHash: 'abcdef123456',
     });
     expect(mocks.readGitInfo).toHaveBeenCalledWith('C:/services/demo');
   });
@@ -71,6 +72,7 @@ describe('service runtime version', () => {
       await expect(resolveServiceRuntimeVersion(service())).resolves.toEqual({
         value: '0.0.0+abcdef123456',
         source: 'git',
+        gitHash: 'abcdef123456',
       });
     },
   );
@@ -102,6 +104,7 @@ describe('service runtime version', () => {
     await expect(resolveServiceRuntimeVersion(withoutSource)).resolves.toEqual({
       value: '0.0.0+unversioned',
       source: 'unversioned',
+      gitHash: null,
     });
     expect(mocks.readGitInfo).not.toHaveBeenCalled();
   });

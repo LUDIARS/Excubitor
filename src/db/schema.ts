@@ -200,6 +200,13 @@ export const servicePrefs = sqliteTable('service_prefs', {
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
+/** サービスごとの直近の起動 git hash。デプロイ通知の比較基準。 */
+export const serviceDeployments = sqliteTable('service_deployments', {
+  service_code: text('service_code').primaryKey(),
+  git_hash: text('git_hash').notNull(),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});
+
 /**
  * 他拠点 (リモート) の Excubitor ピア。 federation で接続先と認証トークンを保持する。
  * - base_url: 相手 Excubitor backend の URL (例 https://host:17332 / Tailscale 経由)。
@@ -264,6 +271,7 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS launch_profile (id INTEGER PRIMARY KEY, configured INTEGER NOT NULL DEFAULT 0, auto_launch INTEGER NOT NULL DEFAULT 1, selection TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL)`,
   `INSERT OR IGNORE INTO launch_profile (id, configured, auto_launch, selection, updated_at) VALUES (1, 0, 1, '[]', unixepoch() * 1000)`,
   `CREATE TABLE IF NOT EXISTS service_prefs (code TEXT PRIMARY KEY, uses_corpus INTEGER, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
+  `CREATE TABLE IF NOT EXISTS service_deployments (service_code TEXT PRIMARY KEY, git_hash TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   // federation: 他拠点 Excubitor ピア (base_url + token)。
   `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`
 ];

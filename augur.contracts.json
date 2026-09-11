@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "contracts": [
+    { "id": "C-1", "criterion": "C-1 resolveServiceRuntimeVersion(service): package 版を優先しても解決済み gitHash を結果に含める", "symbol": "runtimeVersionCarriesGitHash", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
+    { "id": "C-2", "criterion": "C-2 dispatchServiceDeployment(input): 初回と同一 hash を送信せず、hash 変化時だけ前後 hash を POST する", "symbol": "changedHashDispatchesOnly", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
+    { "id": "C-3", "criterion": "C-3 dispatchServiceDeployment(input): 送信失敗時も最新 hash を永続化し起動フローを失敗させない", "symbol": "dispatchFailureIsContained", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
+    { "id": "C-4", "criterion": "C-4 serviceDeployments: service code ごとに直近 git hash を1行で永続化する", "symbol": "deploymentHashIsPersistent", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" }
+  ]
+}

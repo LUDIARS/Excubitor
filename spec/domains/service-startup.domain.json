@@ -59,6 +59,9 @@
       "pathPattern": "(^|/)src/process/(?:.*/)?[^/]+$"
     },
     {
+      "pathPattern": "(^|/)src/deploy/[^/]+$"
+    },
+    {
       "pathPattern": "(^|/)src/service-runner-(?:args|infisical)\\.ts$"
     },
     {

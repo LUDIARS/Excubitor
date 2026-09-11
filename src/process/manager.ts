@@ -31,6 +31,7 @@ import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-vers
 import { verifyProcessIdentity, waitForProcessIdentityOutcome, type VerifiedProcessIdentity } from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { clearDeclaredPort } from './port-guard.js';
+import { dispatchServiceDeployment } from '../deploy/deployed-dispatch.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -515,6 +516,16 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     // persisted. Keep the successful lifecycle result truthful; reconciliation
     // can adopt the pending row if this supervisor exits before a later scan.
     logger.error({ code: svc.code, err: (error as Error).message }, 'failed to promote spawned service state to running');
+  });
+
+  // Network failure must never alter a successful service start. The persisted
+  // hash also deduplicates subsequent restart-loop notifications.
+  void dispatchServiceDeployment({
+    code: svc.code,
+    gitHash: version.gitHash,
+    version: version.value,
+    startedAt: spawnedAt,
+    restartCount,
   });
 
   return spawned;

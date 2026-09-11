@@ -11,6 +11,8 @@ export type ServiceVersionSource = 'package' | 'git' | 'unversioned';
 export interface ServiceRuntimeVersion {
   value: string;
   source: ServiceVersionSource;
+  /** Git の解決可否にかかわらず常に存在するフィールド。 */
+  gitHash: string | null;
 }
 
 export interface VersionedEnvironment {
@@ -46,14 +48,14 @@ function serviceVersionDirectory(svc: Service): string | null {
  */
 export async function resolveServiceRuntimeVersion(svc: Service): Promise<ServiceRuntimeVersion> {
   const cwd = serviceVersionDirectory(svc);
-  if (!cwd) return { value: '0.0.0+unversioned', source: 'unversioned' };
+  if (!cwd) return { value: '0.0.0+unversioned', source: 'unversioned', gitHash: null };
 
   const git = await readGitInfo(cwd);
   const packageVersion = normalizedVersionComponent(git.package_version);
-  if (packageVersion) return { value: packageVersion, source: 'package' };
   const gitHash = normalizedVersionComponent(git.hash);
-  if (gitHash) return { value: `0.0.0+${gitHash}`, source: 'git' };
-  return { value: '0.0.0+unversioned', source: 'unversioned' };
+  if (packageVersion) return { value: packageVersion, source: 'package', gitHash };
+  if (gitHash) return { value: `0.0.0+${gitHash}`, source: 'git', gitHash };
+  return { value: '0.0.0+unversioned', source: 'unversioned', gitHash: null };
 }
 
 /**

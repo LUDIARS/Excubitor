@@ -42,6 +42,7 @@ vi.mock('../log/process-file.js', () => ({
 vi.mock('./build.js', () => ({ runServiceBuild: mocks.runServiceBuild }));
 vi.mock('./startup-env.js', () => ({ assertStartupEnv: vi.fn() }));
 vi.mock('../auto_fix/concordia-dispatch.js', () => ({ maybeDispatchCrashFixToConcordia: vi.fn() }));
+vi.mock('../deploy/deployed-dispatch.js', () => ({ dispatchServiceDeployment: vi.fn() }));
 vi.mock('./hot-reload.js', () => ({ assertHotReloadAllowed: vi.fn(async () => undefined) }));
 vi.mock('./cernere-launch-credential.js', () => ({
   prepareSpawnEnv: mocks.prepareSpawnEnv,
