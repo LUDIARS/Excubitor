@@ -230,67 +230,8 @@ export function buildLaunchRouter(
     });
   });
 
-  app.get('/api/v1/projects', async (c) => {
-    const profile = getLaunchProfile();
-    const catalog = getCatalog();
-    const projects = buildPlanProjects(
-      catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
-    );
-    const detail = instanceDetailByCode();
-    const downtimeByCode = await readDowntimeSummaries(
-      projects.flatMap((p) => p.services.map((s) => s.code)),
-      24 * 60,
-    );
-    const view = projects.map((p) => ({
-        project_code: p.project_code,
-        project_name: p.project_code,
-        components: p.services.map((s) => {
-          const d = detail.get(s.code);
-          return {
-            code: s.code,
-            name: s.name,
-            project_code: s.project_code,
-            disabled: s.disabled,
-            description: s.description,
-            component: s.component,
-            runtime: s.runtime,
-            tier: s.tier,
-            state: s.state,
-            port: s.port,
-            frontend_port: s.frontend_port,
-            backend_port: s.backend_port,
-            ports: s.ports,
-            frontend_url: s.frontend_url,
-            subdomain: s.subdomain,
-            domain: s.domain,
-            git: {
-              branch: d?.git_branch ?? null,
-              hash: d?.git_hash ?? null,
-              dirty: d?.git_dirty ?? null,
-            },
-            package_version: d?.package_version ?? null,
-            monitor_only: s.monitor_only,
-            has_vestigium: s.has_vestigium,
-            log_path: s.log_path,
-            autostart: s.autostart,
-            allow_hot_reload: s.allow_hot_reload,
-            start_script: s.start_script,
-            uses_corpus: s.uses_corpus,
-            host: null,
-            last_seen_at: d?.last_seen_at ?? null,
-            docker_id: d?.docker_id ?? null,
-            health_ok: d?.health_ok ?? null,
-            health_reason: d?.health_reason ?? null,
-            health_detail: d?.health_detail ?? null,
-            health_checked_at: d?.health_checked_at ?? null,
-            downtime_24h: downtimeByCode.get(s.code) ?? null,
-          };
-        }),
-      }));
-    view.sort(compareProjectViews);
-    return c.json({ projects: view });
-  });
-
+  app.get('/api/v1/projects', async (c) =>
+    c.json({ projects: await readProjectView(getCatalog(), readDowntimeSummaries) }));
   app.put('/api/v1/services/:code/catalog-info', async (c) => {
     const code = c.req.param('code');
     logger.info({ code }, 'catalog info update requested');
@@ -343,6 +284,69 @@ export function buildLaunchRouter(
   });
 
   return app;
+}
+
+/** Read display attributes; history is queried only by callers that request it. */
+export async function readProjectView(
+  catalog: Catalog, readDowntimeSummaries?: DowntimeSummaryReader,
+): Promise<ProjectView[]> {
+  const profile = getLaunchProfile();
+  const projects = buildPlanProjects(
+    catalog.services, stateByCode(), new Set(profile.selection), undefined, usesCorpusByCode(catalog),
+  );
+  const detail = instanceDetailByCode();
+  const downtimeByCode = readDowntimeSummaries ? await readDowntimeSummaries(
+    projects.flatMap((p) => p.services.map((s) => s.code)),
+    24 * 60,
+  ) : undefined;
+  const view = projects.map((p) => ({
+      project_code: p.project_code,
+      project_name: p.project_code,
+      components: p.services.map((s) => {
+        const d = detail.get(s.code);
+        return {
+          code: s.code,
+          name: s.name,
+          project_code: s.project_code,
+          disabled: s.disabled,
+          description: s.description,
+          component: s.component,
+          runtime: s.runtime,
+          tier: s.tier,
+          state: s.state,
+          port: s.port,
+          frontend_port: s.frontend_port,
+          backend_port: s.backend_port,
+          ports: s.ports,
+          frontend_url: s.frontend_url,
+          subdomain: s.subdomain,
+          domain: s.domain,
+          git: {
+            branch: d?.git_branch ?? null,
+            hash: d?.git_hash ?? null,
+            dirty: d?.git_dirty ?? null,
+          },
+          package_version: d?.package_version ?? null,
+          monitor_only: s.monitor_only,
+          has_vestigium: s.has_vestigium,
+          log_path: s.log_path,
+          autostart: s.autostart,
+          allow_hot_reload: s.allow_hot_reload,
+          start_script: s.start_script,
+          uses_corpus: s.uses_corpus,
+          host: null,
+          last_seen_at: d?.last_seen_at ?? null,
+          docker_id: d?.docker_id ?? null,
+          health_ok: d?.health_ok ?? null,
+          health_reason: d?.health_reason ?? null,
+          health_detail: d?.health_detail ?? null,
+          health_checked_at: d?.health_checked_at ?? null,
+          downtime_24h: downtimeByCode?.get(s.code) ?? null,
+        };
+      }),
+    }));
+  view.sort(compareProjectViews);
+  return view;
 }
 
 function normalizeList(input: string[] | undefined): string[] | undefined {

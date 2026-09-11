@@ -3,10 +3,12 @@ import { dirname } from 'node:path';
 import type { Catalog } from '../catalog/loader.js';
 import { viewerEntries, viewerTarget } from './catalog.js';
 import type { ViewerManifest } from './manifest.js';
+import { monitorSnapshotSchema, type MonitorSnapshot } from './monitor-snapshot.js';
 
 /** Runs in the management process; the DMZ worker never opens the management DB. */
 export function publishViewerManifest(
   file: string, catalog: Catalog, prefs: Map<string, boolean>, now: number,
+  monitor?: MonitorSnapshot,
 ): void {
   const entries = viewerEntries(catalog, prefs).filter((entry) => entry.excludedReason === null);
   const targets = entries.flatMap((entry) => {
@@ -17,6 +19,11 @@ export function publishViewerManifest(
     version: 1, expiresAt: now + 30_000,
     entries: entries.map((entry) => ({ ...entry, excludedReason: null })), targets,
   };
+  if (monitor) {
+    manifest.monitor = monitorSnapshotSchema.parse(monitor);
+    manifest.entries.push({ code: 'excubitor', name: 'Excubitor — Monitor',
+      href: '/viewer/apps/excubitor/', excludedReason: null });
+  }
   mkdirSync(dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.tmp`;
   try {

@@ -29,6 +29,15 @@ export function buildViewerRouter(directory: ViewerDirectory): Hono {
   app.all('/viewer/apps/:code/*', async (c) => {
     directory.entries(); // Villa also fails closed when the publication lease expires.
     const code = c.req.param('code');
+    if (code === 'excubitor') {
+      if (!['GET', 'HEAD'].includes(c.req.method)) return c.text('Method not allowed', 405);
+      const snapshot = directory.monitor?.();
+      if (!snapshot) return c.text('Monitorの表示情報を取得できません。', 503);
+      c.header('cache-control', 'no-store');
+      if (c.req.path === '/viewer/apps/excubitor/snapshot') return c.json(snapshot);
+      if (c.req.path !== '/viewer/apps/excubitor/') return c.notFound();
+      return c.html(await readFile(resolve('frontend/dist-dmz/monitor.html'), 'utf8'));
+    }
     if (code === 'villa') {
       if (!['GET', 'HEAD'].includes(c.req.method)) return c.text('Method not allowed', 405);
       try {

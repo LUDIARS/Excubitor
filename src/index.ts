@@ -45,8 +45,9 @@ import { startConcordiaDispatchLoop } from './auto_fix/concordia-dispatch-loop.j
 import { buildReviewsRouter } from './reviews/router.js';
 import { buildHubRouter } from './hub/router.js';
 import { startViewerManifestPublisher } from './viewer/manifest-publisher.js';
+import { monitorSnapshotSchema } from './viewer/monitor-snapshot.js';
 import { readCorpusPrefs } from './launch/corpus-prefs.js';
-import { buildLaunchRouter } from './launch/router.js';
+import { buildLaunchRouter, readProjectView } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
@@ -1212,6 +1213,11 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const stopViewerPublication = startViewerManifestPublisher(
     'data/viewer-manifest.json', () => currentCatalog!, readCorpusPrefs,
     () => logger.warn('Viewer directory publication failed; DMZ lease will expire'),
+    async () => {
+      // Reuse display attributes without running the unused downtime history
+      // aggregation. The DMZ never receives or calls the management API.
+      return monitorSnapshotSchema.parse({ projects: await readProjectView(currentCatalog!) });
+    },
   );
   return {
     router: app,

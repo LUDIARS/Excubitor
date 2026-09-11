@@ -13,7 +13,7 @@ export function buildDmzRouter(directory: ViewerDirectory): Hono {
   });
   app.get('/', (c) => c.redirect('/viewer/' + new URL(c.req.url).search, 308));
   app.route('/', buildViewerRouter(directory));
-  // Only the separate Viewer build is served, never frontend/dist (Ex Monitor).
+  // Only the separate DMZ entries are served, never the management App build.
   app.get('/assets/*', serveStatic({ root: './frontend/dist-dmz' }));
   app.notFound((c) => c.text('Not found', 404));
   return app;

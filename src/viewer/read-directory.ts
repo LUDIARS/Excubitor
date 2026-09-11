@@ -9,6 +9,7 @@ export function readViewerDirectory(file: string): ViewerDirectory {
   };
   return {
     entries: () => read().entries,
+    monitor: () => read().monitor ?? null,
     target: (code) => {
       const target = read().targets.find((entry) => entry.code === code);
       return target ? { ...target, upstream: new URL(target.upstream) } : null;

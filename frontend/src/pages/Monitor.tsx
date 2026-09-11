@@ -17,8 +17,9 @@ import MetricGraph from '../components/MetricGraph';
 const RUNNING_STATES = new Set(['running', 'pending']);
 const HEALTH_STALE_MS = 90_000;
 
-export default function Monitor() {
-  const [projects, setProjects] = useState<Project[] | null>(null);
+export default function Monitor({ snapshot }: { snapshot?: Project[] } = {}) {
+  const readOnly = snapshot !== undefined;
+  const [projects, setProjects] = useState<Project[] | null>(snapshot ?? null);
   const [ports, setPorts] = useState<PortReport | null>(null);
   const [plan, setPlan] = useState<LaunchPlan | null>(null);
   const [memByCode, setMemByCode] = useState<Map<string, MemoryCard>>(new Map());
@@ -56,12 +57,16 @@ export default function Monitor() {
   };
 
   useEffect(() => {
+    if (snapshot !== undefined) {
+      setProjects(snapshot);
+      return;
+    }
     void reloadCore();
     void reloadPlan().catch(() => {});
     void fetchDiscovery().then(setDiscovery).catch(() => {});
     const id = setInterval(() => void reloadCore(), 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [snapshot]);
 
   const startableSet = useMemo(
     () => new Set((plan?.projects ?? []).flatMap((p) => p.services).filter((s) => s.startable).map((s) => s.code)),
@@ -130,7 +135,7 @@ export default function Monitor() {
         </div>
       )}
 
-      <div className="monitor-bar">
+      {!readOnly && <div className="monitor-bar">
         <div className="monitor-bar-info">
           <strong>{selection.size}</strong> selected
           <label className="auto-launch">
@@ -146,7 +151,7 @@ export default function Monitor() {
           <span className="bar-sep" />
           <button disabled={busy !== null} onClick={doCheckUpdates}>{busy === 'updates' ? 'Checking...' : 'Check updates'}</button>
         </div>
-      </div>
+      </div>}
 
       {discovery && discovery.candidates.length > 0 && (
         <div className="discovery-strip">
@@ -161,6 +166,7 @@ export default function Monitor() {
       <div className="svc-rows">
         {rows.map((project) => (
           <ProjectRow
+            readOnly={readOnly}
             key={project.project_code}
             project={project}
             portsByCode={portsByCode}
@@ -176,7 +182,7 @@ export default function Monitor() {
         ))}
       </div>
 
-      {detailFor && (
+      {!readOnly && detailFor && (
         <ServiceDetailOverlay
           c={latestComponent(projects, detailFor.code) ?? detailFor}
           port={primaryPortStatus(latestComponent(projects, detailFor.code) ?? detailFor, portsByCode.get(detailFor.code) ?? [])}
@@ -187,15 +193,16 @@ export default function Monitor() {
           onShowLogs={() => setLogsOpenFor(detailFor.code)}
         />
       )}
-      {logsOpenFor && <LogsDrawer code={logsOpenFor} onClose={() => setLogsOpenFor(null)} />}
+      {!readOnly && logsOpenFor && <LogsDrawer code={logsOpenFor} onClose={() => setLogsOpenFor(null)} />}
     </div>
   );
 }
 
 function ProjectRow({
-  project, portsByCode, memByCode, updates, startableSet, selection,
+  readOnly, project, portsByCode, memByCode, updates, startableSet, selection,
   onToggleSelect, onShowLogs, onShowDetail, onChanged,
 }: {
+  readOnly: boolean;
   project: Project;
   portsByCode: Map<string, ServicePortStatus[]>;
   memByCode: Map<string, MemoryCard>;
@@ -216,7 +223,7 @@ function ProjectRow({
     <div className={`svc-row ${rowState} ${components.every((c) => c.disabled) ? 'disabled' : ''}`}>
       <div className="svc-row-main project-row-main">
         <span className={`dot ${running ? 'running' : 'stopped'}`} title={running ? 'one or more components running' : 'no running components'} />
-        <div className="project-row-selects">
+        {!readOnly && <div className="project-row-selects">
           {components.map((c) => (
             <label key={c.code} className="svc-row-select" title={startableSet.has(c.code) ? 'include in launch set' : 'not startable'}>
               <input
@@ -227,14 +234,15 @@ function ProjectRow({
               />
             </label>
           ))}
-        </div>
-        <button className="svc-name-button project-name-button" onClick={() => onShowDetail(primary)}>
+        </div>}
+        <button className="svc-name-button project-name-button" disabled={readOnly} onClick={() => onShowDetail(primary)}>
           <span className="svc-row-name">{projectDisplayName(project)}</span>
           <span className="svc-row-code">{branch?.branch ? `${branch.branch}${branch.dirty ? ' *' : ''}` : '-'}</span>
         </button>
         <div className="project-component-statuses">
           {components.map((c) => (
             <ComponentStatusLine
+              readOnly={readOnly}
               key={c.code}
               c={c}
               portStatuses={portsByCode.get(c.code) ?? []}
@@ -252,8 +260,9 @@ function ProjectRow({
 }
 
 function ComponentStatusLine({
-  c, portStatuses, mem, update, onShowLogs, onShowDetail, onChanged,
+  readOnly, c, portStatuses, mem, update, onShowLogs, onShowDetail, onChanged,
 }: {
+  readOnly: boolean;
   c: Component;
   portStatuses: ServicePortStatus[];
   mem: MemoryCard | undefined;
@@ -300,7 +309,7 @@ function ComponentStatusLine({
   const memPct = memoryPct(mem);
   return (
     <div className={`component-status-line ${displayState} ${c.disabled ? 'disabled' : ''}`}>
-      <button className="component-status-main" onClick={onShowDetail}>
+      <button className="component-status-main" disabled={readOnly} onClick={onShowDetail}>
         <span className={`dot ${displayState}`} title={healthTitle} />
         <span className="component-status-role">{componentLabel(c)}</span>
         <span className={`state-badge ${displayState}`} title={healthTitle}>{displayState}</span>
@@ -310,7 +319,7 @@ function ComponentStatusLine({
         {managedPorts(c).map((p) => (
           <span className={`managed-port ${portStatusFor(p, portStatuses)?.conflict ? 'conflict' : ''}`} key={`${p.role}:${p.port}`}>
             {p.role}: {p.port}
-            <button className="danger" disabled={opsBusy} onClick={() => void emergency('kill-port', p.port)}>Kill</button>
+            {!readOnly && <button className="danger" disabled={opsBusy} onClick={() => void emergency('kill-port', p.port)}>Kill</button>}
           </span>
         ))}
       </div>
@@ -331,15 +340,15 @@ function ComponentStatusLine({
           {url && <a className="svc-url" href={url} target="_blank" rel="noreferrer">{shortUrl(url)}</a>}
           {update?.available && <span className="tag upd" title={`behind ${update.behind}`}>update</span>}
       </div>
-      <div className="svc-row-actions">
+      {!readOnly && <div className="svc-row-actions">
           {url && <button disabled={busy} onClick={() => openFrontendUrl(url)}>Open</button>}
           {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
           {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
           {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
           {managedPorts(c).length > 0 && <button disabled={opsBusy} onClick={() => void emergency('claude-port-fix')}>Claude ops</button>}
           <button disabled={busy} onClick={onShowLogs}>Logs</button>
-      </div>
-      {running && (
+      </div>}
+      {running && (!readOnly || mem) && (
         <div className="svc-row-metrics">
           <MetricGraph label="CPU" color="#f59e0b" points={(mem?.cpu_spark ?? []).map((s) => ({ t: s.t, v: s.cpu }))} value={mem?.cpu_pct != null ? `${mem.cpu_pct}%` : '-'} />
           <MetricGraph label="Memory" color="#60a5fa" points={(mem?.spark ?? []).map((s) => ({ t: s.t, v: s.rss }))} value={mem?.rss_bytes != null ? fmtMiB(mem.rss_bytes) + (memPct != null ? ` (${memPct.toFixed(0)}%)` : '') : '-'} />
