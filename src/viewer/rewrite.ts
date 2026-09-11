@@ -127,7 +127,11 @@ export function rewriteHtml(text: string, target: ViewerTarget, headers: Headers
   let html = text.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi,
     (_all, open: string, script: string, close: string) => {
     const marker = `\0EX_VIEWER_SCRIPT_${scripts.length}\0`;
-    scripts.push(script);
+    // Vite's React refresh preamble is an inline module. Its imports bypass
+    // fetch/DOM interception, just like imports in external module responses.
+    // JSON data and classic scripts must retain their original contents.
+    const isModule = /\btype\s*=\s*(["'])module\1/i.test(open);
+    scripts.push(isModule ? rewriteModules(script, target) : script);
     return rewriteTag(open, target, nonce) + marker + close;
   });
   html = html.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi,
