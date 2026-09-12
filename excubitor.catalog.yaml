@@ -19,3 +19,31 @@ services:
       url: http://127.0.0.1:17334/health
       interval_sec: 30
       grace_period_sec: 30
+
+  # Excubitor 自身。 **観測専用**で、 lifecycle は持たせない。
+  #
+  # Excubitor は他サービスの監督者であって被監督者ではないので、 `command` も
+  # `start_script` も置かない (= spawn する対象が無い)。 `autostart: false` と
+  # `restart_policy: no` も合わせ、 自分を起動・再起動する経路を作らない。 起動は
+  # 常駐 supervisor が持つ。
+  #
+  # それでも catalog に載せるのは、 サービスの版・死活を横断照会する側 (Revisor の
+  # service-version、 Concordia) が catalog だけを頼りにサービスを解決するため。
+  # 載せないと `Ex` が `excubitor-viewer-dmz` (:17334、 既定で停止) に解決され、
+  # 走っている本体 (:17332) の版が引けない。
+  - code: excubitor
+    name: Excubitor (Supervisor)
+    description: サービス監視・起動制御の本体。observability と control plane を提供する。
+    project_code: Ex
+    component: supervisor
+    tier: personal
+    runtime: node
+    repo: LUDIARS/Excubitor
+    cwd: ${ARS_ROOT}/Excubitor
+    port: 17332
+    autostart: false
+    restart_policy: "no"
+    health:
+      type: http
+      url: http://127.0.0.1:17332/health
+      interval_sec: 30
