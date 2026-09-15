@@ -170,6 +170,7 @@ Concordia の `catalog/loader.ts` の `ServiceSchema` を継承。主フィー�
 - `runtime`: `docker-compose | docker | node | dev-process-md`
 - `cwd` / `command` / `compose_file` / `services` / `container_names`
 - `autostart` (bool) / `restart_policy` (`no|on-failure|always`) / `max_restart`
+- `deploy_notify` (bool, 既定 true): false なら git hash の変化を検知しても Concordia へ service-deployed を送らない (同じ repo を共有する frontend などの二重通知を避ける)
 - `health` (`http|tcp|cmd` + interval / grace)
 - `log_sources` / `log_path` (Vestigium JSONL を優先)
 - `infisical` (project_id / environment / inject / prefix)

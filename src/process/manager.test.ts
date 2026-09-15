@@ -64,6 +64,7 @@ import {
   spawnService,
   validateManagedProcess,
 } from './manager.js';
+import { dispatchServiceDeployment } from '../deploy/deployed-dispatch.js';
 
 describe('shouldDetachSpawn (design.md §15.1)', () => {
   it('Windows は detached を外す (DETACHED_PROCESS が CREATE_NO_WINDOW を無効化するため)', () => {
@@ -158,6 +159,36 @@ describe('process manager lifecycle hardening', () => {
     const stopping = killService('running-state-failure');
     child.emit('exit', null, 'SIGTERM');
     await expect(stopping).resolves.toBe(true);
+  });
+
+  it('dispatches the deployment event for a service by default', async () => {
+    const child = fakeChild(9105);
+    mocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+
+    await spawnService(service('deploy-notify-default'));
+    expect(dispatchServiceDeployment).toHaveBeenCalledWith(expect.objectContaining({ code: 'deploy-notify-default' }));
+
+    const stopping = killService('deploy-notify-default');
+    child.emit('exit', null, 'SIGTERM');
+    await stopping;
+  });
+
+  it('does not dispatch the deployment event when the catalog opts out', async () => {
+    const child = fakeChild(9106);
+    mocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+
+    await spawnService({ ...service('deploy-notify-opt-out'), deploy_notify: false });
+    expect(dispatchServiceDeployment).not.toHaveBeenCalled();
+
+    const stopping = killService('deploy-notify-opt-out');
+    child.emit('exit', null, 'SIGTERM');
+    await stopping;
   });
 
   it('suppresses restart policy for an explicit stop and waits for exit handling', async () => {

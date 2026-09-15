@@ -520,13 +520,17 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
 
   // Network failure must never alter a successful service start. The persisted
   // hash also deduplicates subsequent restart-loop notifications.
-  void dispatchServiceDeployment({
-    code: svc.code,
-    gitHash: version.gitHash,
-    version: version.value,
-    startedAt: spawnedAt,
-    restartCount,
-  });
+  // Services that opt out (catalog `deploy_notify: false`) share a repo with a
+  // notifying service, so dispatching here would duplicate the notification.
+  if (svc.deploy_notify !== false) {
+    void dispatchServiceDeployment({
+      code: svc.code,
+      gitHash: version.gitHash,
+      version: version.value,
+      startedAt: spawnedAt,
+      restartCount,
+    });
+  }
 
   return spawned;
 }

@@ -183,6 +183,10 @@ const ServiceSchema = z.object({
   allow_hot_reload: z.boolean().default(false),
   restart_policy: z.enum(['no', 'on-failure', 'always']).default('no'),
   max_restart: z.number().default(5),
+  // false の service は git hash が変わって起動しても Concordia へ service-deployed を送らない。
+  // 同じ repo を共有する frontend 等で、デプロイ通知が backend と二重になるのを避けるために使う。
+  // 省略時は送る (既存 fragment と既存テストの Service fixture を変えないため optional にする)。
+  deploy_notify: z.boolean().optional(),
   health: HealthSchema.optional(),
   log_sources: z.array(LogSourceSchema).optional(),
   /**
