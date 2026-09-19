@@ -427,8 +427,10 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
 ユーザ指示:「サービス起動時はウィンドウを作らず起動・再起動も Excubitor から」「Concordia/Memoria 等の start-xxxx.bat 系に対応」「Corpus を使う/使わないケースを設定できるように」「ログを集積しサービス毎に取得、 オンメモリで持たず全サービスをストリームで確認、 API + MCP 対応」「ポート衝突を回避・検知」「カードを大きく詳細 + 最近の更新内容」。
 
 ### 15.1 ウィンドウ無し起動 (req1)
-> 2026-08-02 更新: Windows の既定 spawn 戦略は §17 (job-breakaway) へ移行した。本節は
-> `EXCUBITOR_SPAWN_STRATEGY=child` を選んだ場合の規定として有効。窓抑止の要件自体は不変。
+> 2026-08-02 更新: Windows の既定 spawn 戦略は §17 (job-breakaway) へ移行した。
+> 2026-09-19 更新: Windows で child 起動を選ぶ経路は廃止した (§17.6)。本節の「Windows は
+> detached を外す」規定は適用先が無くなり、履歴として残す。窓抑止の要件自体は不変で、
+> job-breakaway 側 (launcher の `ShowWindow=0` と `windowsHide`) が満たす。
 
 - `process/manager.ts` の spawn を **Windows では `windowsHide: true` のみ (detached を外す)** で起動する。
   - **背景の罠**: `windowsHide` が立てる `CREATE_NO_WINDOW` は、 `detached` が立てる `DETACHED_PROCESS` と併用すると CreateProcess 仕様で**無視される** ([process-creation-flags](https://learn.microsoft.com/windows/win32/procthread/process-creation-flags))。 当初 `detached:true + windowsHide:true` を併用したため窓抑止が効かず、 コンソール非保持の `cmd.exe` が自前で新規コンソール窓を出していた (#req1 の再発)。
@@ -538,10 +540,8 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
 - **win32 の managed service spawn 既定を `job-breakaway` にする** (`src/process/breakaway-spawn.ts`)。
   WMI `Win32_Process.Create` は WmiPrvSE 側でプロセスを生成するため、呼び出し元の Job に入らない。
 - 非 win32 の既定は従来どおり `child` (detached + プロセスグループ)。
-  `EXCUBITOR_SPAWN_STRATEGY=child|job-breakaway` で明示上書きでき、**不正値は fail-fast**
-  (無言の戦略フォールバックを禁止する §16.2 の原則を spawn 層にも適用)。
-- §15.1 の「Windows は detached を外す」は `child` 戦略を選んだ場合の規定として残る
-  (`shouldDetachSpawn` は不変)。
+- ~~`EXCUBITOR_SPAWN_STRATEGY=child|job-breakaway` で明示上書きできる~~ → **2026-09-19 廃止 (§17.6)**。
+  戦略は実行 OS だけで決まる。
 
 ### 17.3 契約
 
@@ -765,3 +765,38 @@ pid 不在だけでなく、timeout・権限・コマンド起動失敗も含ま
 - 全 managed service が adopted 管理になるため、AdoptedProcessReaper の生存確認
   (`verifyProcessIdentity`) が **サービス数 × 5 秒間隔で `powershell.exe` を起動する**。
   サービス数が増えたら照合の一括化 (1 回の PowerShell で全 pid を返す) を検討する。
+
+### 17.6 win32 の child 起動を廃止する (2026-09-19)
+
+**事象**: 2026-09-19 16:53:06 (JST)、外部 fragment の catalog trust を反映するために supervisor を
+`Stop-ScheduledTask` → `Start-ScheduledTask` で入れ替えた瞬間、Concordia / Revisor / Memoria /
+Praeforma / concordia-cost / actio-web / Elegantia / Figmentum web と外部 fragment の Web サービスが
+同時に消えた。落ちた側の err.log は空で、Memoria は `previous run ended 2026-09-19T07:53:06.928Z` を残した。
+autostart 対象は数十秒以内に新 pid で再 spawn されたため「Cc は残った」ように見え、autostart 外の
+Web 系だけが落ちたまま残った。2026-09-06 の同時死 (problem_logs/2026-09-06-*) と同じ機構である。
+
+**原因**: ユーザ環境変数 (`HKCUEnvironment`) に `EXCUBITOR_SPAWN_STRATEGY=child` が残っていた。
+job-breakaway が 2026-08-12 に照合予算不足で失敗し続けた時期の回避策と推定される (audit_log の
+breakaway 失敗記録は 08-12 が最後)。この値のせいで win32 でも child 起動になり、サービスは
+supervisor の**直接の子**として Scheduled Task の Job に属した (実測: ppid=supervisor、
+`IsProcessInJob=true`)。Task の停止で OS が Job ごと終了させた。2026-09-06 の problem log が
+「launcher を通らない spawn 経路が別に存在する」と書いた経路の正体はこの上書きだった。
+
+**決定**:
+
+- win32 は **必ず** job-breakaway で起動する。win32 で child 起動を選ぶ手段 (env / option) を持たない。
+  判定は `src/process/spawn-strategy.ts` の `spawnsOutsideJob()` に一本化した。
+- `EXCUBITOR_SPAWN_STRATEGY` は読まない。値が残っていれば 1 プロセス 1 回だけ warn を出す
+  (従わないことを観測可能にするため。fail-fast にしないのは、残骸 1 つで全 spawn を止めないため)。
+- child 起動は POSIX 専用とし、常に `detached: true` (自前プロセスグループ) で起動する。
+  `shouldDetachSpawn` と §15.1 の win32 分岐は削除した。
+- 登録テストは起動経路の判定だけを `vi.mock('./spawn-strategy.js')` で差し替え、どの OS でも
+  child / job-breakaway の両ライフサイクルを検証する。
+
+**前提の再確認 (2026-09-19 実測)**: job-breakaway 起動は 3 回連続で成功 (0.8〜1.1s)、
+生成プロセスは 3 つとも `IsProcessInJob=false`。08-12 の失敗を直した 4078bb8 (照合予算 10s) 以降の
+経路で動いている。
+
+**反映**: supervisor の再起動が要る (spawn は supervisor が持つ)。再起動の瞬間は、Job 内に残っている
+既存サービスが最後の 1 回だけ巻き添えになる。以後に起動したサービスは Job 外に出るため、
+supervisor の再起動・死亡を生き延びる。

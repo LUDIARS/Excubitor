@@ -12,9 +12,13 @@ const mocks = vi.hoisted(() => ({
   waitForProcessIdentityOutcome: vi.fn(),
   loggerWarn: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
+  spawnsOutsideJob: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
+// 起動経路は実行 OS で決まる (win32 = job-breakaway 固定)。どの OS で走らせても両経路を
+// 検証できるよう、判定だけを差し替える。本番コードに経路を選ぶ手段は無い (§17.6)。
+vi.mock('./spawn-strategy.js', () => ({ spawnsOutsideJob: mocks.spawnsOutsideJob }));
 vi.mock('../shared/logger.js', () => ({
   createNamedLogger: () => ({ info: vi.fn(), warn: mocks.loggerWarn, error: vi.fn() }),
 }));
@@ -60,22 +64,10 @@ import {
   isPidManaged,
   killService,
   resumeProcessRestarts,
-  shouldDetachSpawn,
   spawnService,
   validateManagedProcess,
 } from './manager.js';
 import { dispatchServiceDeployment } from '../deploy/deployed-dispatch.js';
-
-describe('shouldDetachSpawn (design.md §15.1)', () => {
-  it('Windows は detached を外す (DETACHED_PROCESS が CREATE_NO_WINDOW を無効化するため)', () => {
-    expect(shouldDetachSpawn('win32')).toBe(false);
-  });
-
-  it('POSIX は プロセスグループ生存のため detached を維持', () => {
-    expect(shouldDetachSpawn('linux')).toBe(true);
-    expect(shouldDetachSpawn('darwin')).toBe(true);
-  });
-});
 
 describe('inheritableSupervisorEnv', () => {
   it('drops the Excubitor machine identity credential so children cannot fetch other projects', () => {
@@ -100,10 +92,10 @@ describe('inheritableSupervisorEnv', () => {
 
 describe('process manager lifecycle hardening', () => {
   beforeEach(() => {
-    // 既存のライフサイクル検証は ChildProcess ベースの挙動を対象にする。win32 の
-    // 既定 (job-breakaway) は専用の describe で検証する。
-    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'child');
+    // 既存のライフサイクル検証は ChildProcess ベースの挙動 (POSIX の child 起動) を対象にする。
+    // win32 の job-breakaway は専用の describe で検証する。
     vi.clearAllMocks();
+    mocks.spawnsOutsideJob.mockReturnValue(false);
     mocks.dbRun.mockReset();
     mocks.verifyProcessIdentity.mockResolvedValue(true);
     mocks.prepareSpawnEnv.mockImplementation(async (_svc: unknown, env: Record<string, string>) => env);
@@ -297,9 +289,9 @@ describe('process manager lifecycle hardening', () => {
       // §17.4.2: 先頭語は実行ファイルへ解決してから渡す (win32 では node.exe の絶対パス)。
       expect.stringMatching(/(^|[\\/])node(\.exe)?$/),
       ['demo.js'],
-      // 期待値は design.md §15.1 の契約を直接書く (実装関数を再利用すると恒真になる)。
+      // child 起動は POSIX 専用で、supervisor 再起動を生き延びるよう常に detached (§17.6)。
       expect.objectContaining({
-        detached: process.platform !== 'win32',
+        detached: true,
         windowsHide: true,
         env: expect.objectContaining({
           EXCUBITOR_SERVICE_VERSION: '0.0.0+unversioned',
@@ -408,17 +400,13 @@ function service(code: string): Service {
   } as Service;
 }
 
-describe('job-breakaway spawn (win32 default)', () => {
+describe('job-breakaway spawn (win32)', () => {
   beforeEach(() => {
-    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'job-breakaway');
     vi.clearAllMocks();
+    mocks.spawnsOutsideJob.mockReturnValue(true);
     mocks.dbRun.mockReset();
     mocks.prepareSpawnEnv.mockImplementation(async (_svc: unknown, env: Record<string, string>) => env);
     resumeProcessRestarts();
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
   });
 
   /** WMI は短命 launcher の pid を返し、実プロセスの pid は launcher が結果へ書く。 */
@@ -531,12 +519,5 @@ describe('job-breakaway spawn (win32 default)', () => {
       }),
     ).rejects.toThrow(/spawn npm ENOENT/);
     expect(isManaged('breakaway-launch-failed')).toBe(false);
-  });
-
-  it('rejects an unknown EXCUBITOR_SPAWN_STRATEGY instead of guessing', async () => {
-    vi.stubEnv('EXCUBITOR_SPAWN_STRATEGY', 'both');
-    await expect(spawnService(service('breakaway-bad-env'))).rejects.toThrow(
-      /EXCUBITOR_SPAWN_STRATEGY/,
-    );
   });
 });

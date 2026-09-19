@@ -30,6 +30,7 @@ import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-version.js';
 import { verifyProcessIdentity, waitForProcessIdentityOutcome, type VerifiedProcessIdentity } from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
+import { spawnsOutsideJob } from './spawn-strategy.js';
 import { clearDeclaredPort } from './port-guard.js';
 import { dispatchServiceDeployment } from '../deploy/deployed-dispatch.js';
 
@@ -37,7 +38,7 @@ const logger = createNamedLogger('excubitor.process');
 
 export interface SpawnedProcess {
   code: string;
-  /** job-breakaway 起動 (win32 既定) は ChildProcess を持たない (pid 管理)。 */
+  /** job-breakaway 起動 (win32) は ChildProcess を持たない (pid 管理)。 */
   child: ChildProcess | null;
   pid: number | null;
   startedAt: Date;
@@ -267,20 +268,6 @@ export async function spawnService(svc: Service, opts: SpawnOptions = {}): Promi
   }
 }
 
-/**
- * spawn 時に `detached` を立てるか (design.md §15.1)。
- *
- * POSIX: managed services are deliberately detached (own process group) so they
- * survive an OS-manager restart of the local-control supervisor.
- * Windows: detached を外す。 DETACHED_PROCESS と併用すると windowsHide の
- * CREATE_NO_WINDOW が CreateProcess 仕様で無視され、 shell 経由の cmd.exe が自前の
- * コンソール窓を開く。 Windows は親終了で子を連鎖終了しないため再起動耐性に detached は
- * 不要 (boot 時の reconcile/adoptProcess は不変)。 停止は従来どおり taskkill /T /F。
- */
-export function shouldDetachSpawn(platform: NodeJS.Platform): boolean {
-  return platform !== 'win32';
-}
-
 /** @implements SPEC-SERVICE-RUNTIME-VERSION */
 async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<SpawnedProcess> {
   if (processes.has(svc.code)) {
@@ -376,9 +363,10 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   // では子が Job を継承して脱出できない (detached は CREATE_NEW_PROCESS_GROUP /
   // DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_JOB ではない)。Task の
   // tree-kill で全サービスが道連れになった実障害 (2026-08-02) の根治として、
-  // win32 既定は WMI 経由の job-breakaway spawn を使い、生成 pid を adopted と
+  // win32 は必ず WMI 経由の job-breakaway spawn を使い、生成 pid を adopted と
   // 同じ pid 管理 (reaper 再起動 / taskkill /T stop) に載せる (design.md §17)。
-  if (resolveSpawnStrategy() === 'job-breakaway') {
+  // win32 で child 起動を選ぶ経路は無い (§17.6)。
+  if (spawnsOutsideJob()) {
     // launcher が Node の spawn で起動するため、コマンドは child 戦略と同じ
     // (cmd, args, shell) の形のまま渡す。 文字列へ畳まないので引用の食い違いも起きない。
     // app は元から exe 直起動。それ以外は先頭語を実行ファイルへ解決し、cmd.exe が
@@ -395,10 +383,8 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   }
 
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
-  // child 戦略: POSIX はプロセスグループ生存のため detached を維持し、win32 で
-  // child 戦略を明示した場合は design.md §15.1 のとおり detached を外して
-  // CREATE_NO_WINDOW (windowsHide) を有効にする。
-  const detached = shouldDetachSpawn(process.platform);
+  // child 起動は POSIX 専用。managed service は自前のプロセスグループに置き (detached)、
+  // local-control supervisor が OS service manager から再起動されても生き残らせる。
   let child: ChildProcess;
   let spawnedAt: Date;
   try {
@@ -411,7 +397,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
       shell: resolvedChild.shell,
       env: childEnv,
       stdio: ['ignore', stdoutFd, stderrFd],
-      detached,
+      detached: true,
       windowsHide: true,
     });
     spawnedAt = new Date();
@@ -484,7 +470,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   };
   processes.set(svc.code, spawned);
   logger.info(
-    { code: svc.code, pid: child.pid, restartCount, detached, version: childEnv[SERVICE_VERSION_ENV] },
+    { code: svc.code, pid: child.pid, restartCount, detached: true, version: childEnv[SERVICE_VERSION_ENV] },
     'spawned (windowless)',
   );
 
@@ -748,16 +734,6 @@ export function inheritableSupervisorEnv(env: NodeJS.ProcessEnv): Record<string,
         typeof entry[1] === 'string' && !NON_INHERITABLE_ENV_KEYS.includes(entry[0]),
     ),
   );
-}
-
-/** 実行時の spawn 戦略。EXCUBITOR_SPAWN_STRATEGY で明示上書き (不正値は fail-fast)。 */
-function resolveSpawnStrategy(): 'child' | 'job-breakaway' {
-  const override = process.env.EXCUBITOR_SPAWN_STRATEGY;
-  if (override === undefined || override === '') {
-    return process.platform === 'win32' ? 'job-breakaway' : 'child';
-  }
-  if (override === 'child' || override === 'job-breakaway') return override;
-  throw new Error(`EXCUBITOR_SPAWN_STRATEGY must be "child" or "job-breakaway": ${override}`);
 }
 
 // WMI 経由 spawn は powershell と launcher の起動を挟むため、作成時刻の照合は spawn 前後の

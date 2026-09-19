@@ -17,8 +17,10 @@
  * 常駐するのは実プロセスだけになり、ログのロックは構造的に起きない。spawn 失敗も
  * 「無出力の即死」ではなく理由つきで supervisor に返る。
  *
- * Windows は親の終了で子を道連れにしないため、detached は付けない
+ * Windows は親の終了だけでは子を道連れにしないため、detached は付けない
  * (design.md §15.1: DETACHED_PROCESS は CREATE_NO_WINDOW を無効化して窓を開く)。
+ * これは **Job Object に属さない場合に限って** 成り立つ。launcher は WMI 経由で supervisor の
+ * Job の外に生成されるので成り立つが、Job 内の親が死ぬと子も Job ごと殺される (design.md §17.6)。
  *
  * ただし **`spawn` イベント直後に launcher が終了すると子が起動に入る前に消える**
  * (2026-08-09 実測)。`spawn` は CreateProcess の成功を意味するだけで、子の初期化完了は
