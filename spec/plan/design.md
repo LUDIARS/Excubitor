@@ -775,12 +775,31 @@ Praeforma / concordia-cost / actio-web / Elegantia / Figmentum web と外部 fra
 autostart 対象は数十秒以内に新 pid で再 spawn されたため「Cc は残った」ように見え、autostart 外の
 Web 系だけが落ちたまま残った。2026-09-06 の同時死 (problem_logs/2026-09-06-*) と同じ機構である。
 
-**原因**: ユーザ環境変数 (`HKCUEnvironment`) に `EXCUBITOR_SPAWN_STRATEGY=child` が残っていた。
+**原因**: ユーザ環境変数 (`HKCU\Environment`) に `EXCUBITOR_SPAWN_STRATEGY=child` が残っていた。
 job-breakaway が 2026-08-12 に照合予算不足で失敗し続けた時期の回避策と推定される (audit_log の
 breakaway 失敗記録は 08-12 が最後)。この値のせいで win32 でも child 起動になり、サービスは
-supervisor の**直接の子**として Scheduled Task の Job に属した (実測: ppid=supervisor、
-`IsProcessInJob=true`)。Task の停止で OS が Job ごと終了させた。2026-09-06 の problem log が
+supervisor の**直接の子**として `detached` なしで起動された (§15.1 の win32 分岐。実測: ppid=supervisor)。
+Windows の Node (libuv) は `detached` なしで起動した子を、親だけがハンドルを持つ
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` の Job に入れる。親が終了するとハンドルが閉じ、子は OS に一斉終了させられる。
+supervisor が終わった理由 (Task の停止 / 未捕捉例外) は関係ない。2026-09-06 の problem log が
 「launcher を通らない spawn 経路が別に存在する」と書いた経路の正体はこの上書きだった。
+
+**機構の訂正 (2026-09-19 実測)**: 本節の初版と problem log は「Scheduled Task の Job ごと終了した」と
+していたが誤り。根拠は 2 つ。
+
+1. 反映のための 1 回目の supervisor 再起動 (18:36) で、旧 supervisor の直接の子だった Ex backend
+   (`detached: true` で起動) は `Stop-ScheduledTask` を生き延びた。Task の停止は detached の子を殺していない。
+2. 使い捨ての親 node から `detached` なし / ありの子を 1 つずつ起動し、親だけを `taskkill /F` (`/T` なし)
+   で終了すると、`detached` なしの子だけが消え、`detached` の子は残った。
+
+- `IsProcessInJob(h, NULL)` は「どれかの Job に属するか」しか返さない。`detached` なしの子を 1 つでも
+  起動した node は自分自身も True になる (実測)。子プロセスを起動するサービス (Concordia / Revisor /
+  Memoria の tsx など) が job-breakaway 後も True と出るのはこのためで、supervisor の Job にいることを
+  意味しない。生存の判定は supervisor 再起動前後の pid 比較で行う。
+- 守るべき不変条件は「supervisor と launcher は managed service を `detached` で起動する」こと。
+  §17.4.1 の「launcher が `spawn` 直後に終了すると子が消えた」(2026-08-09) もこの機構で説明でき、
+  `detached: true` で直ったのもそのためである。shell (cmd.exe) を挟む起動は `detached` を付けないため、
+  launcher 終了時にどこまで残るかは未検証。
 
 **決定**:
 
@@ -797,6 +816,10 @@ supervisor の**直接の子**として Scheduled Task の Job に属した (実
 生成プロセスは 3 つとも `IsProcessInJob=false`。08-12 の失敗を直した 4078bb8 (照合予算 10s) 以降の
 経路で動いている。
 
-**反映**: supervisor の再起動が要る (spawn は supervisor が持つ)。再起動の瞬間は、Job 内に残っている
-既存サービスが最後の 1 回だけ巻き添えになる。以後に起動したサービスは Job 外に出るため、
+**反映**: supervisor の再起動が要る (spawn は supervisor が持つ)。再起動の瞬間は、supervisor の直接の子として
+起動済みの既存サービスが最後の 1 回だけ巻き添えになる。以後に起動したサービスは supervisor の子ではなくなり、
 supervisor の再起動・死亡を生き延びる。
+
+**反映結果 (2026-09-19)**: 18:36 に反映し、autostart 外のサービスを起動し直した後、18:39 に supervisor を
+もう一度再起動した。稼働中の全サービス (17) の pid と health は前後で変わらず、supervisor の auto-launch も
+すべて `already running` で素通りした。

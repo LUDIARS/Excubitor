@@ -19,8 +19,10 @@
  *
  * Windows は親の終了だけでは子を道連れにしないため、detached は付けない
  * (design.md §15.1: DETACHED_PROCESS は CREATE_NO_WINDOW を無効化して窓を開く)。
- * これは **Job Object に属さない場合に限って** 成り立つ。launcher は WMI 経由で supervisor の
- * Job の外に生成されるので成り立つが、Job 内の親が死ぬと子も Job ごと殺される (design.md §17.6)。
+ * **この前提は Node の spawn には当てはまらない** (2026-09-19 実測、design.md §17.6)。Node (libuv) は
+ * `detached` なしの子を、親だけがハンドルを持つ KILL_ON_JOB_CLOSE の Job に入れるため、親が終了すると
+ * 子も消える。下の 2026-08-09 の「launcher が終了すると子が消えた」もこの機構で説明でき、
+ * `detached: true` が効いたのもそのためである。
  *
  * ただし **`spawn` イベント直後に launcher が終了すると子が起動に入る前に消える**
  * (2026-08-09 実測)。`spawn` は CreateProcess の成功を意味するだけで、子の初期化完了は

@@ -1,8 +1,9 @@
 /**
  * managed service をどの経路で起動するかの判定。正本: spec/plan/design.md §17.6。
  *
- * win32 は **必ず** Job 外 (job-breakaway) で起動する。Scheduled Task の Job 内に子を残すと、
- * supervisor の停止 (`Stop-ScheduledTask` / 未捕捉例外) で OS が Job ごと全サービスを殺す。
+ * win32 は **必ず** Job 外 (job-breakaway) で起動する。supervisor の直接の子として `detached` なしで
+ * 起動すると、Node (libuv) が子を「親だけがハンドルを持つ KILL_ON_JOB_CLOSE の Job」に入れるため、
+ * supervisor が終わると (`Stop-ScheduledTask` / 未捕捉例外) 全サービスが一斉に消える (design.md §17.6)。
  * child 起動 (supervisor の直接の子) は POSIX 専用で、win32 で選ぶ手段は持たない。
  *
  * 以前は `EXCUBITOR_SPAWN_STRATEGY=child` で win32 でも child 起動を選べたが、ユーザ環境変数に

@@ -16,6 +16,8 @@ kind: problem
 **これは回帰である。** 契約は「Ex が起動するサービスはすべて独立プロセスである」。
 実際には spawn したサービスが supervisor と同一 Job Object に属しており、
 supervisor が死ぬと OS によって道連れで強制終了される。
+(2026-09-19 訂正: その Job は Scheduled Task のものではなく、supervisor の node (libuv) が
+`detached` なしの子を入れる Job だった。下記「機構の訂正」)
 
 2026-09-06 16:51、Ex supervisor (pid 32984) が未捕捉例外で死亡し、その 172ms 後に
 Concordia (11111) と Revisor (4240) が同時に消滅した。Cc 側には一切の異常が無く、
@@ -72,6 +74,10 @@ Concordia は supervisor の **直接の子** であり、かつ **同一 Job Ob
 breakaway-launcher を経由していない。Windows は Job Object に
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` が付く場合、最後のハンドルが閉じた時点で
 Job 内の全プロセスを強制終了する。これが 172ms の同時死の機構である。
+(2026-09-19 訂正: KILL_ON_JOB_CLOSE の Job は Task のものではなく、supervisor の node (libuv) が
+`detached` なしの子のために作ったもの。ハンドルを持つのは supervisor だけなので、supervisor の死と
+同時に閉じる。9/6 は Task の停止ではなく supervisor の未捕捉例外による終了だったが、それでも
+同時死したことと整合する)
 
 ### 契約と実装の乖離
 
@@ -123,10 +129,28 @@ launcher を経由しない spawn 経路が別に存在し、そちらが detach
     concordia   5984                           inJob=True   ppid=63092
     figmentum-audio-web 41604                  inJob=True   ppid=63092
 
-    HKCUEnvironment:  EXCUBITOR_SPAWN_STRATEGY = child
+    HKCU\Environment:  EXCUBITOR_SPAWN_STRATEGY = child
 
 同時刻に `dist/process/breakaway-spawn.js` の `spawnOutsideJob` を無害な `node -e setTimeout` で
 3 回試行し、3 回とも成功 (0.8〜1.1s)、生成プロセスは 3 つとも `inJob=False`。job-breakaway 経路は動く。
+
+### 機構の訂正 (2026-09-19 実測)
+
+本記録は当初「Scheduled Task の Job ごと終了した」としていたが、正しくは次のとおり。
+Windows の Node (libuv) は `detached` なしで起動した子を、親だけがハンドルを持つ
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` の Job に入れる。親が終了するとハンドルが閉じ、子は OS に一斉終了させられる。
+
+- 反映のための 1 回目の supervisor 再起動 (2026-09-19 18:36) で、旧 supervisor の直接の子だった
+  Ex backend (`detached: true` で起動) は `Stop-ScheduledTask` を生き延びた。
+- 使い捨ての親 node から `detached` なし / ありの子を 1 つずつ起動し、親だけを `taskkill /F`
+  (`/T` なし) で終了すると、`detached` なしの子だけが消え、`detached` の子は残った。
+- 旧 child 戦略は design.md §15.1 により win32 でだけ `detached` を外していた。そのため
+  supervisor が終わる理由 (Task の停止 / 未捕捉例外) を問わず、配下が一斉に消えた。
+- 上の `inJob=True` の実測は根拠にならない。`IsProcessInJob(h, NULL)` は「どれかの Job に属するか」
+  しか返さず、`detached` なしの子を 1 つでも起動した node は自分自身も True になる (実測)。
+
+修正後の検証: 反映後に autostart 外のサービスを起動し直し、18:39 に supervisor をもう一度再起動した。
+稼働中の全サービス (17) の pid と health は前後で変わらなかった。
 
 ## Regression Context
 
@@ -158,6 +182,9 @@ spawn 経路が Job Object からの breakaway を保証していない。`detac
 `unref()` は **Job Object に対しては無力** であり、切り離しには
 `CREATE_BREAKAWAY_FROM_JOB` (かつ Job 側が `JOB_OBJECT_LIMIT_BREAKAWAY_OK` を許可)
 が必要になる。現状はどちらの保証も無い。
+(2026-09-19 訂正: 今回の全滅に効いたのは逆に `detached` の有無だった。`detached` なしの子は
+libuv の Job に入り、親の終了で消える。`detached: true` の子は supervisor の終了も Task の停止も
+生き延びた。「機構の訂正」参照)
 
 加えて、実測された Concordia の ppid が supervisor 直下であることから、
 **breakaway-launcher を経由しない spawn 経路が存在する**。契約を守る経路と
@@ -165,7 +192,7 @@ spawn 経路が Job Object からの breakaway を保証していない。`detac
 
 **経路の正体 (2026-09-19 確定)**: ユーザ環境変数 `EXCUBITOR_SPAWN_STRATEGY=child`。
 `src/process/manager.ts` の `resolveSpawnStrategy()` はこの値があれば win32 でも `child` を返し、
-supervisor の直接の子として `child_process.spawn` する (= Job 内)。コードに別経路があったのではなく、
+supervisor の直接の子として `detached` なしで `child_process.spawn` する (= libuv の Job 内)。コードに別経路があったのではなく、
 **設定による上書きが breakaway を黙って無効にしていた**。audit_log の breakaway 失敗記録は
 2026-08-12 (照合予算不足による `could not be verified` / `timed out after 20000ms`) が最後で、
 その回避策として設定され、4078bb8 (照合予算 10s) で原因が直った後も残ったと推定される
@@ -206,6 +233,8 @@ warn で流れているため確定していない。**別途調査が必要。*
    - Windows では `detached: true` だけでは不十分。Job 所属時は
      `CREATE_BREAKAWAY_FROM_JOB` を用いるか、supervisor 自身が
      `JOB_OBJECT_LIMIT_BREAKAWAY_OK` を持つ Job を作って子を入れる。
+     (2026-09-19 訂正: 実測では `detached: true` の子は supervisor の終了と Task の停止を生き延びた。
+     現行の job-breakaway は WMI で Task の Job を出たうえで `detached` で起動するので、どちらも満たす)
    - `breakaway-launcher.ts:20` の「Windows は親の終了で子を道連れにしない」という
      コメントは条件付きでしか成立しないため、記述を訂正する。— 対応済み (Job に属さない場合に限ると明記)
 2. **`excubitor-backend.ts:184` の `terminateChild()` を try/catch で包む。**
