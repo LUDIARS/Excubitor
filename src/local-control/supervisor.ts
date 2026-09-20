@@ -29,6 +29,7 @@ import {
 import { LocalControlServer, type LocalControlDispatch } from './server.js';
 import { LocalControlStateStore } from './state-store.js';
 import { TargetOperationQueue } from './target-queue.js';
+import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('excubitor.local-control');
 const DEFAULT_OPERATION_DRAIN_TIMEOUT_MS = 30_000;
@@ -523,7 +524,7 @@ function completedResponse(
 }
 
 async function serviceStatus(code: string, runtime: string): Promise<ServiceStatusPayload> {
-  if (runtime !== 'node' && runtime !== 'dev-process-md' && runtime !== 'app') {
+  if (!isLocalProcessRuntime(runtime)) {
     return { kind: 'service-status', code, runtime, state: 'unknown', running: null, pid: null };
   }
   const managed = await validateManagedProcess(code);

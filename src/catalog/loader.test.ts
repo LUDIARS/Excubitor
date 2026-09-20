@@ -90,6 +90,26 @@ describe('catalog source merge', () => {
     );
   });
 
+  it('accepts a python service so its interpreter can be spawned like node', () => {
+    // runtime: python が enum に無かった頃は、 定義があっても schema で無言に捨てられ
+    // 「カタログに無い」とだけ言われて起動できなかった (Interpres の worldpos sidecar)。
+    const basePath = join(mocks.root, 'excubitor.config.yaml');
+    writeYaml(basePath, '{}\n');
+    writeFragment('Interpres', [
+      'services:',
+      '  - code: interpres-worldpos',
+      '    name: Interpres WorldPos sidecar',
+      '    runtime: python',
+      '    cwd: /srv/interpres',
+      '    command: /srv/interpres/.venv/bin/python worldpos/server.py',
+    ].join('\n'));
+    process.env.EXCUBITOR_TRUSTED_FRAGMENT_REPOS = 'Interpres';
+
+    expect(loadCatalog(basePath).services).toMatchObject([
+      { code: 'interpres-worldpos', runtime: 'python' },
+    ]);
+  });
+
   it('logs fragment schema failures with their source instead of dropping them silently', () => {
     const basePath = join(mocks.root, 'excubitor.config.yaml');
     writeYaml(basePath, '{}\n');

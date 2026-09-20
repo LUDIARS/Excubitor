@@ -150,17 +150,19 @@ const ServiceSchema = z.object({
   /**
    * - docker-compose / docker: コンテナ
    * - node: `command` を spawn する常駐サービス (port を持つ)
+   * - python: node と同じく `command` を spawn する常駐サービス。 処理系が違うだけで
+   *   起動・死活・制御の扱いは node と同一 (venv の python.exe を直接指すのが既定)
    * - dev-process-md: cwd の dev-process.md から起動コマンドを解決
    * - app: **ローカルアプリ (プロダクト)**。 port を持たないネイティブ/デスクトップ製品
    *   (Tauri / Electron / native exe / CLI バイナリ)。 `exec` で起動し、 死活は
    *   プロセス生存で判定、 既定では自動 respawn しない (GUI を勝手に再起動しない)。
    */
-  runtime: z.enum(['docker-compose', 'docker', 'node', 'dev-process-md', 'app', 'android']),
+  runtime: z.enum(['docker-compose', 'docker', 'node', 'python', 'dev-process-md', 'app', 'android']),
   android: AndroidAppSchema.optional(),
   cwd: z.string().optional(),
   command: z.string().optional(),
   /**
-   * 起動スクリプト (.bat / .sh / .cmd) の絶対パス。 設定すると runtime=node/dev-process-md の
+   * 起動スクリプト (.bat / .sh / .cmd) の絶対パス。 設定すると runtime=node/python/dev-process-md の
    * `command` より優先してこのスクリプトを spawn する。 既存の start-<service>.bat
    * (git pull → 関連リポ build → npm run dev) をそのまま Excubitor から「ウィンドウ無し」で
    * 起動するための口。 cwd 省略時はスクリプトのあるディレクトリで実行する。

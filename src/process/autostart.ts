@@ -2,6 +2,7 @@ import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
 import { spawnService, isManaged } from './manager.js';
 import { resolveInjectEnv } from './inject.js';
+import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('concordia.observability.autostart');
 
@@ -28,7 +29,7 @@ export async function runAutostart(
     }
     // app は GUI 製品なので既定では autostart しないが、 catalog で autostart=true を
     // 明示したものは opt-in として起動する (node / dev-process-md と同じ spawn 経路)。
-    if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md' && svc.runtime !== 'app') {
+    if (!isLocalProcessRuntime(svc.runtime)) {
       skipped.push(svc.code);
       continue;
     }

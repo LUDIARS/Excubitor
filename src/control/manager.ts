@@ -17,6 +17,7 @@ import { runServiceBuild } from '../process/build.js';
 import { assertStartupEnv } from '../process/startup-env.js';
 import { injectServiceRuntimeVersion } from '../process/service-version.js';
 import { controlAndroid } from '../android/control.js';
+import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('excubitor.control');
 
@@ -57,7 +58,7 @@ export async function controlService(
       }
     }
     result = await controlDockerCompose(svc, action, composeEnv);
-  } else if (svc.runtime === 'node' || svc.runtime === 'dev-process-md' || svc.runtime === 'app') {
+  } else if (isLocalProcessRuntime(svc.runtime)) {
     logger.info({ code: svc.code, action, actor }, 'control invoke (process)');
     result = await controlProcess(svc, action, env);
   } else {

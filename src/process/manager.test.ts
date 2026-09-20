@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   stopProcessLog: vi.fn(),
   runServiceBuild: vi.fn(),
   verifyProcessIdentity: vi.fn(),
+  checkProcessIdentity: vi.fn(),
   waitForProcessIdentityOutcome: vi.fn(),
   loggerWarn: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
@@ -53,6 +54,7 @@ vi.mock('./cernere-launch-credential.js', () => ({
 }));
 vi.mock('./identity.js', () => ({
   verifyProcessIdentity: mocks.verifyProcessIdentity,
+  checkProcessIdentity: mocks.checkProcessIdentity,
   waitForProcessIdentityOutcome: mocks.waitForProcessIdentityOutcome,
 }));
 
@@ -204,19 +206,43 @@ describe('process manager lifecycle hardening', () => {
   it('prunes a stale adopted PID identity and records a crash', async () => {
     const startedAt = new Date('2026-07-12T00:00:00.000Z');
     adoptProcess('stale-adopted', { pid: 9191, startedAt, verified: true });
-    mocks.verifyProcessIdentity.mockResolvedValueOnce(false);
+    mocks.checkProcessIdentity.mockResolvedValueOnce({ ok: false, reason: 'exited' });
 
     await expect(validateManagedProcess('stale-adopted')).resolves.toBe(false);
 
     expect(isManaged('stale-adopted')).toBe(false);
-    expect(mocks.verifyProcessIdentity).toHaveBeenCalledWith(9191, startedAt);
+    expect(mocks.checkProcessIdentity).toHaveBeenCalledWith(9191, startedAt);
     expect(mocks.dbRun).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps an adopted process whose identity was merely unreadable', async () => {
+    // 照合は 5 秒ごとに powershell / ps を起動する外部コマンドで、 負荷が高いと timeout する。
+    // そこで adoption を捨てると reaper が「死んだ」と信じて二重起動し、 後から起動した方が
+    // port を奪って稼働中の実体を落とす。 unreadable は生存側に倒す。
+    const startedAt = new Date('2026-07-12T00:00:00.000Z');
+    adoptProcess('unreadable-adopted', { pid: 9194, startedAt, verified: true });
+    mocks.checkProcessIdentity.mockResolvedValueOnce({ ok: false, reason: 'unreadable' });
+
+    await expect(validateManagedProcess('unreadable-adopted')).resolves.toBe(true);
+
+    expect(isManaged('unreadable-adopted')).toBe(true);
+    expect(mocks.dbRun).not.toHaveBeenCalled();
+  });
+
+  it('drops an adopted PID that was recycled by another process', async () => {
+    const startedAt = new Date('2026-07-12T00:00:00.000Z');
+    adoptProcess('recycled-adopted', { pid: 9195, startedAt, verified: true });
+    mocks.checkProcessIdentity.mockResolvedValueOnce({ ok: false, reason: 'recycled' });
+
+    await expect(validateManagedProcess('recycled-adopted')).resolves.toBe(false);
+
+    expect(isManaged('recycled-adopted')).toBe(false);
+  });
+
   it('does not delete an adopted identity replaced during asynchronous validation', async () => {
-    let resolveVerification = (_verified: boolean): void => undefined;
-    mocks.verifyProcessIdentity.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
-      resolveVerification = resolve;
+    let resolveVerification = (_check: { ok: false; reason: string }): void => undefined;
+    mocks.checkProcessIdentity.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveVerification = resolve as typeof resolveVerification;
     }));
     adoptProcess('replaced-adopted', {
       pid: 9192,
@@ -230,7 +256,7 @@ describe('process manager lifecycle hardening', () => {
       startedAt: new Date('2026-07-12T00:01:00.000Z'),
       verified: true,
     });
-    resolveVerification(false);
+    resolveVerification({ ok: false, reason: 'exited' });
 
     await expect(validating).resolves.toBe(true);
     expect(getManagedPid('replaced-adopted')).toBe(9193);

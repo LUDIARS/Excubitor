@@ -167,7 +167,10 @@ Concordia で SQLite 化済みの schema (`observability/db/schema.ts`) をそ�
 Concordia の `catalog/loader.ts` の `ServiceSchema` を継承。主フィールド:
 
 - `code` / `name` / `project_code` / `component` / `port`
-- `runtime`: `docker-compose | docker | node | dev-process-md`
+- `runtime`: `docker-compose | docker | node | python | dev-process-md | app | android`
+  - `node` と `python` は同じ経路。 `cwd` を起点に `command` の先頭トークンを実行ファイルとして spawn するだけで、
+    処理系の違いは Excubitor 側に影響しない (venv の python.exe を直接指すのが既定)。
+  - 分類の正本は `src/catalog/runtime-kind.ts`。 制御・autostart・再採用・メモリ監視の対象判定はこの述語を使う。
 - `cwd` / `command` / `compose_file` / `services` / `container_names`
 - `autostart` (bool) / `restart_policy` (`no|on-failure|always`) / `max_restart`
 - `deploy_notify` (bool, 既定 true): false なら git hash の変化を検知しても Concordia へ service-deployed を送らない (同じ repo を共有する frontend などの二重通知を避ける)

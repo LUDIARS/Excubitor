@@ -11,6 +11,7 @@ import { Hono } from 'hono';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { detectLeak, type LeakResult } from './leak.js';
 import { latestPerTarget, querySeries, toLeakSamples, type LatestTarget } from './store.js';
+import { isDockerRuntime } from '../catalog/runtime-kind.js';
 
 const SPARK_POINTS = 80;
 
@@ -46,7 +47,7 @@ interface TargetCard {
 function primarySourceForKind(kind: string, runtime?: string): 'process' | 'docker' | 'wsl' | 'host' {
   if (kind === 'host') return 'host';
   if (kind === 'wsl') return 'wsl';
-  if (runtime === 'docker-compose' || runtime === 'docker') return 'docker';
+  if (runtime && isDockerRuntime(runtime)) return 'docker';
   return 'process';
 }
 

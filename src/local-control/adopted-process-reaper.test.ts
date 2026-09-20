@@ -120,6 +120,52 @@ describe('AdoptedProcessReaper', () => {
     expect(control).not.toHaveBeenCalled();
   });
 
+  it('counts successful recovery spawns toward the catalog limit', async () => {
+    // recovery の spawn はほぼ必ず成功するので、 成功でカウンタをリセットすると max_restart に
+    // 永遠に到達せず無制限に重複起動する。 稼働中の実体が port を奪われて落ちる原因になっていた。
+    const control = vi.fn(async () => successfulControl());
+    const reaper = new AdoptedProcessReaper({
+      queue: new TargetOperationQueue(),
+      refreshCatalog: async () => undefined,
+      service: () => service({ restart_policy: 'always', max_restart: 2 }),
+      listAdopted: () => ['alpha'],
+      isAdopted: () => true,
+      shouldRecover: () => true,
+      validateManaged: vi.fn(async () => false),
+      control,
+    });
+
+    for (let i = 0; i < 5; i += 1) await reaper.runOnce();
+
+    expect(control).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows recovery again once the service is confirmed healthy', async () => {
+    const control = vi.fn(async () => successfulControl());
+    let healthy = false;
+    const reaper = new AdoptedProcessReaper({
+      queue: new TargetOperationQueue(),
+      refreshCatalog: async () => undefined,
+      service: () => service({ restart_policy: 'always', max_restart: 1 }),
+      listAdopted: () => ['alpha'],
+      isAdopted: () => true,
+      shouldRecover: () => true,
+      validateManaged: vi.fn(async () => healthy),
+      control,
+    });
+
+    await reaper.runOnce();
+    await reaper.runOnce();
+    expect(control).toHaveBeenCalledTimes(1);
+
+    healthy = true;
+    await reaper.runOnce();
+    healthy = false;
+    await reaper.runOnce();
+
+    expect(control).toHaveBeenCalledTimes(2);
+  });
+
   it('stops periodic checks and waits for the active tick on close', async () => {
     vi.useFakeTimers();
     const refreshCatalog = vi.fn(async () => undefined);

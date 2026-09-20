@@ -28,6 +28,7 @@ import {
   raiseLeakTask,
 } from './store.js';
 import type { MemorySample } from './types.js';
+import { isDockerRuntime, isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('excubitor.memory');
 
@@ -38,14 +39,11 @@ interface RunningInstance {
   startedAt: number | null;
 }
 
-function isDockerRuntime(svc: Service): boolean {
-  return svc.runtime === 'docker-compose' || svc.runtime === 'docker';
-}
 function isProcessRuntime(svc: Service): boolean {
-  return svc.runtime === 'node' || svc.runtime === 'dev-process-md' || svc.runtime === 'app';
+  return isLocalProcessRuntime(svc.runtime);
 }
 function primarySource(svc: Service): 'process' | 'docker' {
-  return isDockerRuntime(svc) ? 'docker' : 'process';
+  return isDockerRuntime(svc.runtime) ? 'docker' : 'process';
 }
 
 /** running な instance を code → {instanceId, pid} で引けるよう取得。 */
@@ -78,7 +76,7 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
   const now = Date.now();
   const cpuCount = os.cpus().length;
   const running = loadRunningInstances();
-  const needDocker = catalog.services.some((s) => isDockerRuntime(s) && running.has(s.code));
+  const needDocker = catalog.services.some((s) => isDockerRuntime(s.runtime) && running.has(s.code));
 
   // 全プロセス走査は process-snapshot loop が一元管理する。ここではキャッシュだけを読む。
   const procList = getFreshProcessSnapshot(now)?.processes ?? null;
@@ -94,7 +92,7 @@ export async function collectMemoryOnce(catalog: Catalog): Promise<CollectResult
     const inst = running.get(svc.code);
     if (!inst) continue;
 
-    if (isDockerRuntime(svc) && dockerStats && svc.container_names) {
+    if (isDockerRuntime(svc.runtime) && dockerStats && svc.container_names) {
       for (const name of svc.container_names) {
         const stat = dockerStats.get(name);
         if (!stat) continue;

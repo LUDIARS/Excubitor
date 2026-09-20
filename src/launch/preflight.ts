@@ -17,6 +17,7 @@ import { managedPortsForService } from '../catalog/ports.js';
 import { resolveInjectEnv } from '../process/inject.js';
 import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
 import { getServiceByCode } from '../process/service-registry.js';
+import { needsWorkingDirectory } from '../catalog/runtime-kind.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -173,7 +174,7 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
 
 function checkPaths(svc: Service): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
-  if (svc.runtime === 'node' || svc.runtime === 'dev-process-md') {
+  if (needsWorkingDirectory(svc.runtime)) {
     if (svc.start_script && !existsSync(svc.start_script)) {
       checks.push({ kind: 'start_script', status: 'fail', detail: `start_script が存在しない: ${svc.start_script}` });
     } else if (svc.start_script) {

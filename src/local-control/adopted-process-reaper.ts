@@ -30,6 +30,14 @@ export interface AdoptedProcessReaperOptions {
  * catalog-authorized recovery without racing explicit service operations.
  */
 export class AdoptedProcessReaper {
+  /**
+   * code -> これまでに recovery で spawn し直した回数。 `max_restart` の上限判定に使う。
+   *
+   * **spawn が成功しても消さない。** recovery の spawn はほぼ必ず成功するので、 成功でリセットすると
+   * 上限に永遠に到達せず、 誤判定が続く限り無制限に重複起動し続ける (稼働中の実体が port を奪われて落ちる)。
+   * リセットするのは `validateManaged` が通った = サービスが実際に生きていると確認できたときだけ、
+   * および復旧対象から外れたとき。
+   */
   private readonly retryCounts = new Map<string, number>();
   private readonly intervalMs: number;
   private readonly listAdopted: () => string[];
@@ -112,14 +120,10 @@ export class AdoptedProcessReaper {
 
     const attempts = this.retryCounts.get(code) ?? 0;
     const maximum = Math.max(0, Math.trunc(service.max_restart));
-    if (attempts >= maximum) {
-      this.retryCounts.delete(code);
-      return;
-    }
+    if (attempts >= maximum) return;
 
     this.retryCounts.set(code, attempts + 1);
-    const result = await this.control(service, 'start', 'supervisor-adopted-recovery');
-    if (result.ok || attempts + 1 >= maximum) this.retryCounts.delete(code);
+    await this.control(service, 'start', 'supervisor-adopted-recovery');
   }
 }
 

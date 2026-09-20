@@ -21,6 +21,14 @@ export type ProcessIdentityOutcome =
   | { ok: true; identity: VerifiedProcessIdentity }
   | { ok: false; reason: ProcessIdentityFailureReason };
 
+/**
+ * 期待値つき照合の結果。 `ProcessIdentityFailureReason` に `recycled` (pid 再利用) を加えて、
+ * 「捨ててよい pid」と「捨ててはいけない pid」を呼び出し側が分けられるようにする。
+ */
+export type ProcessIdentityCheck =
+  | { ok: true; identity: VerifiedProcessIdentity }
+  | { ok: false; reason: ProcessIdentityFailureReason | 'recycled' };
+
 type StartedAtProbe =
   | { kind: 'started-at'; startedAt: Date }
   | { kind: 'exited' }
@@ -54,12 +62,38 @@ export async function verifyProcessIdentity(
   expectedStartedAt: Date,
   options: ProcessIdentityOptions = {},
 ): Promise<VerifiedProcessIdentity | null> {
-  if (!Number.isInteger(pid) || pid <= 0 || Number.isNaN(expectedStartedAt.getTime())) return null;
-  const actualStartedAt = await readProcessStartedAt(pid, options);
-  if (!actualStartedAt) return null;
+  const check = await checkProcessIdentity(pid, expectedStartedAt, options);
+  return check.ok ? check.identity : null;
+}
+
+/**
+ * `verifyProcessIdentity` と同じ照合をしつつ、 成立しなかった理由を残す。
+ *
+ * `probeProcessStartedAt` は「本当に居ない (`exited`)」と「居るが読めない (`unreadable`)」を
+ * わざわざ区別しているのに、 `verifyProcessIdentity` が両方を `null` へ潰すため、 呼び出し側が
+ * **生きているプロセスを死んだものとして捨てられてしまう**。 対処が正反対なので、 理由を保って返す口を用意する。
+ *
+ * - `exited`     — pid が存在しない。 死んでいる。
+ * - `recycled`   — pid は生きているが作成時刻が期待値と違う。 別プロセスが pid を再利用している。
+ * - `unreadable` — pid は生きている (または不在を確認できない) が作成時刻を読めない。
+ *                  **まだ動いている可能性が高いので、 死亡扱いにしてはいけない。**
+ */
+export async function checkProcessIdentity(
+  pid: number,
+  expectedStartedAt: Date,
+  options: ProcessIdentityOptions = {},
+): Promise<ProcessIdentityCheck> {
+  if (!Number.isInteger(pid) || pid <= 0 || Number.isNaN(expectedStartedAt.getTime())) {
+    return { ok: false, reason: 'unreadable' };
+  }
+  const probe = await probeProcessStartedAt(pid, options);
+  if (probe.kind === 'exited') return { ok: false, reason: 'exited' };
+  if (probe.kind === 'unreadable') return { ok: false, reason: 'unreadable' };
   const toleranceMs = options.toleranceMs ?? START_TIME_TOLERANCE_MS;
-  if (Math.abs(actualStartedAt.getTime() - expectedStartedAt.getTime()) > toleranceMs) return null;
-  return { pid, startedAt: actualStartedAt, verified: true };
+  if (Math.abs(probe.startedAt.getTime() - expectedStartedAt.getTime()) > toleranceMs) {
+    return { ok: false, reason: 'recycled' };
+  }
+  return { ok: true, identity: { pid, startedAt: probe.startedAt, verified: true } };
 }
 
 /**

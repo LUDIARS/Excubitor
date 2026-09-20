@@ -18,6 +18,7 @@ import { managedPortsForService } from '../catalog/ports.js';
 import { adoptProcess, getManagedPid, isManaged, isPidAlive, isPidManaged } from './manager.js';
 import { readProcessIdentity, verifyProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { listListeners } from '../scanner/ports.js';
+import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('excubitor.process.reconcile');
 
@@ -42,7 +43,7 @@ export interface ReconcileResult {
 export async function reconcileProcesses(catalog: Catalog): Promise<ReconcileResult> {
   const processRuntimes = new Set(
     catalog.services
-      .filter((s) => s.runtime === 'node' || s.runtime === 'dev-process-md' || s.runtime === 'app')
+      .filter((s) => isLocalProcessRuntime(s.runtime))
       .map((s) => s.code),
   );
 

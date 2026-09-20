@@ -28,11 +28,17 @@ import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
 import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-version.js';
-import { verifyProcessIdentity, waitForProcessIdentityOutcome, type VerifiedProcessIdentity } from './identity.js';
+import {
+  checkProcessIdentity,
+  verifyProcessIdentity,
+  waitForProcessIdentityOutcome,
+  type VerifiedProcessIdentity,
+} from './identity.js';
 import { spawnOutsideJob, type BreakawaySpawnOptions } from './breakaway-spawn.js';
 import { spawnsOutsideJob } from './spawn-strategy.js';
 import { clearDeclaredPort } from './port-guard.js';
 import { dispatchServiceDeployment } from '../deploy/deployed-dispatch.js';
+import { isCommandRuntime, isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
 const logger = createNamedLogger('excubitor.process');
 
@@ -121,12 +127,25 @@ export async function validateManagedProcess(code: string): Promise<boolean> {
 
   const candidate = adopted.get(code);
   if (!candidate) return false;
-  const verified = await verifyProcessIdentity(candidate.pid, candidate.startedAt);
-  if (verified) return adopted.get(code) === candidate || processes.has(code);
+  const check = await checkProcessIdentity(candidate.pid, candidate.startedAt);
+  if (check.ok) return adopted.get(code) === candidate || processes.has(code);
 
   // Identity verification is asynchronous. Never remove an entry that was
   // replaced by reconciliation or a concurrent start while verification ran.
   if (adopted.get(code) !== candidate) return isManaged(code);
+
+  // 作成時刻を読めなかっただけ (pid は生きている / 不在を確認できない) なら、 死亡と決めない。
+  // ここで捨てると AdoptedProcessReaper が「死んだ」と信じて二重起動し、 後から起動した
+  // インスタンスが port を奪って稼働中の実体を落とす。 照合は 5 秒ごとに powershell / ps を
+  // 起動する外部コマンドで、 負荷が高いと timeout して読めないことがあるため、 実際に起きる。
+  if (check.reason === 'unreadable') {
+    logger.warn(
+      { code, pid: candidate.pid },
+      'process identity was unreadable; keeping the adoption instead of treating it as crashed',
+    );
+    return true;
+  }
+
   adopted.delete(code);
   await updateInstanceStatus(code, 'crashed', null);
   return false;
@@ -273,7 +292,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   if (processes.has(svc.code)) {
     throw new Error(`service ${svc.code} is already spawned`);
   }
-  if (svc.runtime !== 'node' && svc.runtime !== 'dev-process-md' && svc.runtime !== 'app') {
+  if (!isLocalProcessRuntime(svc.runtime)) {
     throw new Error(`spawnService: unsupported runtime ${svc.runtime}`);
   }
 
@@ -290,7 +309,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   let cmd: string;
   let args: string[];
   let hotReloadSource: HotReloadSource;
-  // 起動方式の解決。 runtime=node/dev-process-md で start_script があれば最優先で使う
+  // 起動方式の解決。 runtime=node/python/dev-process-md で start_script があれば最優先で使う
   // (= 既存 start-<service>.bat の pull/build/dev 一式をそのまま起動)。
   if (svc.runtime !== 'app' && svc.start_script) {
     cmd = svc.start_script;
@@ -302,7 +321,8 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     cmd = svc.exec;
     args = svc.exec_args ?? [];
     hotReloadSource = { kind: 'command', command: [cmd, ...args].join(' ') };
-  } else if (svc.runtime === 'node') {
+  } else if (isCommandRuntime(svc.runtime)) {
+    // node / python: cwd 起点で `command` の先頭トークンをそのまま実行ファイルとして起動する。
     if (!svc.cwd) throw new Error(`service ${svc.code} has no cwd`);
     if (!svc.command) throw new Error(`service ${svc.code} has no command`);
     const parts = splitCommand(svc.command);

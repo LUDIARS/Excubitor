@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  checkProcessIdentity,
   readProcessIdentity,
   verifyProcessIdentity,
   waitForProcessIdentity,
@@ -36,6 +37,39 @@ describe('process identity verification', () => {
       run,
       toleranceMs: 1_000,
     })).resolves.toBeNull();
+  });
+
+  it('distinguishes an unreadable live PID from an exited one', async () => {
+    // 生きているのに読めなかっただけの pid を死亡扱いにすると、 reaper が二重起動して
+    // 稼働中の実体を落とす。 verifyProcessIdentity の null では区別がつかないので checkProcessIdentity を使う。
+    const failing = vi.fn(async () => ({ ok: false, code: 1, stdout: '', stderr: 'boom' }));
+
+    await expect(checkProcessIdentity(1234, new Date('2026-07-12T03:00:00.000Z'), {
+      platform: 'win32',
+      run: failing,
+      isProcessAlive: () => true,
+    })).resolves.toEqual({ ok: false, reason: 'unreadable' });
+
+    await expect(checkProcessIdentity(1234, new Date('2026-07-12T03:00:00.000Z'), {
+      platform: 'win32',
+      run: failing,
+      isProcessAlive: () => false,
+    })).resolves.toEqual({ ok: false, reason: 'exited' });
+  });
+
+  it('reports a recycled PID separately from an unreadable one', async () => {
+    const run = vi.fn(async () => ({
+      ok: true,
+      code: 0,
+      stdout: '2026-07-12T04:00:00.000Z',
+      stderr: '',
+    }));
+
+    await expect(checkProcessIdentity(1234, new Date('2026-07-12T03:00:00.000Z'), {
+      platform: 'win32',
+      run,
+      toleranceMs: 1_000,
+    })).resolves.toEqual({ ok: false, reason: 'recycled' });
   });
 
   it('reads the current identity when no persisted start time exists', async () => {
