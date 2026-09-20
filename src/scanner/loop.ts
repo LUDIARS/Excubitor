@@ -5,6 +5,7 @@ import { syncHealthyServiceStates } from './health-state.js';
 import { type Catalog } from '../catalog/loader.js';
 import { processDowntimeAlerts } from './downtime-alert.js';
 import { syncDiskVersions } from './version-reconcile.js';
+import { syncSourceGitInfo } from './source-git.js';
 
 const logger = createNamedLogger('excubitor.scanner');
 
@@ -27,6 +28,14 @@ export function startScannerLoop(catalog: Catalog, intervalMs = HEALTH_SCAN_INTE
         logger.debug({ scanned, matched }, 'docker scan complete');
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'docker scan failed');
+      }
+
+      // docker scan は docker 系しか git を書かないので、 node 等の checkout も追随させる。
+      try {
+        const { updated, skipped } = await syncSourceGitInfo(catalog);
+        logger.debug({ updated, skipped }, 'source git sync complete');
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'source git sync failed');
       }
 
       // host プロセススキャン (#91): runtime=app 等の process_match で外部起動の生存を反映。
