@@ -111,7 +111,11 @@ async function processRecovery(
   }
 }
 
-/** 停止を観測したサービスの down_since (初回のみ) と last_probe_at を記録する。 */
+/**
+ * 停止を観測したサービスの down_since (初回のみ) と last_probe_at を記録する。
+ *
+ * @implements SPEC-MONITOR-LIGHTWEIGHT
+ */
 function recordFailedProbes(failures: readonly HealthObservation[], now: number): void {
   if (failures.length === 0) return;
   db().transaction(() => {

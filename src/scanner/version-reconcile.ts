@@ -55,6 +55,8 @@ function normalize(value: string | null | undefined): string | null {
  * boot 時に公開する build version と同じ resolver を使い、異なる版体系を比べて偽の
  * mismatch にしない。git / package.json を読むため inventory 走査 (既定 5 分間隔) で回し、
  * それ以上の頻度では呼ばない。 readGit には同じ走査の source git 同期と共有する読み手を渡す。
+ *
+ * @implements SPEC-MONITOR-LIGHTWEIGHT
  */
 export async function syncDiskVersions(
   catalog: Catalog,

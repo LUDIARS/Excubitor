@@ -1,5 +1,7 @@
 import type { PeerLinkStatus, ServiceHealthState } from '../../lib/api';
 
+/** @implements SPEC-FEDERATION-HEALTH-CACHE */
+
 /** epoch ms を「N秒前 / N分前」で出す。 */
 export function fmtAgo(at: number | null, now = Date.now()): string {
   if (at == null) return '—';

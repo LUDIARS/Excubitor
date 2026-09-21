@@ -1,6 +1,8 @@
 import type { MeshLink, MeshView } from '../../lib/api';
 import { fmtAgo, LINK_LABEL } from './format';
 
+/** @implements SPEC-FEDERATION-HEALTH-CACHE */
+
 /**
  * 拠点メッシュの到達性。 上段が拠点ごとの状態、 下段が拠点 → 拠点のつながり表。
  * メッシュなので A→B と B→A は別々に出す (片方向だけ切れていることがある)。

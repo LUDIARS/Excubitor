@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { setCoverage, type CoverageIssue, type MeshCoverageEntry, type MeshView } from '../../lib/api';
 import { fmtAgo, HEALTH_LABEL } from './format';
 
+/** @implements SPEC-FEDERATION-COVERAGE */
+
 const ISSUE_LABEL: Record<CoverageIssue, string> = {
   duplicate_managed: '複数拠点が管理',
   uncovered: '担保なし',

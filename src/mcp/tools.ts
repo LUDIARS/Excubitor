@@ -262,6 +262,7 @@ export function buildMcpServer(baseUrl: string): McpServer {
     },
   );
 
+  /** @implements SPEC-FEDERATION-COVERAGE */
   server.tool(
     'excubitor_federation_mesh',
     '拠点メッシュの集約。 拠点ごとの到達性、 拠点→拠点のつながり (双方向別々)、 サービスごとにどの拠点が担保しているか (duplicate_managed / uncovered / down の指摘付き)。 値は各拠点がキャッシュした死活で、 呼んでも probe は走らない。',

@@ -1,4 +1,4 @@
-# federation-mesh — 拠点メッシュ・担保サービス・拠点間ヘルス {#SPEC-FEDERATION-MESH}
+# federation-mesh — 拠点メッシュ・担保サービス・拠点間ヘルス
 
 複数拠点で動く Excubitor (Ex) 同士をメッシュ状につなぎ、どの拠点がどのサービスを担保しているかと、
 拠点間の死活を、どの拠点からでも確認できるようにする。
@@ -15,7 +15,9 @@ loopback 専用のため他拠点から届く口が無く、集約ビューは�
 
 ## 要求
 
-**SPEC-FEDERATION-MESH** — 各拠点の Ex は、メッシュ網 (Tailscale / Cloudflare Mesh) の中だけで互いに届き、
+### 拠点間の接続 {#SPEC-FEDERATION-MESH}
+
+各拠点の Ex は、メッシュ網 (Tailscale / Cloudflare Mesh) の中だけで互いに届き、
 管理面をメッシュ側へ出さない。
 
 1. **拠点間専用リスナー** — `EXCUBITOR_FEDERATION_LISTEN` に自拠点のメッシュ側アドレスを書いた拠点だけ、
@@ -34,7 +36,9 @@ loopback 専用のため他拠点から届く口が無く、集約ビューは�
 6. **メッシュ接続** — 各拠点が他の全拠点をピア登録する (base_url = 相手の拠点間リスナー、例
    `http://100.x.y.z:17335`)。token と base_url は各拠点の DB (`remote_peers`、token は at-rest 暗号化) に置く。
 
-**SPEC-FEDERATION-COVERAGE** — 各拠点は自分が担保するサービスの一覧を返し、メッシュ全体で
+### 担保サービス {#SPEC-FEDERATION-COVERAGE}
+
+各拠点は自分が担保するサービスの一覧を返し、メッシュ全体で
 サービスごとの担保拠点を確認できる。
 
 1. **担保の既定** — 自拠点の catalog に載っていて `disabled` でないサービスを担保する。
@@ -49,7 +53,9 @@ loopback 専用のため他拠点から届く口が無く、集約ビューは�
    - `uncovered`: どこかの catalog に載っているのに、どの拠点も担保していない
    - `down`: 担保している拠点のどこからも up が見えず、どれかが down を見ている
 
-**SPEC-FEDERATION-HEALTH-CACHE** — 拠点間のヘルスは、各拠点が自分の監視ループで確かめてキャッシュした値を返す。
+### 拠点間ヘルスのキャッシュ {#SPEC-FEDERATION-HEALTH-CACHE}
+
+拠点間のヘルスは、各拠点が自分の監視ループで確かめてキャッシュした値を返す。
 
 1. **自拠点の health** — `GET /api/v1/federation/health` は監視ループの health キャッシュ・DB の状態・
    ピア巡回キャッシュだけから組む。呼ばれても probe も他拠点への通信も起こさない。
