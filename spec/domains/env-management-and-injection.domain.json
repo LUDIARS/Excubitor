@@ -26,6 +26,12 @@
       "pathPattern": "(^|/)frontend/src/pages/(Catalog|Config)\\.tsx$"
     },
     {
+      "pathPattern": "(^|/)frontend/src/lib/genius-runtime-config\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/components/GeniusRuntimeConfigCard\\.tsx$"
+    },
+    {
       "pathPattern": "(^|/)src/index\\.ts$",
       "namePattern": "reloadCatalog"
     }

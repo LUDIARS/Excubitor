@@ -56,12 +56,36 @@ EducationLab用credentialはInfisicalへ保存しない。保存するのはEx�
 Ex内部へだけ解決し、`cernere_launch_credentials`がspawn直前に消費する。issuer値は
 子envから削除し、Exが毎回生成したEducationLab用secretだけをEducationLabへ渡す。
 
+## 3. Genius runtime configuration
+
+Config ページの **Genius runtime configuration** から Genius の完全な JSON object を
+保存できる。
+保存値は `%APPDATA%/Excubitor/config.enc` 内でファイル全体ごと AES-256-GCM 暗号化され、
+管理 API は設定値本文を返さない。Excubitor が Genius を spawn するときだけ、本文を
+`EXCUBITOR_SERVICE_CONFIG_JSON` として child process の環境変数へ注入する。
+
+- JSON は `dataDir` / `embedding` / `distill` / `sources` など、Genius config schema を
+  満たす完全な base config を入力する。
+- HTTP port は入力しない。catalog / ProcessMap が正本であり、Excubitor は
+  `GENIUS_PORT` を別途注入する。
+- 保存後の値を UI/API から読み戻さない。変更時は完全な JSON を再入力する。
+- 設定が未保存・破損・Genius schema 不正なら、Genius は部分設定に fallback せず起動時に
+  明示エラーで停止する。
+- **2026-09-21 時点で Genius はまだこの環境変数を読まない** (ローカル `genius.config.json`
+  と `GENIUS_*` の個別 override だけを見る)。Genius 側の loader 対応が入るまで、保存しても
+  起動設定は変わらない。`genius.config.json` を削除しないこと。
+
+詳細は [service-runtime-config.md](../feature/service-runtime-config.md) を参照。
+
 ## API (WebUI が叩く)
 
 - `GET /api/v1/config/infisical` — identity 状態 + サービスマッピング
 - `PUT /api/v1/config/infisical/identity` — identity 保存 (暗号化)
 - `POST /api/v1/config/infisical/test` — 接続テスト
 - `PUT /api/v1/config/infisical/services` — マッピング一括保存
+- `GET /api/v1/config/services/:code/runtime-config` — runtime config の設定有無・キー名だけを取得
+- `PUT /api/v1/config/services/:code/runtime-config` — `{ "config": { ... } }` を暗号化保存、
+  `{ "config": null }` で削除
 
 ## 保存先
 

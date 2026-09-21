@@ -357,6 +357,11 @@ export interface NotificationStatus {
   package_audit_discord: PackageAuditDiscordStatus;
 }
 
+export interface ServiceRuntimeConfigStatus {
+  configured: boolean;
+  keys: string[];
+}
+
 export interface IdentityInput {
   siteUrl: string;
   environment?: string;
@@ -671,6 +676,24 @@ export function saveCfTunnel(input: {
   allowed_hostnames?: string[];
 }) {
   return putJSON<{ ok: boolean; cf_tunnel: CfTunnelStatus }>('/api/v1/config/cf-tunnel', input);
+}
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export function fetchServiceRuntimeConfig(code: string): Promise<ServiceRuntimeConfigStatus> {
+  return getJSON<{ code: string; runtime_config: ServiceRuntimeConfigStatus }>(
+    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
+  ).then((response) => response.runtime_config);
+}
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export function saveServiceRuntimeConfig(
+  code: string,
+  config: Record<string, unknown> | null,
+): Promise<ServiceRuntimeConfigStatus> {
+  return putJSON<{ ok: boolean; code: string; runtime_config: ServiceRuntimeConfigStatus }>(
+    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
+    { config },
+  ).then((response) => response.runtime_config);
 }
 
 export function saveDomainRoot(domainRoot: string) {

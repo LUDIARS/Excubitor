@@ -18,6 +18,7 @@ import {
   type DiscordNotificationStatus,
   type PackageAuditDiscordStatus,
 } from '../lib/api';
+import GeniusRuntimeConfigCard from '../components/GeniusRuntimeConfigCard';
 
 interface SvcRow extends ServiceInfisical {
   code: string;
@@ -461,6 +462,8 @@ export default function Config() {
           )}
         </div>
       </section>
+
+      <GeniusRuntimeConfigCard busy={busy} setBusy={setBusy} />
 
       <section className="config-card">
         <h2>Infisical machine identity</h2>

@@ -160,7 +160,9 @@
           "name": "config-ui",
           "description": "Frontend catalog, Infisical, service-env, and domain-root configuration surfaces.",
           "paths": [
-            "(^|/)frontend/src/pages/(Catalog|Config)\\.tsx$"
+            "(^|/)frontend/src/pages/(Catalog|Config)\\.tsx$",
+            "(^|/)frontend/src/lib/genius-runtime-config\\.ts$",
+            "(^|/)frontend/src/components/GeniusRuntimeConfigCard\\.tsx$"
           ]
         }
       ]

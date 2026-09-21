@@ -44,7 +44,7 @@ catalog がないサービスは監視・起動・再起動の対象にならず
 | 設定可視化 | compose / env / Infisical 設定を統合表示 |
 | 復旧操作 | UI/API は `excubitorctl` と同じ IPC を代理実行。HTTP 停止中も CLI から操作可能 |
 | 自動起動 | supervisor が各サービス所有の catalog にある `autostart: true` と restart policy を解決 |
-| Secret 注入 | Infisical fetch → 子プロセス env に直接渡して `.env` ファイルを残さない |
+| Secret / runtime config 注入 | Infisical secret と暗号化 runtime config を子プロセス env に直接渡して `.env` ファイルを残さない |
 | 起動credential | EducationLab等のspawn直前にExがsecret生成 → Cernereへ暗号化記録 → 子envへ注入 |
 | Infisical 遠隔設定 | secret CRUD を Excubitor 1 か所から |
 | パッケージ日次監査 | catalog 対象 + global CLI の更新・脆弱性・release notes を集約し、専用 Discord webhook へ報告 |

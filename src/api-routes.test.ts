@@ -320,9 +320,12 @@ vi.mock('./launch/orchestrator.js', () => ({
 }));
 
 vi.mock('./secrets/config-store.js', () => ({
+  ServiceRuntimeConfigValidationError: class ServiceRuntimeConfigValidationError extends Error {},
   applyInfisicalToEnv: vi.fn(() => false),
   getServiceMap: () => mocks.serviceMap,
   setServiceMap: (next: Record<string, Record<string, unknown>>) => { mocks.serviceMap = next; },
+  getServiceRuntimeConfigStatus: () => ({ configured: false, keys: [] }),
+  saveServiceRuntimeConfig: () => ({ configured: false, keys: [] }),
   resolveServiceInfisical: (code: string, fallback?: Record<string, unknown>) => mocks.serviceMap[code] ?? fallback,
   saveInfisicalIdentity: (input: { siteUrl: string; environment?: string; clientId: string; clientSecret: string }) => {
     mocks.identity = {

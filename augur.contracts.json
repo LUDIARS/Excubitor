@@ -1,9 +1,13 @@
 {
   "version": 1,
   "contracts": [
-    { "id": "C-1", "criterion": "C-1 resolveServiceRuntimeVersion(service): package 版を優先しても解決済み gitHash を結果に含める", "symbol": "runtimeVersionCarriesGitHash", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
-    { "id": "C-2", "criterion": "C-2 dispatchServiceDeployment(input): 初回と同一 hash を送信せず、hash 変化時だけ前後 hash を POST する", "symbol": "changedHashDispatchesOnly", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
-    { "id": "C-3", "criterion": "C-3 dispatchServiceDeployment(input): 送信失敗時も最新 hash を永続化し起動フローを失敗させない", "symbol": "dispatchFailureIsContained", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" },
-    { "id": "C-4", "criterion": "C-4 serviceDeployments: service code ごとに直近 git hash を1行で永続化する", "symbol": "deploymentHashIsPersistent", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event" }
+    {"id": "C-1", "criterion": "C-1 resolveServiceRuntimeVersion(service): package 版を優先しても解決済み gitHash を結果に含める", "symbol": "runtimeVersionCarriesGitHash", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
+    {"id": "C-2", "criterion": "C-2 dispatchServiceDeployment(input): 初回と同一 hash を送信せず、hash 変化時だけ前後 hash を POST する", "symbol": "changedHashDispatchesOnly", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
+    {"id": "C-3", "criterion": "C-3 dispatchServiceDeployment(input): 送信失敗時も最新 hash を永続化し起動フローを失敗させない", "symbol": "dispatchFailureIsContained", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
+    {"id": "C-4", "criterion": "C-4 serviceDeployments: service code ごとに直近 git hash を1行で永続化する", "symbol": "deploymentHashIsPersistent", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
+    {"id": "C-5", "criterion": "C-5 getServiceRuntimeConfig(code): 未設定サービスには null を返し、設定済みは呼び出しごとの JSON object clone だけを返す", "symbol": "getServiceRuntimeConfig", "file": "src/secrets/config-store.ts", "module": "src/secrets/runtime-config-read.contract.ts"},
+    {"id": "C-6", "criterion": "C-6 saveServiceRuntimeConfig(code, value): 保存結果は configured と keys だけを公開し、値本文も保存先パスも返さない", "symbol": "saveServiceRuntimeConfig", "file": "src/secrets/config-store.ts", "module": "src/secrets/runtime-config-save.contract.ts"},
+    {"id": "C-7", "criterion": "C-7 saveServiceRuntimeConfig(code, value): JSON object でない値と不正な service code を ServiceRuntimeConfigValidationError で fail-closed にする", "symbol": "saveServiceRuntimeConfig", "file": "src/secrets/config-store.ts", "module": "src/secrets/runtime-config-validation.contract.ts"},
+    {"id": "C-8", "criterion": "C-8 resolveInjectEnv(svc): 対象 code の runtime config だけを EXCUBITOR_SERVICE_CONFIG_JSON へ serialize し、env は全値 string のまま返す", "symbol": "resolveInjectEnv", "file": "src/process/inject.ts", "module": "src/secrets/runtime-config-inject.contract.ts"}
   ]
 }

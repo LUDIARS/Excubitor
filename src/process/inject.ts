@@ -12,7 +12,7 @@ import path from 'node:path';
 import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
-import { resolveServiceInfisical } from '../secrets/config-store.js';
+import { getServiceRuntimeConfig, resolveServiceInfisical } from '../secrets/config-store.js';
 import { sharedLogsRoot } from '../log/logs-root.js';
 import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
@@ -56,6 +56,12 @@ export function vestigiumEnvFor(svc: Pick<Service, 'log_path'>): Record<string, 
  */
 export function arsRootEnvFor(): Record<string, string> {
   return { LUDIARS_ROOT: arsRoot() };
+}
+
+function runtimeConfigEnvFor(svc: Pick<Service, 'code'>): Record<string, string> {
+  const config = getServiceRuntimeConfig(svc.code);
+  if (config === null) return {};
+  return { EXCUBITOR_SERVICE_CONFIG_JSON: JSON.stringify(config) };
 }
 
 /**
@@ -116,17 +122,29 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const topology = getTopologyEnv();
   // サービス固有の静的 env (catalog の env:)。 topology より優先 (port 上書き等)。
   const staticEnv = svc.env ?? {};
+  // config.enc に保存された service 固有 config。値は対象 child process
+  // だけに渡し、管理 API / ログには本文を返さない。
+  const runtimeConfigEnv = runtimeConfigEnvFor(svc);
   // 共有ルート / Vestigium ログ先 (最低優先 — catalog env: / secret で上書き可)。
   const arsRootEnv = arsRootEnvFor();
   const vestigiumEnv = vestigiumEnvFor(svc);
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
+  //           < encrypted runtime config < secret < requires_secret。
   if (!cfg || !cfg.inject) {
     const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
     return (await injectServiceRuntimeVersion(
       svc,
-      { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...requiresSecretEnv },
+      {
+        ...arsRootEnv,
+        ...vestigiumEnv,
+        ..._globalEnv,
+        ...topology,
+        ...staticEnv,
+        ...runtimeConfigEnv,
+        ...requiresSecretEnv,
+      },
     )).env;
   }
 
@@ -149,9 +167,19 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     'resolved inject env (topology + infisical)',
   );
   const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
-  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog) < secret < requires_secret。
+  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
+  //           < encrypted runtime config < secret < requires_secret。
   return (await injectServiceRuntimeVersion(
     svc,
-    { ...arsRootEnv, ...vestigiumEnv, ..._globalEnv, ...topology, ...staticEnv, ...env, ...requiresSecretEnv },
+    {
+      ...arsRootEnv,
+      ...vestigiumEnv,
+      ..._globalEnv,
+      ...topology,
+      ...staticEnv,
+      ...runtimeConfigEnv,
+      ...env,
+      ...requiresSecretEnv,
+    },
   )).env;
 }

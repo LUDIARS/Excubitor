@@ -47,6 +47,12 @@ interface InfisicalIdentity {
 interface ExcubitorConfig {
   infisical?: InfisicalIdentity;
   services?: Record<string, ServiceInfisical>;
+  /**
+   * サービス起動時にだけ子プロセスへ渡す完全な runtime config。
+   * config.enc 全体が暗号化されるため、個人パスや接続設定を catalog YAML
+   * や repository の ignored file へ複製しない。
+   */
+  serviceRuntimeConfigs?: Record<string, ServiceRuntimeConfig>;
   settings?: {
     domainRoot?: string;
     cfTunnel?: CfTunnelSettings;
@@ -97,6 +103,21 @@ export interface PackageAuditDiscordInput {
   webhookUrl?: string;
   enabled: boolean;
   clearWebhook?: boolean;
+}
+
+export type ServiceRuntimeConfig = Record<string, unknown>;
+
+export interface ServiceRuntimeConfigStatus {
+  configured: boolean;
+  keys: string[];
+}
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export class ServiceRuntimeConfigValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ServiceRuntimeConfigValidationError';
+  }
 }
 
 export const DEFAULT_DOMAIN_ROOT = '';
@@ -545,6 +566,78 @@ export function setServiceMap(services: Record<string, ServiceInfisical>): void 
   cfg.services = services;
   writeConfig(cfg);
   logger.info({ count: Object.keys(services).length }, 'saved service Infisical map (encrypted)');
+}
+
+// ─────────────── per-service runtime configuration ───────────────
+
+function normalizeServiceCode(code: string): string {
+  if (!/^[a-z][a-z0-9-]*$/.test(code)) {
+    throw new ServiceRuntimeConfigValidationError(
+      'service code must contain lowercase letters, digits, and hyphens only',
+    );
+  }
+  return code;
+}
+
+function normalizeRuntimeConfig(value: unknown): ServiceRuntimeConfig {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ServiceRuntimeConfigValidationError('runtime config must be a JSON object');
+  }
+  try {
+    const cloned = JSON.parse(JSON.stringify(value)) as unknown;
+    if (typeof cloned !== 'object' || cloned === null || Array.isArray(cloned)) {
+      throw new ServiceRuntimeConfigValidationError('runtime config must be a JSON object');
+    }
+    return cloned as ServiceRuntimeConfig;
+  } catch (error) {
+    if (error instanceof ServiceRuntimeConfigValidationError) throw error;
+    throw new ServiceRuntimeConfigValidationError('runtime config must be JSON-serializable', { cause: error });
+  }
+}
+
+/**
+ * 復号済み runtime config。呼び出し元が保存済みのオブジェクトを変更しても
+ * config cache を壊さないよう、毎回 clone を返す。
+ */
+export function getServiceRuntimeConfig(code: string): ServiceRuntimeConfig | null {
+  const key = normalizeServiceCode(code);
+  const configured = readConfig().serviceRuntimeConfigs?.[key];
+  return configured === undefined ? null : normalizeRuntimeConfig(configured);
+}
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export function getServiceRuntimeConfigStatus(code: string): ServiceRuntimeConfigStatus {
+  const config = getServiceRuntimeConfig(code);
+  return {
+    configured: config !== null,
+    keys: config === null ? [] : Object.keys(config).sort(),
+  };
+}
+
+/**
+ * null は設定削除。値の本文は API response / log に出さない。
+ * @implements SPEC-SERVICE-RUNTIME-CONFIG-API
+ */
+export function saveServiceRuntimeConfig(
+  code: string,
+  value: ServiceRuntimeConfig | null,
+): ServiceRuntimeConfigStatus {
+  const key = normalizeServiceCode(code);
+  // 検証は store へ触れる前に済ませる (不正入力で config を読み書きしない)。
+  const stored = value === null ? null : normalizeRuntimeConfig(value);
+  const cfg = readConfig();
+  const map = { ...(cfg.serviceRuntimeConfigs ?? {}) };
+  if (stored === null) delete map[key];
+  else map[key] = stored;
+  cfg.serviceRuntimeConfigs = map;
+  writeConfig(cfg);
+  // status は保存した値から直接組み立てる (復号と clone をもう一度回さない)。
+  const status: ServiceRuntimeConfigStatus = {
+    configured: stored !== null,
+    keys: stored === null ? [] : Object.keys(stored).sort(),
+  };
+  logger.info({ code: key, ...status }, 'saved encrypted service runtime configuration');
+  return status;
 }
 
 /**

@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Service } from '../catalog/loader.js';
+import type { ServiceRuntimeConfig } from '../secrets/config-store.js';
 
 const mocks = vi.hoisted(() => ({
   readIdentity: vi.fn(),
   fetchProjectSecrets: vi.fn(),
   getServiceByCode: vi.fn(),
   resolveServiceInfisical: vi.fn(),
+  getServiceRuntimeConfig: vi.fn<(code: string) => ServiceRuntimeConfig | null>(() => null),
 }));
 
 vi.mock('../secrets/infisical.js', () => ({
@@ -31,13 +33,14 @@ vi.mock('../secrets/infisical.js', () => ({
 
 vi.mock('../secrets/config-store.js', () => ({
   resolveServiceInfisical: mocks.resolveServiceInfisical,
+  getServiceRuntimeConfig: mocks.getServiceRuntimeConfig,
 }));
 
 vi.mock('./service-registry.js', () => ({
   getServiceByCode: mocks.getServiceByCode,
 }));
 
-const { resolveRequiresSecretEnv } = await import('./inject.js');
+const { resolveInjectEnv, resolveRequiresSecretEnv } = await import('./inject.js');
 
 function service(patch: Partial<Service>): Service {
   return {
@@ -130,5 +133,49 @@ describe('resolveRequiresSecretEnv', () => {
 
     await expect(resolveRequiresSecretEnv(svc)).rejects.toThrow(/no machine identity/);
     expect(mocks.fetchProjectSecrets).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveInjectEnv runtime configuration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readIdentity.mockReturnValue({ siteUrl: 'https://x', clientId: 'c', clientSecret: 's' });
+    mocks.fetchProjectSecrets.mockResolvedValue([]);
+    mocks.resolveServiceInfisical.mockReturnValue(undefined);
+    mocks.getServiceRuntimeConfig.mockReturnValue(null);
+  });
+
+  it('injects a stored runtime config only into the target service environment', async () => {
+    const runtimeConfig = { dataDir: './data', embedding: { model: 'bge-m3' } };
+    mocks.getServiceRuntimeConfig.mockImplementation((code) => code === 'genius' ? runtimeConfig : null);
+
+    const geniusEnv = await resolveInjectEnv(service({ code: 'genius' }));
+    const otherServiceEnv = await resolveInjectEnv(service({ code: 'aedilis' }));
+
+    expect(geniusEnv.EXCUBITOR_SERVICE_CONFIG_JSON).toBe(JSON.stringify(runtimeConfig));
+    expect(otherServiceEnv.EXCUBITOR_SERVICE_CONFIG_JSON).toBeUndefined();
+  });
+
+  it('lets an explicitly mapped Infisical secret override the stored runtime config env', async () => {
+    mocks.getServiceRuntimeConfig.mockReturnValue({ dataDir: './data' });
+    mocks.resolveServiceInfisical.mockReturnValue({
+      project_id: 'genius-project',
+      environment: 'dev',
+      inject: true,
+      prefix: '',
+    });
+    mocks.fetchProjectSecrets.mockResolvedValue([
+      { secretKey: 'EXCUBITOR_SERVICE_CONFIG_JSON', secretValue: '{"dataDir":"from-secret"}' },
+    ]);
+
+    const env = await resolveInjectEnv(service({ code: 'genius' }));
+
+    expect(env.EXCUBITOR_SERVICE_CONFIG_JSON).toBe('{"dataDir":"from-secret"}');
+  });
+
+  it('does not add a runtime configuration when the service has none', async () => {
+    const env = await resolveInjectEnv(service({ code: 'genius' }));
+
+    expect(env.EXCUBITOR_SERVICE_CONFIG_JSON).toBeUndefined();
   });
 });

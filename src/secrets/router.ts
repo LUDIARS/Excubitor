@@ -18,7 +18,10 @@ import {
   setDomainRootOverride,
   getDiscordNotificationConfig,
   getDiscordNotificationStatus,
+  getServiceRuntimeConfigStatus,
   saveDiscordNotificationConfig,
+  saveServiceRuntimeConfig,
+  ServiceRuntimeConfigValidationError,
   getPackageAuditDiscordConfig,
   getPackageAuditDiscordStatus,
   savePackageAuditDiscordConfig,
@@ -73,6 +76,10 @@ const PackageAuditNotificationSchema = z.object({
   clear_webhook: z.boolean().optional(),
 });
 
+const RuntimeConfigSchema = z.object({
+  config: z.record(z.unknown()).nullable(),
+});
+
 export interface ConfigRouterDeps {
   onDomainRootChanged?: () => unknown | Promise<unknown>;
 }
@@ -98,6 +105,38 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
       package_audit_discord: getPackageAuditDiscordStatus(),
     }),
   );
+
+  // 値本文は返さない。入力された JSON は config.enc にのみ保存され、
+  // 対象サービスの spawn 時にだけ environment として復号・注入される。
+  app.get('/api/v1/config/services/:code/runtime-config', (c) => {
+    try {
+      return c.json({ code: c.req.param('code'), runtime_config: getServiceRuntimeConfigStatus(c.req.param('code')) });
+    } catch (err) {
+      if (err instanceof ServiceRuntimeConfigValidationError) {
+        return c.json({ error: 'invalid_service_code', message: err.message }, 400);
+      }
+      return c.json({ error: 'runtime_config_status_failed' }, 500);
+    }
+  });
+
+  app.put('/api/v1/config/services/:code/runtime-config', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = RuntimeConfigSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      const code = c.req.param('code');
+      return c.json({
+        ok: true,
+        code,
+        runtime_config: saveServiceRuntimeConfig(code, parsed.data.config),
+      });
+    } catch (err) {
+      if (err instanceof ServiceRuntimeConfigValidationError) {
+        return c.json({ error: 'invalid_runtime_config', message: err.message }, 400);
+      }
+      return c.json({ error: 'runtime_config_save_failed' }, 500);
+    }
+  });
 
   app.put('/api/v1/config/notifications/discord', async (c) => {
     const body = await c.req.json().catch(() => ({}));
