@@ -9,6 +9,7 @@
  */
 
 import type { RemotePeer } from './store.js';
+import { localNodeName } from './node-snapshot.js';
 
 export interface PeerCallResult<T> {
   ok: boolean;
@@ -33,6 +34,9 @@ async function call<T>(
       method,
       headers: {
         authorization: `Bearer ${peer.token}`,
+        // 監査ログ用に呼び出し元の拠点名を名乗る (公開面の actor 表示に使われる)。
+        // 拠点名は日本語もありうるが HTTP ヘッダ値は Latin-1 しか載らないので percent-encode する。
+        'x-excubitor-peer': encodeURIComponent(localNodeName()),
         ...(peer.cf_access_id && peer.cf_access_secret
           ? { 'CF-Access-Client-Id': peer.cf_access_id, 'CF-Access-Client-Secret': peer.cf_access_secret }
           : {}),
@@ -69,6 +73,14 @@ export interface RemoteNodeSnapshot {
 /** ピアのノードスナップショット (サマリ + サービス一覧 + host メトリクス) を取得。 */
 export function fetchNode(peer: RemotePeer): Promise<PeerCallResult<RemoteNodeSnapshot>> {
   return call<RemoteNodeSnapshot>(peer, 'GET', '/api/v1/federation/node');
+}
+
+/**
+ * ピアの health (担保サービス + キャッシュ済み死活 + ピアから見たつながり) を取得。
+ * 応答は未検証の JSON のまま返す (検証は呼び出し側が health-types のスキーマで行う)。
+ */
+export function fetchHealth(peer: RemotePeer, timeoutMs: number): Promise<PeerCallResult<unknown>> {
+  return call<unknown>(peer, 'GET', '/api/v1/federation/health', undefined, timeoutMs);
 }
 
 /** ピアの 1 サービスを start/stop/restart する。 */

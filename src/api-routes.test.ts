@@ -237,6 +237,26 @@ const mocks = vi.hoisted(() => ({
       host: null,
     },
   })),
+  fetchHealth: vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    error: null,
+    data: {
+      schema: 1,
+      node: 'remote-a',
+      generated_at: 1,
+      scan: { started_at: 1, completed_at: 1, duration_ms: 0, interval_ms: 60_000 },
+      summary: { service: 'excubitor', services_total: 1, up: 1, down: 0, unknown: 0, open_errors: 0 },
+      host: null,
+      services: [{
+        code: 'remote-svc', name: 'Remote', project_code: null, kind: 'managed', covered: true, source: 'catalog',
+        state: 'running', port: 9999, git_branch: 'main',
+        health: { state: 'up', reason: 'http', detail: 'HTTP 200', checked_at: 1, reported_version: null },
+      }],
+      links: [],
+    },
+  })),
+  startPeerPoller: vi.fn(() => ({ stop: vi.fn() })),
   remoteControl: vi.fn(async () => ({ ok: true, status: 200, error: null, data: { ok: true } })),
   remoteUpdate: vi.fn(async () => ({ ok: true, status: 200, error: null, data: { ok: true } })),
   updateServiceCatalogInfo: vi.fn(() => ({ updated: true })),
@@ -408,9 +428,11 @@ vi.mock('./federation/secret-box.js', () => ({
 }));
 vi.mock('./federation/client.js', () => ({
   fetchNode: mocks.fetchNode,
+  fetchHealth: mocks.fetchHealth,
   remoteControl: mocks.remoteControl,
   remoteUpdate: mocks.remoteUpdate,
 }));
+vi.mock('./federation/peer-poller.js', () => ({ startPeerPoller: mocks.startPeerPoller }));
 
 vi.mock('./memory/loop.js', () => ({ startMemoryLoop: mocks.startMemoryLoop }));
 
@@ -1186,6 +1208,22 @@ describe('Excubitor HTTP APIs', () => {
     expect(node.res.status).toBe(200);
     expect(node.data).toHaveProperty('summary');
 
+    const unauthorizedHealth = await requestJson(router, 'GET', '/api/v1/federation/health');
+    expect(unauthorizedHealth.res.status).toBe(401);
+    const health = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, { authorization: 'Bearer good' });
+    expect(health.res.status).toBe(200);
+    expect(health.data).toMatchObject({ schema: 1, services: expect.any(Array), links: expect.any(Array) });
+
+    // 管理面は同じ /api/v1/federation/ 配下でも token 無しで loopback から使える。
+    const coverage = await requestJson(router, 'GET', '/api/v1/federation/coverage');
+    expect(coverage.res.status).toBe(200);
+    expect(coverage.data).toHaveProperty('services');
+    const override = await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: false });
+    expect(override.res.status).toBe(200);
+    expect(override.data).toMatchObject({ ok: true, code: 'svc-a', covered: false });
+    const unknownOverride = await requestJson(router, 'PUT', '/api/v1/federation/coverage/nope', { covered: false });
+    expect(unknownOverride.res.status).toBe(404);
+
     const localControl = await requestJson(
       router,
       'POST',
@@ -1263,11 +1301,20 @@ describe('Excubitor HTTP APIs', () => {
 
     const tested = await requestJson(router, 'POST', `/api/v1/peers/${peerId}/test`, {});
     expect(tested.res.status).toBe(200);
-    expect(tested.data).toMatchObject({ ok: true, node: 'remote-a' });
+    expect(tested.data).toMatchObject({ ok: true, link: 'up', node: 'remote-a' });
 
-    const aggregate = await requestJson(router, 'GET', '/api/v1/federation/services');
+    // 集約はキャッシュ (疎通テストで入った値) から返し、 画面を開くたびにピアへは問い合わせない。
+    const fetchCalls = mocks.fetchHealth.mock.calls.length;
+    const aggregate = await requestJson<{ peers: Array<Record<string, unknown>> }>(router, 'GET', '/api/v1/federation/services');
     expect(aggregate.res.status).toBe(200);
-    expect(aggregate.data).toHaveProperty('peers');
+    expect(aggregate.data.peers[0]).toMatchObject({ node: 'remote-a', ok: true, status: 'up' });
+    const mesh = await requestJson<{ nodes: Array<Record<string, unknown>>; coverage: Array<Record<string, unknown>> }>(
+      router, 'GET', '/api/v1/federation/mesh',
+    );
+    expect(mesh.res.status).toBe(200);
+    expect(mesh.data.nodes.map((n) => n.node)).toContain('remote-a');
+    expect(mesh.data.coverage.some((row) => row.code === 'remote-svc')).toBe(true);
+    expect(mocks.fetchHealth.mock.calls.length).toBe(fetchCalls);
 
     const remoteControl = await requestJson(router, 'POST', `/api/v1/peers/${peerId}/services/remote-svc/control`, {
       action: 'start',

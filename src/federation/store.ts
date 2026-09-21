@@ -83,6 +83,16 @@ export function listPeers(): RemotePeer[] {
   return rows.map(rowToPeer);
 }
 
+export interface PeerIdentity {
+  id: string;
+  name: string;
+}
+
+/** 有効なピアの id と登録名だけを返す (token を復号しない。 表示・集約用)。 */
+export function listEnabledPeerIdentities(): PeerIdentity[] {
+  return db().all(sql`SELECT id, name FROM remote_peers WHERE enabled = 1 ORDER BY name ASC`) as PeerIdentity[];
+}
+
 export function getPeer(id: string): RemotePeer | null {
   const rows = db().all(sql`SELECT * FROM remote_peers WHERE id = ${id} LIMIT 1`) as Array<Record<string, unknown>>;
   return rows[0] ? rowToPeer(rows[0]) : null;

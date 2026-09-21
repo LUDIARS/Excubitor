@@ -79,6 +79,9 @@ import { buildMemoryRouter } from './memory/router.js';
 import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
+import { buildFederationPublicRouter } from './federation/public-router.js';
+import { startFederationListener } from './federation/listener.js';
+import { startPeerPoller } from './federation/peer-poller.js';
 import { buildCfTunnelRouter } from './cf-tunnel/router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
@@ -557,7 +560,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     ? { stop: logSafeModeNoop }
     : await startErrorDetector();
   const dispatchHandle = startConcordiaDispatchLoop(() => currentCatalog!);
-  const scannerHandle = startScannerLoop(currentCatalog);
+  // 死活確認 (短周期) と棚卸し (長周期) の 2 本。 catalog は live 参照で reload に追随させる。
+  const scannerHandle = startScannerLoop(() => currentCatalog!);
   // WMI/ps の全プロセス走査はこの loop だけが担当し、memory/Concordia はキャッシュを参照する。
   const processSnapshotHandle = startProcessSnapshotLoop();
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
@@ -565,6 +569,14 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
   // 構造化された死活履歴の retention 剪定。
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
+  // 拠点間ヘルス: 有効な各ピアの health (相手がキャッシュしている値) を周期的に取りに行く。
+  const peerPollerHandle = startPeerPoller({ getCatalog: () => currentCatalog! });
+  // 拠点間専用リスナー。 EXCUBITOR_FEDERATION_LISTEN を設定した拠点だけ、 Tailscale /
+  // Cloudflare Mesh 側のアドレスに bind して他拠点向け API だけを出す (本体 17332 は loopback のまま)。
+  const federationListener = startFederationListener({
+    publicRouter: buildFederationPublicRouter(() => currentCatalog!),
+    catalog: currentCatalog!,
+  });
   const parquetHandle = logSafeMode
     ? { stop: logSafeModeNoop }
     : startParquetCompactionLoop(() => currentCatalog!);
@@ -787,8 +799,11 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildMemoryRouter(() => currentCatalog!));
   app.route('/', buildProcessSnapshotRouter());
 
-  // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作)
-  app.route('/', buildFederationRouter(() => currentCatalog!));
+  // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作、 メッシュ集約・担保)
+  app.route('/', buildFederationRouter({
+    getCatalog: () => currentCatalog!,
+    getListenerStatus: () => federationListener.status(),
+  }));
 
   // Cloudflare Tunnel ルート管理 (/api/v1/cf-tunnel/* — allowlist 付きの狭い CF ブローカー)
   app.route('/', buildCfTunnelRouter());
@@ -1234,6 +1249,12 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
       try { processSnapshotHandle.stop(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
+      try { peerPollerHandle.stop(); } catch { /* best-effort shutdown */ }
+      try {
+        await federationListener.close();
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'federation listener close failed');
+      }
       try { parquetHandle.stop(); } catch { /* noop */ }
       try { fileTailHandle.stop(); } catch { /* noop */ }
       try {

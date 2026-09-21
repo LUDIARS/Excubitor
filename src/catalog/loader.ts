@@ -346,6 +346,31 @@ const LogStoreSchema = z.object({
   compact_hour_utc: z.number().int().min(0).max(23).default(18),
 });
 
+/**
+ * 監視ループの周期。 死活確認 (安い probe) と棚卸し (git / 版 / docker) を別周期で回す
+ * (scanner/loop.ts)。
+ */
+const MonitorSchema = z.object({
+  /** 死活確認 (HTTP / TCP / プロセス / port) の周期 (秒)。 */
+  health_interval_sec: z.number().int().min(10).default(60),
+  /** git / 版 / docker の棚卸し周期 (秒)。 */
+  inventory_interval_sec: z.number().int().min(60).default(300),
+  /** 同時に走らせる probe 数の上限。 */
+  probe_concurrency: z.number().int().positive().default(8),
+  /** 状態が変わらなくても死活履歴へ 1 行残す間隔 (秒)。 稼働率集計の粒度になる。 */
+  liveness_heartbeat_sec: z.number().int().positive().default(300),
+});
+
+/** 拠点間連携 (federation) のピア巡回設定。 接続先と token は DB (remote_peers) が正本。 */
+const FederationSchema = z.object({
+  /** 各ピアの health を取りに行く周期 (秒)。 */
+  peer_poll_sec: z.number().int().min(10).default(60),
+  /** 1 ピアへの問い合わせのタイムアウト (ms)。 */
+  peer_timeout_ms: z.number().int().positive().default(5_000),
+  /** この秒数より古いピアの値は stale として表示する。 */
+  stale_after_sec: z.number().int().positive().default(180),
+});
+
 const CatalogSchema = z.object({
   project_versions: z.record(ProjectVersionSchema).default({}),
   services: z.array(ServiceSchema),
@@ -359,6 +384,10 @@ const CatalogSchema = z.object({
   retention: RetentionSchema.default({}),
   /** ログのライブ保持と日次圧縮。 */
   log_store: LogStoreSchema.default({}),
+  /** 監視ループ (死活確認 / 棚卸し) の周期。 */
+  monitor: MonitorSchema.default({}),
+  /** 拠点間連携のピア巡回。 */
+  federation: FederationSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;

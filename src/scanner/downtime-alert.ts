@@ -33,6 +33,9 @@ export async function processDowntimeAlerts(
   const now = deps.now ?? Date.now();
   const config = deps.config === undefined ? getDiscordNotificationConfig() : deps.config;
   const send = deps.send ?? sendDiscordWebhook;
+  // 死活確認は短周期で回るので、 停止中サービスの記録は 1 周分を 1 トランザクションで書く
+  // (停止中の数だけ個別 commit しない)。 通知の判定と送信はその後で 1 件ずつ行う。
+  recordFailedProbes(observations.filter((observation) => !observation.ok), now);
   for (const observation of observations) {
     if (observation.ok) {
       await processRecovery(observation, now, config, send);
@@ -48,14 +51,6 @@ async function processFailure(
   config: DiscordNotificationConfig | null,
   send: (webhookUrl: string, content: string) => Promise<void>,
 ): Promise<void> {
-  db().run(sql`
-    INSERT INTO health_alert_state (service_code, down_since, last_probe_at, updated_at)
-    VALUES (${observation.code}, ${now}, ${now}, ${now})
-    ON CONFLICT(service_code) DO UPDATE SET
-      down_since = COALESCE(health_alert_state.down_since, excluded.down_since),
-      last_probe_at = excluded.last_probe_at,
-      updated_at = excluded.updated_at
-  `);
   const state = readState(observation.code);
   if (!state?.down_since || state.notified_at) return;
   const thresholdMs = (config?.downtimeThresholdSec ?? 60) * 1000;
@@ -114,6 +109,23 @@ async function processRecovery(
   } catch (err) {
     recordFailure(observation.code, now, err);
   }
+}
+
+/** 停止を観測したサービスの down_since (初回のみ) と last_probe_at を記録する。 */
+function recordFailedProbes(failures: readonly HealthObservation[], now: number): void {
+  if (failures.length === 0) return;
+  db().transaction(() => {
+    for (const observation of failures) {
+      db().run(sql`
+        INSERT INTO health_alert_state (service_code, down_since, last_probe_at, updated_at)
+        VALUES (${observation.code}, ${now}, ${now}, ${now})
+        ON CONFLICT(service_code) DO UPDATE SET
+          down_since = COALESCE(health_alert_state.down_since, excluded.down_since),
+          last_probe_at = excluded.last_probe_at,
+          updated_at = excluded.updated_at
+      `);
+    }
+  });
 }
 
 function readState(code: string): AlertState | undefined {

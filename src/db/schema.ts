@@ -231,6 +231,20 @@ export const remotePeers = sqliteTable('remote_peers', {
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
+/**
+ * federation: この拠点がサービスを担保するかの上書き (拠点ローカル)。
+ *
+ * 既定では「自拠点の catalog に載っているサービス」を担保する。 同じリポジトリを複数拠点に
+ * clone すると両方が担保を名乗るので、 担保しない拠点側でここに covered=0 を置く。 catalog は
+ * git で全拠点に共有されるため、 拠点ごとの差はここ (各拠点の DB) にだけ持つ。
+ * 行が無い code は catalog の既定に従う。
+ */
+export const federationCoveragePrefs = sqliteTable('federation_coverage_prefs', {
+  code: text('code').primaryKey(),
+  covered: integer('covered', { mode: 'boolean' }).notNull(),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});
+
 export const auditLog = sqliteTable('audit_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   ts: integer('ts', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
@@ -273,7 +287,9 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS service_prefs (code TEXT PRIMARY KEY, uses_corpus INTEGER, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   `CREATE TABLE IF NOT EXISTS service_deployments (service_code TEXT PRIMARY KEY, git_hash TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   // federation: 他拠点 Excubitor ピア (base_url + token)。
-  `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`
+  `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
+  // federation: 拠点ごとの担保上書き (行が無い code は catalog の既定に従う)。
+  `CREATE TABLE IF NOT EXISTS federation_coverage_prefs (code TEXT PRIMARY KEY, covered INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
 ];
 
 /**

@@ -20,6 +20,9 @@
       "pathPattern": "(^|/)frontend/src/pages/Federation\\.tsx$"
     },
     {
+      "pathPattern": "(^|/)frontend/src/components/federation/"
+    },
+    {
       "namePattern": "[Ff]ederation"
     },
     {

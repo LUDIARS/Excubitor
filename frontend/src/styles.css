@@ -914,6 +914,34 @@ button.danger { color: var(--err); border-color: rgba(248,113,113,0.4); }
 .self-node-name { font-weight: 700; }
 .self-token { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); }
 .self-node-hint { margin: 8px 0 0; }
+.self-node .self-node-row + .self-node-row { margin-top: 8px; }
+
+/* 拠点メッシュ (到達性 / つながり表 / 担保表) */
+.mesh-panel, .coverage-panel { margin-bottom: 24px; }
+.mesh-subtitle { font-size: 13px; font-weight: 600; color: var(--fg-muted); margin: 4px 0 8px; }
+.mesh-matrix-wrap { overflow-x: auto; }
+.mesh-matrix { border-collapse: collapse; font-size: 12px; }
+.mesh-matrix th, .mesh-matrix td { padding: 6px 10px; border: 1px solid var(--border); text-align: center; white-space: nowrap; }
+.mesh-matrix thead th, .mesh-matrix tbody th { color: var(--fg-muted); font-weight: 600; }
+.link-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); }
+.link-up { color: var(--ok); }
+.link-down, .link-unauthorized { color: var(--err); }
+.link-pending { color: var(--fg-muted); }
+.link-badge.link-up { border-color: rgba(52,211,153,0.4); }
+.link-badge.link-down, .link-badge.link-unauthorized { border-color: rgba(248,113,113,0.4); }
+tr.stale, td.stale, .coverage-cell.stale { opacity: 0.55; }
+.small { font-size: 11px; }
+.coverage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; }
+.coverage-toolbar label { display: flex; align-items: center; gap: 6px; }
+.coverage-table td { vertical-align: top; }
+.coverage-cell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.coverage-override { font-size: 11px; padding: 2px 6px; }
+.health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); flex: 0 0 auto; }
+.health-dot.health-up { background: var(--ok); }
+.health-dot.health-down { background: var(--err); }
+.issue-badge { display: inline-block; font-size: 11px; padding: 1px 7px; margin: 0 4px 4px 0; border-radius: 999px; border: 1px solid var(--border); }
+.issue-badge.issue-duplicate_managed { color: var(--warn); border-color: var(--warn); }
+.issue-badge.issue-uncovered, .issue-badge.issue-down { color: var(--err); border-color: rgba(248,113,113,0.5); }
 
 /* ブランチ状況 (Monitor) */
 .cc-branch { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }

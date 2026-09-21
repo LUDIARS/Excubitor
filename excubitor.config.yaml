@@ -24,6 +24,23 @@ memory_monitor:
     leak_window_min: 120
     leak_threshold_mb_per_hr: 200
 
+monitor:
+  # 死活確認 (HTTP / TCP / プロセス / port の probe)。 子プロセスをほぼ起動しないので短周期で回す。
+  health_interval_sec: 60
+  # git / 版 / docker の棚卸し。 git は .git 直読み + checkout ごとに git status 1 回。
+  inventory_interval_sec: 300
+  # 同時に投げる probe の上限 (全サービス同時で負荷の山を作らない)。
+  probe_concurrency: 8
+  # 状態が変わらなくても死活履歴へ 1 行残す間隔。 稼働率集計の粒度。
+  liveness_heartbeat_sec: 300
+
+federation:
+  # 他拠点の health (相手がキャッシュしている値) を取りに行く周期。
+  peer_poll_sec: 60
+  peer_timeout_ms: 5000
+  # これより古いピアの値は stale と表示する。
+  stale_after_sec: 180
+
 retention:
   enabled: true
   logs_hours: 72

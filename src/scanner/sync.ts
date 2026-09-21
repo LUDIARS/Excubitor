@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { listContainers, type DockerContainer } from '../docker/containers.js';
 import { type Catalog, type Service } from '../catalog/loader.js';
-import { readGitInfo, type GitInfo } from './git.js';
+import { readGitInfo, type GitInfo, type GitInfoReader } from './git.js';
 import { getOrCreateLocalHost, heartbeatLocalHost } from './host.js';
 
 /**
@@ -13,7 +13,7 @@ import { getOrCreateLocalHost, heartbeatLocalHost } from './host.js';
  * v0.1: docker (compose 含む) のみ、Enode / dev-process-md は ProcessManager 実裁E��に対応、E
  *       git / package_version は catalog の cwd を見て同時に取得、E
  */
-export async function syncDockerInstances(catalog: Catalog): Promise<{
+export async function syncDockerInstances(catalog: Catalog, readGit: GitInfoReader = readGitInfo): Promise<{
   scanned: number;
   matched: number;
 }> {
@@ -37,7 +37,7 @@ export async function syncDockerInstances(catalog: Catalog): Promise<{
       ? null
       : (svc.cwd ?? (svc.compose_file ? dirname(svc.compose_file) : null));
     const git: GitInfo = gitCwd
-      ? await readGitInfo(gitCwd)
+      ? await readGit(gitCwd)
       : { branch: null, hash: null, dirty: null, package_version: null };
 
     await upsertInstance(svc.code, hostId, state.docker_id, state.state, state.detail, git, svc.port ?? null);

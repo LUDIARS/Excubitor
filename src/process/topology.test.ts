@@ -32,6 +32,8 @@ function cat(services: Service[]): Catalog {
     },
     retention: { enabled: true, logs_hours: 72, liveness_hours: 168, parquet_days: 90, interval_min: 60, batch_rows: 50_000 },
     log_store: { ring_lines_per_service: 2_000, ring_lines_global: 20_000, compact_hour_utc: 18 },
+    monitor: { health_interval_sec: 60, inventory_interval_sec: 300, probe_concurrency: 8, liveness_heartbeat_sec: 300 },
+    federation: { peer_poll_sec: 60, peer_timeout_ms: 5_000, stale_after_sec: 180 },
   };
 }
 

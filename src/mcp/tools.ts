@@ -251,11 +251,24 @@ export function buildMcpServer(baseUrl: string): McpServer {
 
   server.tool(
     'excubitor_federation_services',
-    '他拠点 (リモート Excubitor ピア) を含む全ノードのサービス集約。 local + 各 enabled ピアのサマリ/サービス/host メトリクス。',
+    '他拠点 (リモート Excubitor ピア) を含む全ノードのサービス集約。 local + 各 enabled ピアのサマリ/サービス/host メトリクス (ピア分は巡回キャッシュ)。',
     {},
     async () => {
       try {
         return jsonContent(await apiGet('/api/v1/federation/services'));
+      } catch (err) {
+        return errorContent(err);
+      }
+    },
+  );
+
+  server.tool(
+    'excubitor_federation_mesh',
+    '拠点メッシュの集約。 拠点ごとの到達性、 拠点→拠点のつながり (双方向別々)、 サービスごとにどの拠点が担保しているか (duplicate_managed / uncovered / down の指摘付き)。 値は各拠点がキャッシュした死活で、 呼んでも probe は走らない。',
+    {},
+    async () => {
+      try {
+        return jsonContent(await apiGet('/api/v1/federation/mesh'));
       } catch (err) {
         return errorContent(err);
       }

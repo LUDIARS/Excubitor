@@ -1012,6 +1012,10 @@ export interface FederationNode {
   base_url: string | null;
   ok: boolean;
   error: string | null;
+  /** ピアのみ: 巡回キャッシュのつながり状態と鮮度。 */
+  status?: PeerLinkStatus;
+  checked_at?: number | null;
+  stale?: boolean;
   node?: string;
   summary: NodeSummary | null;
   services: NodeService[];
@@ -1049,7 +1053,14 @@ export function deletePeer(id: string) {
 }
 
 export function testPeer(id: string) {
-  return postJSON<{ ok: boolean; status: number | null; error: string | null; node: string | null }>(
+  return postJSON<{
+    ok: boolean;
+    status: number | null;
+    link: PeerLinkStatus;
+    latency_ms: number | null;
+    error: string | null;
+    node: string | null;
+  }>(
     `/api/v1/peers/${encodeURIComponent(id)}/test`,
     {},
   );
@@ -1074,10 +1085,93 @@ export function remoteUpdate(peerId: string, code: string, opts: { install?: boo
   );
 }
 
+// ─────────────── 拠点メッシュ (担保 / 拠点間ヘルス) ───────────────
+export type PeerLinkStatus = 'up' | 'down' | 'unauthorized' | 'pending';
+export type ServiceHealthState = 'up' | 'down' | 'unmonitored' | 'unknown';
+export type CoverageIssue = 'duplicate_managed' | 'uncovered' | 'down';
+
+export interface MeshNode {
+  node: string;
+  peer_id: string | null;
+  is_self: boolean;
+  status: PeerLinkStatus;
+  stale: boolean;
+  checked_at: number | null;
+  last_ok_at: number | null;
+  latency_ms: number | null;
+  error: string | null;
+  scan_completed_at: number | null;
+  services_total: number;
+  covered_total: number;
+  covered_down: number;
+}
+
+export interface MeshLink {
+  from: string;
+  node: string;
+  status: PeerLinkStatus;
+  latency_ms: number | null;
+  checked_at: number | null;
+  last_ok_at: number | null;
+  error: string | null;
+  reported_by: string;
+  stale: boolean;
+}
+
+export interface MeshCoverageEntry {
+  node: string;
+  kind: 'managed' | 'observed';
+  covered: boolean;
+  source: 'catalog' | 'override';
+  health: ServiceHealthState;
+  checked_at: number | null;
+  stale: boolean;
+}
+
+export interface MeshCoverageRow {
+  code: string;
+  name: string;
+  project_code: string | null;
+  nodes: MeshCoverageEntry[];
+  managed_by: string[];
+  issues: CoverageIssue[];
+}
+
+export interface MeshView {
+  generated_at: number;
+  self: string;
+  stale_after_ms: number;
+  nodes: MeshNode[];
+  links: MeshLink[];
+  coverage: MeshCoverageRow[];
+}
+
+/** 拠点メッシュの集約 (拠点 / 拠点間リンク / サービス × 拠点の担保)。 値は各拠点のキャッシュ。 */
+export function fetchMesh(): Promise<MeshView> {
+  return getJSON<MeshView>('/api/v1/federation/mesh');
+}
+
+/** この拠点での担保を上書きする (null で catalog の既定に戻す)。 */
+export function setCoverage(code: string, covered: boolean | null) {
+  return putJSON<{ ok: boolean; code: string; covered: boolean | null }>(
+    `/api/v1/federation/coverage/${encodeURIComponent(code)}`,
+    { covered },
+  );
+}
+
 // ─────────────── このノードの identity (federation token) ───────────────
+export interface FederationListenerStatus {
+  enabled: boolean;
+  listening: string[];
+  error: string | null;
+}
+
 export interface SelfNode {
   node: string;
   token: string;
+  listener: FederationListenerStatus;
+  /** 拠点間リスナーの URL。 相手拠点のピア登録 (base_url) に貼る。 */
+  mesh_base_urls: string[];
 }
 
 /** 本ノードの federation 名 + agent token。 ピアに貼り付けて登録するための導線。 */

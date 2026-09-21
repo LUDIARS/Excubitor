@@ -826,3 +826,69 @@ supervisor の再起動・死亡を生き延びる。
 **反映結果 (2026-09-19)**: 18:36 に反映し、autostart 外のサービスを起動し直した後、18:39 に supervisor を
 もう一度再起動した。稼働中の全サービス (17) の pid と health は前後で変わらず、supervisor の auto-launch も
 すべて `already running` で素通りした。
+
+## 18. v0.9 — 監視ループの軽量化と拠点メッシュ (2026-09-21) {#SPEC-MONITOR-LIGHTWEIGHT}
+
+neco 指示 (2026-09-21): 各 Ex をメッシュ状につなぎ担保サービスと拠点間ヘルスを確認できるようにする。
+あわせてモニター処理をもう少し軽量な形で作り直す。拠点メッシュ側の仕様は
+[`spec/feature/federation-mesh.md`](../feature/federation-mesh.md) (SPEC-FEDERATION-MESH /
+SPEC-FEDERATION-COVERAGE / SPEC-FEDERATION-HEALTH-CACHE)。ここでは監視ループ側を書く。
+
+### 18.1 以前の形と重さ
+
+1 本の 5 分ループ (`scanner/loop.ts`) が docker → source git → host process → disk version → health を
+順に回していた。93 サービス (node 46 / app 44 / docker-compose 3) の実測で、1 周あたりの子プロセス起動は:
+
+- git: source git 同期と disk version 同期が別々に `readGitInfo` を呼び、1 サービスあたり
+  `git rev-parse` ×2 + `git status` ×1 を 2 回 = 約 550 回
+- tasklist: host process スキャン・health snapshot・port のプロセス名解決で 3 回
+- netstat: 1 回
+
+死活は 5 分遅れで、その割に 1 周が重かった。また loop は起動時の catalog を握ったままで、reload に追随していなかった。
+
+### 18.2 決定
+
+**SPEC-MONITOR-LIGHTWEIGHT** — 監視は安い死活確認と重い棚卸しを別周期で回し、子プロセス起動を
+サービス数ではなく checkout 数・周回数に比例させる。
+
+- **2 本に分ける** (`scanner/loop.ts`)
+  - 死活確認 (`health-loop.ts`、既定 60 秒): host process スキャン → health probe → DB 更新 →
+    health キャッシュ差し替え → 停止 / 復旧通知
+  - 棚卸し (`inventory-loop.ts`、既定 5 分): docker → source git → disk version
+  - 周期は `excubitor.config.yaml` の `monitor:` で変える。loop は catalog を live 参照し reload に追随する。
+  - 周回は「完了してから次を予約」(`shared/periodic.ts`)。1 周が長引いても重ならない。
+- **git は `.git` を直接読む** (`scanner/git-fs.ts`)。HEAD / loose ref / packed-refs / worktree の
+  `gitdir` + `commondir` / detached HEAD を読み、branch と 12 桁 hash を子プロセス無しで出す。
+  読めない形式 (reftable 等) だけ `git rev-parse` に委ねる。
+- **git 情報は 1 周で checkout ごとに 1 回** (`scanner/git-inventory.ts`)。docker / source git /
+  disk version の 3 段が同じ読み手を共有し、`git status` は checkout 数ぶんだけ走る。
+- **プロセス一覧は process snapshot を使い回す**。OS の全プロセス走査は process-snapshot ループ (60 秒) だけが行い、
+  host process スキャン・health の process 判定・port のプロセス名解決は鮮度内の snapshot を読む。
+  snapshot が無い (起動直後など) ときだけ tasklist / ps を起動する。
+- **health snapshot は要るものだけ取る** (`scanner/health.ts`)。port 判定のサービスが無ければ netstat を起動せず、
+  process 判定のサービスが無ければプロセス一覧も引かない。port 判定は LISTEN port の集合だけを使い、
+  プロセス名 (tasklist) は引かない。
+- **probe の同時数に上限** (`monitor.probe_concurrency`、既定 8、`shared/map-limit.ts`)。全サービス同時で
+  socket / 子プロセスの山を作らない。
+- **DB 書き込みを 1 トランザクションに** (`health-state.ts` / `host-process.ts`)。
+- **死活履歴は変化時と heartbeat だけ** (`monitor.liveness_heartbeat_sec`、既定 300 秒)。状態が変わったとき、
+  または直前の行から heartbeat 間隔が過ぎたときだけ `liveness_history` へ書く。稼働率集計
+  (`scanner/downtime.ts`) は状態の変わり目があれば正しく出るので、粒度は以前の 5 分走査と変わらない
+  (変化の検出は 60 秒粒度に細かくなる)。周期が短くなったので、info ログも状態変化があった周だけに出す。
+- **health キャッシュ** (`scanner/health-cache.ts`)。死活確認の各周の結果をメモリに丸ごと差し替えで保持し、
+  拠点間の health 応答はここを読む。
+
+### 18.3 効果の見込み (93 サービス、5 分あたり)
+
+| | 以前 | 以後 |
+|---|---|---|
+| git 起動 | 約 550 | checkout 数ぶんの `git status` = 42 (2026-09-21 実測。90 サービスの source dir が 42 checkout に収まり、HEAD は 42 件とも `.git` 直読みで解決できた) |
+| tasklist | 3 | 0 (snapshot があれば) |
+| netstat | 1 | 5 (死活確認 60 秒 × 5 周。port 判定のサービスがあるときだけ) |
+| 死活の遅れ | 最大 5 分 | 最大 60 秒 |
+| liveness_history 行 | 93 / 5 分 | 状態変化 + heartbeat (93 / 5 分が上限) |
+
+### 18.4 触っていないもの
+
+- process-snapshot ループ (PowerShell CIM を 60 秒ごと) は今回そのまま。常駐 PowerShell 化などは別途。
+- メモリ監視ループ (`memory/loop.ts`) は周期も採取も変えていない。

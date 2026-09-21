@@ -1,7 +1,7 @@
 import { dirname } from 'node:path';
 
 import type { Service } from '../catalog/loader.js';
-import { readGitInfo } from '../scanner/git.js';
+import { readGitInfo, type GitInfoReader } from '../scanner/git.js';
 
 export const SERVICE_VERSION_ENV = 'EXCUBITOR_SERVICE_VERSION';
 export const VITE_SERVICE_VERSION_ENV = 'VITE_EXCUBITOR_SERVICE_VERSION';
@@ -46,11 +46,14 @@ function serviceVersionDirectory(svc: Service): string | null {
  *
  * @implements SPEC-SERVICE-RUNTIME-VERSION
  */
-export async function resolveServiceRuntimeVersion(svc: Service): Promise<ServiceRuntimeVersion> {
+export async function resolveServiceRuntimeVersion(
+  svc: Service,
+  readGit: GitInfoReader = readGitInfo,
+): Promise<ServiceRuntimeVersion> {
   const cwd = serviceVersionDirectory(svc);
   if (!cwd) return { value: '0.0.0+unversioned', source: 'unversioned', gitHash: null };
 
-  const git = await readGitInfo(cwd);
+  const git = await readGit(cwd);
   const packageVersion = normalizedVersionComponent(git.package_version);
   const gitHash = normalizedVersionComponent(git.hash);
   if (packageVersion) return { value: packageVersion, source: 'package', gitHash };

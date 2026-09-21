@@ -9,15 +9,23 @@ import {
   updatePeer,
   remoteControl,
   remoteUpdate,
+  fetchMesh,
   type PeerView,
   type FederationView,
   type FederationNode,
   type SelfNode,
+  type MeshView,
 } from '../lib/api';
+import { MeshPanel } from '../components/federation/MeshPanel';
+import { CoveragePanel } from '../components/federation/CoveragePanel';
+
+/** 画面の再取得間隔。 サーバ側はキャッシュを返すだけなので、 ここを縮めても他拠点への通信は増えない。 */
+const REFRESH_MS = 15_000;
 
 export default function Federation() {
   const [peers, setPeers] = useState<PeerView[]>([]);
   const [view, setView] = useState<FederationView | null>(null);
+  const [mesh, setMesh] = useState<MeshView | null>(null);
   const [self, setSelf] = useState<SelfNode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,19 +39,28 @@ export default function Federation() {
 
   const reload = async () => {
     try {
-      const [p, v] = await Promise.all([fetchPeers(), fetchFederation()]);
+      const [p, v, m] = await Promise.all([fetchPeers(), fetchFederation(), fetchMesh()]);
       setPeers(p);
       setView(v);
+      setMesh(m);
       setError(null);
     } catch (e: unknown) {
       setError((e as Error).message);
     }
   };
 
+  const reloadMesh = async () => {
+    const m = await fetchMesh();
+    setMesh(m);
+  };
+
   useEffect(() => {
     void reload();
     void fetchSelfNode().then(setSelf).catch(() => {});
-    const id = setInterval(() => void fetchFederation().then(setView).catch(() => {}), 10000);
+    const id = setInterval(() => {
+      void fetchFederation().then(setView).catch(() => {});
+      void fetchMesh().then(setMesh).catch(() => {});
+    }, REFRESH_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -106,10 +123,24 @@ export default function Federation() {
 
       <SelfNodePanel self={self} />
 
+      <h2 className="mem-section-title">拠点メッシュ</h2>
+      <p className="muted">
+        各拠点は自分の監視ループで確かめた死活を保存しておき、 ほかの拠点はそれを巡回周期 (既定 60 秒) で
+        取りに行きます。 この画面を開いても、 死活の確認も拠点間の通信も増えません。
+      </p>
+      {mesh === null ? <div className="empty-state">読み込み中…</div> : <MeshPanel mesh={mesh} />}
+
+      <h2 className="mem-section-title">担保 (どの拠点がどのサービスを見るか)</h2>
+      {mesh === null ? (
+        <div className="empty-state">読み込み中…</div>
+      ) : (
+        <CoveragePanel mesh={mesh} onChanged={reloadMesh} />
+      )}
+
       <h2 className="mem-section-title">他拠点ピア</h2>
       <div className="peer-add foundation-form">
         <input placeholder="拠点名 (例: 自宅PC)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="base_url (例: https://host:17332)" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+        <input placeholder="base_url (例: http://100.x.y.z:17335 — 相手の拠点間リスナー)" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
         <input placeholder="agent token" value={token} onChange={(e) => setToken(e.target.value)} type="password" />
         <input placeholder="CF-Access Client Id (任意)" value={cfId} onChange={(e) => setCfId(e.target.value)} />
         <input placeholder="CF-Access Client Secret (任意)" value={cfSecret} onChange={(e) => setCfSecret(e.target.value)} type="password" />
@@ -191,8 +222,23 @@ function SelfNodePanel({ self }: { self: SelfNode | null }) {
         <button onClick={() => setRevealed((v) => !v)}>{revealed ? '隠す' : '表示'}</button>
         <button onClick={() => void onCopy()}>{copied ? 'コピー済' : 'token をコピー'}</button>
       </div>
+      <div className="self-node-row">
+        <span className="muted">拠点間リスナー:</span>
+        {self.listener.enabled ? (
+          self.mesh_base_urls.length > 0 ? (
+            self.mesh_base_urls.map((url) => <code key={url} className="self-token mono">{url}</code>)
+          ) : (
+            <span className="bad">bind 待ち (メッシュ側アドレスがまだ無い。 30 秒ごとに再試行)</span>
+          )
+        ) : self.listener.error ? (
+          <span className="bad">設定エラー: {self.listener.error}</span>
+        ) : (
+          <span className="muted">無効 (EXCUBITOR_FEDERATION_LISTEN 未設定。 他拠点からは届きません)</span>
+        )}
+      </div>
       <p className="self-node-hint muted">
-        この token を相手ノードの「他拠点ピア」登録に貼ると、 相手から本ノードへ接続できます。
+        この token と拠点間リスナーの URL を相手ノードの「他拠点ピア」登録に貼ると、 相手から本ノードへ接続できます
+        (Tailscale / Cloudflare Mesh の中だけで通信します)。
       </p>
     </section>
   );
@@ -230,7 +276,8 @@ function NodeCard({ node, onControl }: { node: FederationNode; onControl?: () =>
     <article className={`node-card ${node.ok ? '' : 'node-down'}`}>
       <div className="node-head">
         <span className="node-name">{node.node ?? node.name}{isRemote ? '' : ' (local)'}</span>
-        {!node.ok && <span className="bad">接続不可: {node.error}</span>}
+        {!node.ok && <span className="bad">接続不可: {node.error ?? node.status ?? '未確認'}</span>}
+        {node.ok && node.stale && <span className="muted">古い値</span>}
       </div>
       {node.host && (
         <div className="node-host">

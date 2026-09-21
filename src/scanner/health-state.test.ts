@@ -13,7 +13,16 @@ vi.mock('./health.js', () => ({
   serviceHealthResults: vi.fn(async () => healthMock.results),
 }));
 
-import { syncHealthyServiceStates } from './health-state.js';
+import { shouldRecordLiveness, syncHealthyServiceStates } from './health-state.js';
+
+describe('shouldRecordLiveness', () => {
+  it('records the first sample, every transition, and a heartbeat when nothing changes', () => {
+    expect(shouldRecordLiveness(null, true, 0, 300_000)).toBe(true);
+    expect(shouldRecordLiveness({ ok: true, probedAt: 0 }, false, 1, 300_000)).toBe(true);
+    expect(shouldRecordLiveness({ ok: true, probedAt: 0 }, true, 299_999, 300_000)).toBe(false);
+    expect(shouldRecordLiveness({ ok: true, probedAt: 0 }, true, 300_000, 300_000)).toBe(true);
+  });
+});
 
 describe('syncHealthyServiceStates', () => {
   beforeEach(() => {
@@ -60,6 +69,40 @@ describe('syncHealthyServiceStates', () => {
     const live = readLatestLiveness('concordia');
     expect(Boolean(live?.ok)).toBe(true);
     expect(JSON.parse(String(live?.detail))).toMatchObject({ source: 'health', reason: 'http' });
+  });
+
+  it('writes liveness only on a state change or after the heartbeat interval', async () => {
+    healthMock.results = new Map([
+      ['concordia', { ok: true, reason: 'http', detail: 'HTTP 200' }],
+    ]);
+    let now = 1_000_000;
+    const options = { now: () => now, livenessHeartbeatMs: 300_000 };
+
+    await syncHealthyServiceStates(catalog('concordia'), options);
+    now += 60_000;
+    await syncHealthyServiceStates(catalog('concordia'), options);
+    expect(countLiveness('concordia')).toBe(1);
+
+    healthMock.results = new Map([
+      ['concordia', { ok: false, reason: 'failed', detail: 'fetch failed' }],
+    ]);
+    now += 60_000;
+    await syncHealthyServiceStates(catalog('concordia'), options);
+    expect(countLiveness('concordia')).toBe(2);
+
+    now += 300_000;
+    await syncHealthyServiceStates(catalog('concordia'), options);
+    expect(countLiveness('concordia')).toBe(3);
+    // 状態 (service_instances) は liveness を書かない周でも毎回更新される。
+    expect(readInstanceState('concordia')?.state).toBe('stopped');
+  });
+
+  it('returns the raw probe results for the health cache', async () => {
+    healthMock.results = new Map([
+      ['concordia', { ok: false, reason: 'not_configured' }],
+    ]);
+    const result = await syncHealthyServiceStates(catalog('concordia'));
+    expect(result.results.get('concordia')).toEqual({ ok: false, reason: 'not_configured' });
   });
 
   it('does not overwrite state for services without a health signal', async () => {
@@ -112,6 +155,17 @@ function readInstanceState(code: string): {
     JOIN services s ON s.id = si.service_id
     WHERE s.code = ${code}
   `) as { state: string; last_seen_at: number | null; reported_version: string | null } | undefined;
+}
+
+function countLiveness(code: string): number {
+  const row = db().get(sql`
+    SELECT COUNT(*) AS n
+    FROM liveness_history lh
+    JOIN service_instances si ON si.id = lh.service_instance_id
+    JOIN services s ON s.id = si.service_id
+    WHERE s.code = ${code}
+  `) as { n: number };
+  return Number(row.n);
 }
 
 function readLatestLiveness(code: string): { ok: unknown; detail: unknown } | undefined {

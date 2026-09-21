@@ -1,0 +1,61 @@
+/**
+ * 他拠点の health を周期的に取りに行き、 peer-cache へ載せる (拠点間ヘルスチェック)。
+ *
+ * 各拠点は外部へ出られないことがあるので、 通信は Tailscale / Cloudflare Mesh 等の
+ * プライベート網の中だけで完結させる。 相手の base_url はメッシュ上のアドレス
+ * (例 `http://100.x.y.z:17335`) を DB (remote_peers) に登録しておく。
+ *
+ * 1 周で有効な全ピアへ 1 回ずつ問い合わせる。 応答の検証は peer-response.ts。
+ */
+
+import type { Catalog } from '../catalog/loader.js';
+import { createNamedLogger } from '../shared/logger.js';
+import { mapWithLimit } from '../shared/map-limit.js';
+import { startPeriodicTask, type PeriodicTaskHandle } from '../shared/periodic.js';
+import { fetchHealth, type PeerCallResult } from './client.js';
+import { prunePeerStates, recordPeerPoll } from './peer-cache.js';
+import { classifyPeerResponse } from './peer-response.js';
+import { federationSettings } from './settings.js';
+import { listPeers, markPeerResult, type RemotePeer } from './store.js';
+
+/** @implements SPEC-FEDERATION-HEALTH-CACHE */
+
+const logger = createNamedLogger('excubitor.federation.poller');
+
+/** 同時に問い合わせるピア数。 拠点数は少ないので小さくてよい。 */
+const PEER_POLL_CONCURRENCY = 4;
+
+export interface PeerPollerDeps {
+  now?: () => number;
+  fetch?: (peer: RemotePeer, timeoutMs: number) => Promise<PeerCallResult<unknown>>;
+}
+
+/** 有効な全ピアへ 1 回ずつ問い合わせる。 */
+export async function pollPeersOnce(timeoutMs: number, deps: PeerPollerDeps = {}): Promise<void> {
+  const now = deps.now ?? Date.now;
+  const fetchPeer = deps.fetch ?? fetchHealth;
+  const peers = listPeers().filter((peer) => peer.enabled);
+  prunePeerStates(new Set(peers.map((peer) => peer.id)));
+  await mapWithLimit(peers, PEER_POLL_CONCURRENCY, async (peer) => {
+    const startedAt = now();
+    const result = await fetchPeer(peer, timeoutMs);
+    const outcome = classifyPeerResponse(result, Math.max(0, now() - startedAt));
+    recordPeerPoll(peer, outcome, now());
+    markPeerResult(peer.id, outcome.ok, outcome.error);
+    if (!outcome.ok) {
+      logger.debug({ peer: peer.name, status: outcome.status, error: outcome.error }, 'peer health poll failed');
+    }
+  });
+}
+
+export interface PeerPollerOptions {
+  getCatalog: () => Catalog;
+}
+
+export function startPeerPoller(options: PeerPollerOptions, deps: PeerPollerDeps = {}): PeriodicTaskHandle {
+  return startPeriodicTask({
+    run: () => pollPeersOnce(federationSettings(options.getCatalog()).peerTimeoutMs, deps),
+    intervalMs: () => federationSettings(options.getCatalog()).peerPollMs,
+    onError: (err) => logger.warn({ err: (err as Error).message }, 'peer poll pass failed'),
+  });
+}

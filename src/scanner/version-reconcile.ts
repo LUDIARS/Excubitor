@@ -16,6 +16,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import type { Catalog } from '../catalog/loader.js';
 import { resolveServiceRuntimeVersion } from '../process/service-version.js';
+import { readGitInfo, type GitInfoReader } from './git.js';
 import { resolveBuildVersion } from '../shared/build-version.js';
 import { createNamedLogger } from '../shared/logger.js';
 
@@ -52,10 +53,13 @@ function normalize(value: string | null | undefined): string | null {
  *
  * 管理対象サービスは起動時に注入する値と同じ resolver を使う。Excubitor 自身だけは
  * boot 時に公開する build version と同じ resolver を使い、異なる版体系を比べて偽の
- * mismatch にしない。git / package.json を読むため health 走査 (5 分間隔) と同じ周期で
- * 回し、それ以上の頻度では呼ばない。
+ * mismatch にしない。git / package.json を読むため inventory 走査 (既定 5 分間隔) で回し、
+ * それ以上の頻度では呼ばない。 readGit には同じ走査の source git 同期と共有する読み手を渡す。
  */
-export async function syncDiskVersions(catalog: Catalog): Promise<{ updated: number }> {
+export async function syncDiskVersions(
+  catalog: Catalog,
+  readGit: GitInfoReader = readGitInfo,
+): Promise<{ updated: number }> {
   let updated = 0;
   for (const svc of catalog.services) {
     if (svc.monitor_only) continue;
@@ -65,7 +69,7 @@ export async function syncDiskVersions(catalog: Catalog): Promise<{ updated: num
         version = (await resolveBuildVersion(catalog, 'excubitor', process.cwd()))?.version
           ?? '0.0.0+unversioned';
       } else {
-        version = (await resolveServiceRuntimeVersion(svc)).value;
+        version = (await resolveServiceRuntimeVersion(svc, readGit)).value;
       }
     } catch (err) {
       logger.warn({ code: svc.code, err: (err as Error).message }, 'disk version resolve failed');

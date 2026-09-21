@@ -15,7 +15,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 | モジュール | 役割 |
 |--------------|--------|
 | `src/catalog/` | 各サービス所有 `${ARS_ROOT}/<repo>/excubitor.catalog.yaml` を集積 + DB sync + file watch。中央 service catalog と fallback は持たない。内容 hash cache / last-known-good / polling fallback で source 単位に障害を隔離する。Excubitor 固有設定は `excubitor.config.yaml`。詳細 [`catalog/FRAGMENTS.md`](catalog/FRAGMENTS.md) |
-| `src/scanner/` | docker / プロセス / git / version の周期スキャン → 死活 state |
+| `src/scanner/` | 監視ループ 2 本 (`loop.ts`)。死活確認 `health-loop.ts` (既定 60 秒、HTTP/TCP/プロセス/port の probe → DB + health キャッシュ `health-cache.ts`) と棚卸し `inventory-loop.ts` (既定 5 分、docker / git / 版)。git は `.git` 直読み (`git-fs.ts`) + checkout ごとに `git status` 1 回 (`git-inventory.ts`)、プロセス一覧は process snapshot を流用。周期は `excubitor.config.yaml` の `monitor:`。design.md §18 |
 | `src/local-control/` | versioned IPC、persistent supervisor、`excubitorctl` client、状態永続化 |
 | `src/control/` | supervisor が利用する service adapter。HTTP route は local-control IPC の proxy |
 | `src/process/` | supervisor 配下の spawn/stop/reconcile primitives。backend から直接所有しない |
@@ -24,7 +24,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 | `src/docker/` | Docker Engine API クライアント (子プロセス無し)。 `docker ps` / `docker stats` の置換。 wsl-helper ハンドルリーク対策、 spec/feature/docker-engine-api.md |
 | `src/memory/` | メモリ + **CPU** 監視。 プロセスツリー RSS / docker stats / WSL / **マシン全体 (host)** を周期サンプリング → 時系列 + leak 検知。 CPU% は累積 tick の tick 間 delta から算出 (`cpu-rate.ts`)。 `/api/v1/memory/summary` (services/wsl/host) |
 | `src/update/` | git pull (更新適用) + アップデート/ブランチ状況確認 (`/api/v1/services/:code/update`・`/branches`・`/api/v1/updates`) |
-| `src/federation/` | **他拠点 Excubitor 連携**。 remote_peers (base_url + agent token) を保持し、 local + 全ピアのサービス/host を集約 (`/api/v1/federation/services`) + リモート操作プロキシ。 公開面 (`/api/v1/federation/node\|control\|update`) は agent token 認証 |
+| `src/federation/` | **拠点メッシュ**。 各拠点の Ex が Tailscale / Cloudflare Mesh 上で互いをピア登録 (remote_peers) し、 相手の health (担保サービス + キャッシュ済み死活 + つながり) を巡回キャッシュ (`peer-poller.ts`)。 集約は `/api/v1/federation/mesh` (拠点 / 拠点間リンク / サービス × 拠点の担保表)、 担保の拠点別上書きは `/api/v1/federation/coverage/:code`。 他拠点向け公開面 (`/api/v1/federation/health\|node\|control\|update`、 agent token) は拠点間専用リスナー (`listener.ts`) にだけ載せる。 spec/feature/federation-mesh.md |
 | `src/cf-tunnel/` | **Cloudflare Tunnel ルート管理ブローカー**。 CF API トークンを外へ出さず public hostname ルート (ingress) を list/add/remove (`/api/v1/cf-tunnel/routes`)。 変更は allowlist (env `EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES` → config store 設定) の hostname のみ (fail-closed)、 catch-all は保護。 Infisical project/allowlist は設定 UI (`/api/v1/config/cf-tunnel`) でも編集可。 spec/feature/cf-tunnel-routes.md |
 | `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポート/メモリCPU を公開 + 制御 (control/update/branch/federation) |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
@@ -36,7 +36,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 ## 技術スタック
 
 - Node.js >= 22 / TypeScript (ESM, tsx watch)
-- Hono + @hono/node-server (backend **17332** / `EXCUBITOR_PORT`、loopback only)
+- Hono + @hono/node-server (backend **17332** / `EXCUBITOR_PORT`、loopback only)。拠点間専用リスナーは **17335** (catalog の `ports` role federation、`EXCUBITOR_FEDERATION_LISTEN` 設定時のみ、メッシュ側アドレスにだけ bind)
 - **SQLite** (better-sqlite3 + drizzle-orm)。DB は `data/excubitor.sqlite`
 - frontend: React。production WebUI は backend **17332** から配信し、Vite dev server のみ **17333**
 - ログ: pino / Vestigium (`@ludiars/vestigium`)
@@ -117,7 +117,11 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   `EXCUBITOR_AGENT_TOKEN` or token ファイル) を Bearer で交換する。 ローカル DB (remote_peers) に
   相手の base_url + token を平文保存するため DB ファイル自体を機密扱いにする。 公開面
   (`/api/v1/federation/*` の node/control/update) のみ token 認証、 ピア管理 (CRUD) は loopback 依存。
-  拠点名は `EXCUBITOR_NODE_NAME` (既定 hostname)。 拠点間通信は Tailscale 等のプライベート網を前提。
+  拠点名は `EXCUBITOR_NODE_NAME` (既定 hostname)。 拠点間通信は Tailscale / Cloudflare Mesh のプライベート網だけで行う
+  (各拠点は外へ出られない前提)。 他拠点から届く口は拠点間専用リスナー (`EXCUBITOR_FEDERATION_LISTEN` にメッシュ側
+  アドレス、 0.0.0.0 / :: は起動拒否、 接続元は `EXCUBITOR_FEDERATION_ALLOW_CIDRS` 既定 100.64.0.0/10 等) だけで、
+  本体 17332 は loopback のまま。 ヘルスは各拠点がキャッシュした値を返し、 画面・API を開いても probe も拠点間通信も増えない。
+  担保は既定 = 自拠点 catalog の有効サービス、 拠点差は DB (`federation_coverage_prefs`) で上書きし catalog には書かない。
 - catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
   設計書 §9 の Phase C/D で対応予定。 ローカルアプリ (local-app) の catalog 追加 (#90) は exec
   パスを各リポのビルド出力で実在確認してから (hora-app 以外は follow-up)。

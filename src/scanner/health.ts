@@ -2,9 +2,13 @@ import { Socket } from 'node:net';
 import { execCapture } from '../shared/exec.js';
 import { managedPortsForService } from '../catalog/ports.js';
 import type { Catalog, Service } from '../catalog/loader.js';
-import { listListeners, type PortListener } from './ports.js';
+import { listListeningPorts } from './ports.js';
 import { listHostProcessImages, matchProcesses } from './host-process.js';
 import { extractReportedVersion } from './health-body.js';
+import { mapWithLimit } from '../shared/map-limit.js';
+
+/** probe の同時実行数の既定値 (catalog の monitor.probe_concurrency が無いとき)。 */
+export const DEFAULT_PROBE_CONCURRENCY = 8;
 
 /** @implements SPEC-SERVICE-RUNTIME-VERSION */
 
@@ -20,17 +24,30 @@ export interface ServiceHealthResult {
   reportedVersion?: string | null;
 }
 
+/**
+ * 1 回の死活確認で全サービスが共有する OS 観測。 要る種類だけ取る:
+ * port 判定のサービスが無ければ netstat を起動せず、 process 判定のサービスが無ければ
+ * プロセス一覧も引かない。 取らなかった項目は null。
+ */
 export interface HealthSnapshot {
-  listeners: PortListener[];
+  listeningPorts: ReadonlySet<number> | null;
   hostImages: Set<string> | null;
 }
 
-export async function readHealthSnapshot(): Promise<HealthSnapshot> {
-  const [listeners, hostImages] = await Promise.all([
-    listListeners(),
-    listHostProcessImages(),
+export async function readHealthSnapshot(services: readonly Service[]): Promise<HealthSnapshot> {
+  const needPorts = services.some(usesPortHealth);
+  const needImages = services.some((svc) => svc.health?.type === 'process' && !!svc.process_match);
+  const [listeningPorts, hostImages] = await Promise.all([
+    needPorts ? listListeningPorts() : Promise.resolve(null),
+    needImages ? listHostProcessImages() : Promise.resolve(null),
   ]);
-  return { listeners, hostImages };
+  return { listeningPorts, hostImages };
+}
+
+/** http / tcp / cmd / process のどれでもないサービスは宣言 port の LISTEN で判定する。 */
+function usesPortHealth(svc: Service): boolean {
+  const type = svc.health?.type;
+  return type !== 'http' && type !== 'tcp' && type !== 'cmd' && type !== 'process';
 }
 
 export async function probeServiceHealth(
@@ -78,9 +95,9 @@ export async function probeServiceHealth(
     return { ok: alive, reason: alive ? 'process' : 'failed', detail: svc.process_match };
   }
 
-  const listeners = snapshot?.listeners ?? await listListeners();
+  const listening = snapshot?.listeningPorts ?? await listListeningPorts();
   const ports = managedPortsForService(svc);
-  const alivePort = ports.find((p) => listeners.some((l) => l.port === p.port));
+  const alivePort = ports.find((p) => listening.has(p.port));
   if (alivePort) {
     return { ok: true, reason: 'port', detail: `${alivePort.role}:${alivePort.port}` };
   }
@@ -90,12 +107,15 @@ export async function probeServiceHealth(
   return { ok: false, reason: 'not_configured' };
 }
 
-export async function serviceHealthResults(catalog: Catalog): Promise<Map<string, ServiceHealthResult>> {
-  const snapshot = await readHealthSnapshot();
-  const entries = await Promise.all(catalog.services.map(async (svc) => {
+export async function serviceHealthResults(
+  catalog: Catalog,
+  concurrency = catalog.monitor?.probe_concurrency ?? DEFAULT_PROBE_CONCURRENCY,
+): Promise<Map<string, ServiceHealthResult>> {
+  const snapshot = await readHealthSnapshot(catalog.services);
+  const entries = await mapWithLimit(catalog.services, concurrency, async (svc) => {
     const result = await probeServiceHealth(svc, snapshot);
     return [svc.code, result] as const;
-  }));
+  });
   return new Map(entries);
 }
 

@@ -2,7 +2,7 @@ import { dirname } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { type Catalog, type Service } from '../catalog/loader.js';
-import { readGitInfo } from './git.js';
+import { readGitInfo, type GitInfoReader } from './git.js';
 
 /**
  * catalog の cwd を見て service_instances の git 情報だけを更新する。
@@ -12,7 +12,10 @@ import { readGitInfo } from './git.js';
  * (2026-09-19: actio が 7 月の作業ブランチのまま)。 死活 (state) は各 runtime の担当が
  * 決めるので、 ここでは git 列と package_version だけを触る。
  */
-export async function syncSourceGitInfo(catalog: Catalog): Promise<{ updated: number; skipped: number }> {
+export async function syncSourceGitInfo(
+  catalog: Catalog,
+  readGit: GitInfoReader = readGitInfo,
+): Promise<{ updated: number; skipped: number }> {
   let updated = 0;
   let skipped = 0;
   for (const svc of catalog.services) {
@@ -20,7 +23,7 @@ export async function syncSourceGitInfo(catalog: Catalog): Promise<{ updated: nu
     if (svc.runtime === 'docker' || svc.runtime === 'docker-compose') continue;
     const cwd = sourceDirectory(svc);
     if (!cwd) { skipped += 1; continue; }
-    const git = await readGitInfo(cwd);
+    const git = await readGit(cwd);
     // 読めなかったときは既知の値を残す (null で上書きして履歴を消さない)。
     if (!git.hash && !git.branch && git.package_version === null) { skipped += 1; continue; }
     updated += writeGitInfo(svc.code, git.branch, git.hash, git.dirty, git.package_version);

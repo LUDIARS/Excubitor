@@ -17,6 +17,8 @@ import { createNamedLogger } from '../shared/logger.js';
 import { safeExec } from '../shared/exec.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { isManaged } from '../process/manager.js';
+import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
+import type { ProcEntry } from '../memory/process-sampler.js';
 
 const logger = createNamedLogger('excubitor.host-process');
 
@@ -37,8 +39,30 @@ export function matchProcesses(
   return alive;
 }
 
-/** host の実行中プロセス image 名を列挙する。 失敗時は null (= スキャン skip)。 */
+/** process snapshot の各プロセス名から image 名集合を作る (pure)。 名前が 1 つも無ければ null。 */
+export function imagesFromProcessEntries(processes: ReadonlyArray<Pick<ProcEntry, 'name'>>): Set<string> | null {
+  const images = new Set<string>();
+  for (const entry of processes) {
+    if (entry.name) images.add(entry.name);
+  }
+  return images.size > 0 ? images : null;
+}
+
+/**
+ * host の実行中プロセス image 名を列挙する。 失敗時は null (= スキャン skip)。
+ *
+ * OS の全プロセス走査は process-snapshot ループ (60 秒ごと) が既に行っているので、 鮮度内の
+ * snapshot があればその名前を使い、 tasklist / ps を起動しない。 snapshot が無い / 古いとき
+ * (起動直後の最初の数秒、 または snapshot 取得の失敗が続いたとき) だけ OS へ直接聞く。
+ */
 export async function listHostProcessImages(): Promise<Set<string> | null> {
+  const snapshot = getFreshProcessSnapshot();
+  const fromSnapshot = snapshot ? imagesFromProcessEntries(snapshot.processes) : null;
+  if (fromSnapshot) return fromSnapshot;
+  return listHostProcessImagesFromOs();
+}
+
+async function listHostProcessImagesFromOs(): Promise<Set<string> | null> {
   if (process.platform === 'win32') {
     // tasklist /FO CSV /NH → "image","pid",... の CSV。 1 列目が image 名。
     const out = await safeExec('tasklist', ['/FO', 'CSV', '/NH'], process.cwd());
@@ -95,9 +119,11 @@ export async function scanHostProcesses(catalog: Catalog): Promise<{ scanned: nu
   }
 
   const aliveCodes = matchProcesses(targets, images);
-  for (const svc of targets) {
-    setHostScanState(svc.code, aliveCodes.has(svc.code) ? 'running' : 'stopped');
-  }
+  db().transaction(() => {
+    for (const svc of targets) {
+      setHostScanState(svc.code, aliveCodes.has(svc.code) ? 'running' : 'stopped');
+    }
+  });
   logger.debug({ scanned: targets.length, alive: aliveCodes.size }, 'host process scan complete');
   return { scanned: targets.length, alive: aliveCodes.size };
 }

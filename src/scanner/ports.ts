@@ -11,6 +11,8 @@
 import { execCapture } from '../shared/exec.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { managedPortsForService } from '../catalog/ports.js';
+import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
+import type { ProcEntry } from '../memory/process-sampler.js';
 
 export interface PortListener {
   port: number;
@@ -172,25 +174,47 @@ async function rawListeners(): Promise<Array<{ port: number; pid: number }>> {
   return r.ok ? parseSs(r.stdout) : [];
 }
 
-/** pid 群の実行ファイル名を取得する (Windows=tasklist / POSIX=ps)。 */
+/**
+ * LISTEN している port 番号だけを返す。 死活確認の port 判定用で、 占有プロセス名は引かない
+ * (tasklist / ps を起動しない)。
+ */
+export async function listListeningPorts(): Promise<Set<number>> {
+  const raw = await rawListeners();
+  return new Set(raw.map((r) => r.port));
+}
+
+/**
+ * pid 群の実行ファイル名を取得する。 鮮度内の process snapshot があればそれを使い、
+ * 無いときだけ OS へ聞く (Windows=tasklist / POSIX=ps)。
+ */
 async function processNamesFor(pids: number[]): Promise<Map<number, string>> {
   if (pids.length === 0) return new Map();
-  let all: Map<number, string>;
-  if (process.platform === 'win32') {
-    const r = await execCapture('tasklist', ['/fo', 'csv', '/nh'], process.cwd(), 10000);
-    if (!r.ok) return new Map();
-    all = parseTasklist(r.stdout);
-  } else {
-    const r = await execCapture('ps', ['-eo', 'pid=,comm='], process.cwd(), 10000);
-    if (!r.ok) return new Map();
-    all = parsePsPidComm(r.stdout);
-  }
+  const snapshot = getFreshProcessSnapshot();
+  const all = snapshot ? namesFromProcessEntries(snapshot.processes) : await processNamesFromOs();
+  if (all == null) return new Map();
   const filtered = new Map<number, string>();
   for (const pid of pids) {
     const name = all.get(pid);
     if (name) filtered.set(pid, name);
   }
   return filtered;
+}
+
+function namesFromProcessEntries(processes: ReadonlyArray<Pick<ProcEntry, 'pid' | 'name'>>): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const entry of processes) {
+    if (entry.name) map.set(entry.pid, entry.name);
+  }
+  return map;
+}
+
+async function processNamesFromOs(): Promise<Map<number, string> | null> {
+  if (process.platform === 'win32') {
+    const r = await execCapture('tasklist', ['/fo', 'csv', '/nh'], process.cwd(), 10000);
+    return r.ok ? parseTasklist(r.stdout) : null;
+  }
+  const r = await execCapture('ps', ['-eo', 'pid=,comm='], process.cwd(), 10000);
+  return r.ok ? parsePsPidComm(r.stdout) : null;
 }
 
 /** LISTEN 中の port → {pids, names} を集約する。 */

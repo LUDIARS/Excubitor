@@ -41,6 +41,12 @@ services:
     repo: LUDIARS/Excubitor
     cwd: ${ARS_ROOT}/Excubitor
     port: 17332
+    # 拠点間専用リスナー (src/federation/listener.ts)。 本体 17332 は loopback 専用のまま、
+    # 他拠点向け API だけをこの port で Tailscale / Cloudflare Mesh 側のアドレスに出す。
+    # bind するアドレスは拠点ごとに env EXCUBITOR_FEDERATION_LISTEN で与える (未設定なら起動しない)。
+    ports:
+      - role: federation
+        port: 17335
     autostart: false
     restart_policy: "no"
     health:
