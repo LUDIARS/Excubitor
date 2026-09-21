@@ -2,8 +2,9 @@
  * 本拠点の health 応答 (`GET /api/v1/federation/health`) を組み立てる。
  *
  * 中身はすべてキャッシュ済みの値: 死活は監視ループの health キャッシュ、 他拠点との
- * つながりは peer-poller のキャッシュ、 サービス状態は DB。 この関数は probe も他拠点への
- * 通信も起こさないので、 何拠点から何度呼ばれても監視対象への負荷は増えない。
+ * つながりは peer-poller のキャッシュ、 サービス状態・依頼の履歴は DB、 拠点情報は起動時に
+ * 控えた値。 この関数は probe も他拠点への通信も起こさないので、 何拠点から何度呼ばれても
+ * 監視対象への負荷は増えない。
  */
 
 import type { Catalog } from '../catalog/loader.js';
@@ -16,10 +17,19 @@ import { listEnabledPeerIdentities } from './store.js';
 import {
   FEDERATION_HEALTH_SCHEMA,
   type NodeHealthPayload,
+  type NodeInfo,
   type NodePeerLink,
   type NodeServiceHealth,
   type ServiceHealthState,
 } from './health-types.js';
+import type { FederationListenerStatus } from './listener.js';
+import { localNodeInfo } from './node-info.js';
+import { listRecentOperations, toSummary } from './operations/store.js';
+import type { OperationSummary } from './operations/types.js';
+import { resolveUpdateSource } from './operations/update-source.js';
+
+/** health 応答に載せる依頼の件数 (新しい順)。 */
+export const RECENT_OPERATIONS_IN_HEALTH = 20;
 
 /** @implements SPEC-FEDERATION-HEALTH-CACHE */
 
@@ -29,6 +39,8 @@ export interface HealthPayloadInput {
   coverage: readonly ServiceCoverage[];
   cache: HealthCacheSnapshot;
   links: NodePeerLink[];
+  nodeInfo: NodeInfo;
+  operations: OperationSummary[];
 }
 
 /** 集めた値から health 応答を組む (pure)。 */
@@ -65,6 +77,8 @@ export function buildHealthPayload(input: HealthPayloadInput): NodeHealthPayload
     host: input.snapshot.host,
     services,
     links: input.links,
+    node_info: input.nodeInfo,
+    operations: input.operations,
   };
 }
 
@@ -79,13 +93,27 @@ export function localPeerLinks(): NodePeerLink[] {
   return listEnabledPeerIdentities().map((peer) => toPeerLink(getPeerState(peer.id) ?? pendingPeerState(peer)));
 }
 
-/** 本拠点の health 応答を組む。 */
-export function localHealthPayload(catalog: Catalog, now = Date.now()): NodeHealthPayload {
+/** 本拠点の health 応答を組む。 listener は拠点間リスナーの今の状態 (拠点情報に出す)。 */
+export function localHealthPayload(
+  catalog: Catalog,
+  listener: FederationListenerStatus,
+  now = Date.now(),
+): NodeHealthPayload {
+  const snapshot = localNodeSnapshot();
+  const coverage = resolveCoverage(catalog.services, readCoveragePrefs());
   return buildHealthPayload({
     now,
-    snapshot: localNodeSnapshot(),
-    coverage: resolveCoverage(catalog.services, readCoveragePrefs()),
+    snapshot,
+    coverage,
     cache: getHealthCache(),
     links: localPeerLinks(),
+    nodeInfo: localNodeInfo({
+      node: snapshot.node,
+      listener,
+      coverage,
+      catalogTotal: catalog.services.length,
+      updateSource: resolveUpdateSource(),
+    }),
+    operations: listRecentOperations(RECENT_OPERATIONS_IN_HEALTH).map(toSummary),
   });
 }

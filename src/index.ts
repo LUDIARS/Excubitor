@@ -80,8 +80,15 @@ import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { buildFederationPublicRouter } from './federation/public-router.js';
-import { startFederationListener } from './federation/listener.js';
+import {
+  startFederationListener,
+  type FederationListenerHandle,
+  type FederationListenerStatus,
+} from './federation/listener.js';
 import { startPeerPoller } from './federation/peer-poller.js';
+import { createOperationRunner } from './federation/operations/runner.js';
+import { selfRepoOf } from './federation/operations/self-operation.js';
+import { captureSelfVersion } from './federation/self-version.js';
 import { buildCfTunnelRouter } from './cf-tunnel/router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
@@ -571,10 +578,24 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
   // 拠点間ヘルス: 有効な各ピアの health (相手がキャッシュしている値) を周期的に取りに行く。
   const peerPollerHandle = startPeerPoller({ getCatalog: () => currentCatalog! });
+  // 拠点への依頼 (更新 / 再起動 / デプロイ / 反映) を 1 件ずつ実行する。 起動時の版を控えてから
+  // recover し、 自己再起動をまたいだ依頼の結果 (起動した版が期待どおりか) を確定する。
+  const selfVersion = await captureSelfVersion(selfRepoOf(currentCatalog!).dir);
+  const operationRunner = createOperationRunner({ getCatalog: () => currentCatalog! });
+  operationRunner.recover(selfVersion.hash);
   // 拠点間専用リスナー。 EXCUBITOR_FEDERATION_LISTEN を設定した拠点だけ、 Tailscale /
   // Cloudflare Mesh 側のアドレスに bind して他拠点向け API だけを出す (本体 17332 は loopback のまま)。
-  const federationListener = startFederationListener({
-    publicRouter: buildFederationPublicRouter(() => currentCatalog!),
+  // 公開面は 1 つだけ作り、 本体とリスナーで共有する (再送防止の nonce を共有するため)。
+  let federationListener: FederationListenerHandle | null = null;
+  const getListenerStatus = (): FederationListenerStatus =>
+    federationListener?.status() ?? { enabled: false, listening: [], error: null };
+  const federationPublicRouter = buildFederationPublicRouter({
+    getCatalog: () => currentCatalog!,
+    getListenerStatus,
+    runner: operationRunner,
+  });
+  federationListener = startFederationListener({
+    publicRouter: federationPublicRouter,
     catalog: currentCatalog!,
   });
   const parquetHandle = logSafeMode
@@ -802,7 +823,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作、 メッシュ集約・担保)
   app.route('/', buildFederationRouter({
     getCatalog: () => currentCatalog!,
-    getListenerStatus: () => federationListener.status(),
+    getListenerStatus,
+    runner: operationRunner,
+    publicRouter: federationPublicRouter,
   }));
 
   // Cloudflare Tunnel ルート管理 (/api/v1/cf-tunnel/* — allowlist 付きの狭い CF ブローカー)
@@ -1250,8 +1273,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { processSnapshotHandle.stop(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { peerPollerHandle.stop(); } catch { /* best-effort shutdown */ }
+      try { operationRunner.stop(); } catch { /* best-effort shutdown */ }
       try {
-        await federationListener.close();
+        await federationListener?.close();
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'federation listener close failed');
       }

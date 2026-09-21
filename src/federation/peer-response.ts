@@ -6,19 +6,37 @@
  */
 
 import type { PeerCallResult } from './client.js';
-import { NodeHealthPayloadSchema, type PeerLinkStatus } from './health-types.js';
+import { FEDERATION_HEALTH_SCHEMA, NodeHealthPayloadSchema, type PeerLinkStatus } from './health-types.js';
 import type { PeerPollOutcome } from './peer-cache.js';
 
 /** @implements SPEC-FEDERATION-HEALTH-CACHE */
+
+/** 相手がこちらを登録していないときに返すエラーコード (peer-auth.ts)。 */
+const NOT_REGISTERED = 'peer_not_registered';
 
 export function classifyPeerResponse(
   result: PeerCallResult<unknown>,
   latencyMs: number,
 ): PeerPollOutcome {
   if (!result.ok) {
-    const status: PeerLinkStatus = result.status === 401 || result.status === 403 ? 'unauthorized' : 'down';
-    // status が null = 接続自体が成立していない (到達不能 / タイムアウト)。 遅延は意味を持たない。
-    return { ok: false, status, latency_ms: result.status == null ? null : latencyMs, error: result.error, payload: null };
+    return {
+      ok: false,
+      status: failureStatus(result),
+      // status が null = 接続自体が成立していない (到達不能 / タイムアウト)。 遅延は意味を持たない。
+      latency_ms: result.status == null ? null : latencyMs,
+      error: result.error,
+      payload: null,
+    };
+  }
+  const schema = (result.data as { schema?: unknown } | null)?.schema;
+  if (schema !== FEDERATION_HEALTH_SCHEMA) {
+    return {
+      ok: false,
+      status: 'down',
+      latency_ms: latencyMs,
+      error: `incompatible health schema (peer=${String(schema)}, local=${FEDERATION_HEALTH_SCHEMA}) — 両拠点の Excubitor を同じ版へ更新してください`,
+      payload: null,
+    };
   }
   const parsed = NodeHealthPayloadSchema.safeParse(result.data);
   if (!parsed.success) {
@@ -33,4 +51,11 @@ export function classifyPeerResponse(
     };
   }
   return { ok: true, status: 'up', latency_ms: latencyMs, error: null, payload: parsed.data };
+}
+
+function failureStatus(result: PeerCallResult<unknown>): PeerLinkStatus {
+  const code = (result.data as { error?: unknown } | null)?.error;
+  if (result.status === 403 && code === NOT_REGISTERED) return 'unregistered';
+  if (result.status === 401 || result.status === 403) return 'unauthorized';
+  return 'down';
 }

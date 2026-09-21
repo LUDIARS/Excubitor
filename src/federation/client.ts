@@ -2,14 +2,24 @@
  * 他拠点 Excubitor ピアへの HTTP クライアント。
  *
  * ピアの base_url + token を使って相手の federation API (`/api/v1/federation/*`) を叩く。
- * すべて Authorization: Bearer <peer.token> を付ける (相手ノードの agent token と一致する想定)。
- * ピアが Cloudflare Access の後ろにある場合は CF-Access Service Token ヘッダも付与し、
- * Access 境界を突破する (origin で agent token が本番 authz)。
+ * - Authorization: Bearer <peer.token> (相手の agent token。 相手に対する認証)
+ * - 署名ヘッダ (request-signature.ts): 自拠点の agent token で要求を署名する。 相手が自拠点を
+ *   ピア登録していれば検証でき、 していなければ 403 peer_not_registered で断られる (相互登録)
+ * ピアが Cloudflare Access の後ろにある場合は CF-Access Service Token ヘッダも付与する。
  * 失敗 (接続不可 / 認証エラー / タイムアウト) は throw せず {ok:false} を返し、 集約は degrade する。
  */
 
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
+import { getOrCreateAgentToken } from '../secrets/agent-token.js';
 import type { RemotePeer } from './store.js';
 import { localNodeName } from './node-snapshot.js';
+import { signatureHeaders } from './request-signature.js';
+import type { OperationRequest } from './operations/types.js';
+
+/** @implements SPEC-FEDERATION-MUTUAL-AUTH */
 
 export interface PeerCallResult<T> {
   ok: boolean;
@@ -20,46 +30,47 @@ export interface PeerCallResult<T> {
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
+function requestHeaders(peer: RemotePeer, method: string, path: string, body: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${peer.token}`,
+    ...signatureHeaders(getOrCreateAgentToken(), localNodeName(), { method, path, body }),
+    ...(peer.cf_access_id && peer.cf_access_secret
+      ? { 'CF-Access-Client-Id': peer.cf_access_id, 'CF-Access-Client-Secret': peer.cf_access_secret }
+      : {}),
+    ...(body ? { 'content-type': 'application/json' } : {}),
+  };
+}
+
 async function call<T>(
   peer: RemotePeer,
   method: 'GET' | 'POST',
   path: string,
-  body?: unknown,
+  payload?: unknown,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<PeerCallResult<T>> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const body = payload !== undefined ? JSON.stringify(payload) : '';
   try {
     const res = await fetch(`${peer.base_url}${path}`, {
       method,
-      headers: {
-        authorization: `Bearer ${peer.token}`,
-        // 監査ログ用に呼び出し元の拠点名を名乗る (公開面の actor 表示に使われる)。
-        // 拠点名は日本語もありうるが HTTP ヘッダ値は Latin-1 しか載らないので percent-encode する。
-        'x-excubitor-peer': encodeURIComponent(localNodeName()),
-        ...(peer.cf_access_id && peer.cf_access_secret
-          ? { 'CF-Access-Client-Id': peer.cf_access_id, 'CF-Access-Client-Secret': peer.cf_access_secret }
-          : {}),
-        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
+      headers: requestHeaders(peer, method, path, body),
+      body: body || undefined,
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await res.text();
     let data: T | null = null;
     try {
       data = text ? (JSON.parse(text) as T) : null;
     } catch {
+      // JSON でない応答 (プロキシのエラーページ等) は data 無しで返し、 status で判断させる。
       data = null;
     }
     if (!res.ok) {
-      return { ok: false, status: res.status, data, error: `HTTP ${res.status}` };
+      const code = (data as { error?: unknown } | null)?.error;
+      return { ok: false, status: res.status, data, error: typeof code === 'string' ? `HTTP ${res.status} ${code}` : `HTTP ${res.status}` };
     }
     return { ok: true, status: res.status, data, error: null };
   } catch (err) {
     return { ok: false, status: null, data: null, error: (err as Error).message };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -83,20 +94,53 @@ export function fetchHealth(peer: RemotePeer, timeoutMs: number): Promise<PeerCa
   return call<unknown>(peer, 'GET', '/api/v1/federation/health', undefined, timeoutMs);
 }
 
-/** ピアの 1 サービスを start/stop/restart する。 */
-export function remoteControl(
-  peer: RemotePeer,
-  code: string,
-  action: 'start' | 'stop' | 'restart',
-): Promise<PeerCallResult<Record<string, unknown>>> {
-  return call(peer, 'POST', '/api/v1/federation/control', { code, action }, 60_000);
+/** ピアへ依頼を出す (受け付けられると 202 と依頼の要約が返る)。 */
+export function requestOperation(peer: RemotePeer, request: OperationRequest): Promise<PeerCallResult<unknown>> {
+  return call<unknown>(peer, 'POST', '/api/v1/federation/operations', request, 15_000);
 }
 
-/** ピアの 1 サービスを update (pull + install + restart) する。 */
-export function remoteUpdate(
+/** ピアに出した依頼の状態 (手順つき) を取得。 */
+export function fetchOperation(peer: RemotePeer, id: string): Promise<PeerCallResult<unknown>> {
+  return call<unknown>(peer, 'GET', `/api/v1/federation/operations/${encodeURIComponent(id)}`);
+}
+
+export interface BundleDownloadResult {
+  ok: boolean;
+  /** 相手の main が手元と同じで、 取り込むコミットが無い。 */
+  upToDate: boolean;
+  status: number | null;
+  error: string | null;
+}
+
+/** 大きいリポジトリの全量 bundle もありうるので、 取得のタイムアウトは長めにとる。 */
+const BUNDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * ピアから git bundle (repo の main、 have 以降) を受け取り、 destPath へ書く。
+ * have は手元の HEAD (相手が持っていれば差分だけになる)。
+ */
+export async function downloadBundle(
   peer: RemotePeer,
-  code: string,
-  opts: { install?: boolean; restart?: boolean },
-): Promise<PeerCallResult<Record<string, unknown>>> {
-  return call(peer, 'POST', '/api/v1/federation/update', { code, ...opts }, 600_000);
+  repo: string,
+  have: string | null,
+  destPath: string,
+): Promise<BundleDownloadResult> {
+  const query = new URLSearchParams({ repo, ...(have ? { have } : {}) });
+  const path = `/api/v1/federation/git/bundle?${query.toString()}`;
+  try {
+    const res = await fetch(`${peer.base_url}${path}`, {
+      method: 'GET',
+      headers: requestHeaders(peer, 'GET', path, ''),
+      signal: AbortSignal.timeout(BUNDLE_TIMEOUT_MS),
+    });
+    if (res.status === 204) return { ok: true, upToDate: true, status: 204, error: null };
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, upToDate: false, status: res.status, error: `HTTP ${res.status} ${text.slice(0, 300)}`.trim() };
+    }
+    await pipeline(Readable.fromWeb(res.body as WebReadableStream<Uint8Array>), createWriteStream(destPath));
+    return { ok: true, upToDate: false, status: res.status, error: null };
+  } catch (err) {
+    return { ok: false, upToDate: false, status: null, error: (err as Error).message };
+  }
 }

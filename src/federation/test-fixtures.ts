@@ -2,7 +2,7 @@
  * federation のテスト用 health 応答を組む (テスト専用。 本番コードから import しない)。
  */
 
-import { FEDERATION_HEALTH_SCHEMA, type NodeHealthPayload, type NodeServiceHealth } from './health-types.js';
+import { FEDERATION_HEALTH_SCHEMA, type NodeHealthPayload, type NodeInfo, type NodeServiceHealth } from './health-types.js';
 
 export function serviceHealth(
   code: string,
@@ -31,6 +31,19 @@ export function serviceHealth(
   };
 }
 
+export function nodeInfo(node: string, overrides: Partial<NodeInfo> = {}): NodeInfo {
+  return {
+    node,
+    excubitor: { version: '1.4.0', git_branch: 'main', git_hash: 'abcdef123456', started_at: 500 },
+    platform: { os: 'win32', release: '10.0', arch: 'x64', hostname: node, node_version: 'v24.0.0' },
+    listener: { enabled: true, listening: ['100.64.0.1:17335'], error: null },
+    peers: { registered: 1, enabled: 1 },
+    services: { catalog_total: 0, covered: 0, managed: 0 },
+    update_source: 'origin',
+    ...overrides,
+  };
+}
+
 export function healthPayload(node: string, overrides: Partial<NodeHealthPayload> = {}): NodeHealthPayload {
   return {
     schema: FEDERATION_HEALTH_SCHEMA,
@@ -41,6 +54,8 @@ export function healthPayload(node: string, overrides: Partial<NodeHealthPayload
     host: null,
     services: [],
     links: [],
+    node_info: nodeInfo(node),
+    operations: [],
     ...overrides,
   };
 }

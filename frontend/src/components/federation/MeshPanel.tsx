@@ -7,7 +7,12 @@ import { fmtAgo, LINK_LABEL } from './format';
  * 拠点メッシュの到達性。 上段が拠点ごとの状態、 下段が拠点 → 拠点のつながり表。
  * メッシュなので A→B と B→A は別々に出す (片方向だけ切れていることがある)。
  */
-export function MeshPanel({ mesh }: { mesh: MeshView }) {
+export function MeshPanel({ mesh, selected, onSelect }: {
+  mesh: MeshView;
+  /** 選択中の拠点名 (詳細パネルに出す)。 */
+  selected: string | null;
+  onSelect: (node: string) => void;
+}) {
   const names = mesh.nodes.map((n) => n.node);
   const linkOf = new Map<string, MeshLink>();
   for (const link of mesh.links) linkOf.set(`${link.from}\u0000${link.node}`, link);
@@ -22,7 +27,12 @@ export function MeshPanel({ mesh }: { mesh: MeshView }) {
         </thead>
         <tbody>
           {mesh.nodes.map((n) => (
-            <tr key={n.peer_id ?? `self:${n.node}`} className={n.stale ? 'stale' : ''}>
+            <tr
+              key={n.peer_id ?? `self:${n.node}`}
+              className={`mesh-node-row${n.stale ? ' stale' : ''}${selected === n.node ? ' selected' : ''}`}
+              onClick={() => onSelect(n.node)}
+              title="クリックで拠点の詳細"
+            >
               <td>
                 {n.node}
                 {n.is_self && <span className="muted"> (この拠点)</span>}

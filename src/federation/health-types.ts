@@ -6,11 +6,15 @@
  */
 
 import { z } from 'zod';
+import { OperationSummarySchema, UpdateSourceSchema } from './operations/types.js';
 
 /** @implements SPEC-FEDERATION-HEALTH-CACHE */
 
-/** 応答形式の版。 互換性のない変更をしたら上げる。 */
-export const FEDERATION_HEALTH_SCHEMA = 1;
+/**
+ * 応答形式の版。 互換性のない変更をしたら上げる。
+ * 2: node_info (拠点情報) と operations (依頼の履歴) を追加、 リンク状態に unregistered を追加。
+ */
+export const FEDERATION_HEALTH_SCHEMA = 2;
 
 /**
  * サービス 1 件の死活。
@@ -47,9 +51,10 @@ export type NodeServiceHealth = z.infer<typeof NodeServiceHealthSchema>;
  * - up:           health を取得できた
  * - down:         接続できない / タイムアウト / 5xx / 応答が契約に合わない
  * - unauthorized: 401 / 403 (token の食い違い)
+ * - unregistered: token は合っているが、 相手がこちらをピア登録していない (相互登録待ち)
  * - pending:      登録直後でまだ 1 回も問い合わせていない
  */
-export const PeerLinkStatusSchema = z.enum(['up', 'down', 'unauthorized', 'pending']);
+export const PeerLinkStatusSchema = z.enum(['up', 'down', 'unauthorized', 'unregistered', 'pending']);
 export type PeerLinkStatus = z.infer<typeof PeerLinkStatusSchema>;
 
 export const NodePeerLinkSchema = z.object({
@@ -72,6 +77,33 @@ export const NodeSummarySchema = z.object({
   open_errors: z.number(),
 });
 
+/** 拠点情報 (node-info.ts)。 表示用で、 認可や判定には使わない。 */
+export const NodeInfoSchema = z.object({
+  node: z.string(),
+  excubitor: z.object({
+    version: z.string(),
+    git_branch: z.string().nullable(),
+    git_hash: z.string().nullable(),
+    started_at: z.number(),
+  }),
+  platform: z.object({
+    os: z.string(),
+    release: z.string(),
+    arch: z.string(),
+    hostname: z.string(),
+    node_version: z.string(),
+  }),
+  listener: z.object({
+    enabled: z.boolean(),
+    listening: z.array(z.string()),
+    error: z.string().nullable(),
+  }),
+  peers: z.object({ registered: z.number(), enabled: z.number() }),
+  services: z.object({ catalog_total: z.number(), covered: z.number(), managed: z.number() }),
+  update_source: UpdateSourceSchema.nullable(),
+});
+export type NodeInfo = z.infer<typeof NodeInfoSchema>;
+
 export const NodeHealthPayloadSchema = z.object({
   schema: z.literal(FEDERATION_HEALTH_SCHEMA),
   node: z.string().min(1),
@@ -86,5 +118,8 @@ export const NodeHealthPayloadSchema = z.object({
   host: z.record(z.unknown()).nullable(),
   services: z.array(NodeServiceHealthSchema),
   links: z.array(NodePeerLinkSchema),
+  node_info: NodeInfoSchema,
+  /** この拠点が受けた依頼の直近分 (新しい順)。 */
+  operations: z.array(OperationSummarySchema),
 });
 export type NodeHealthPayload = z.infer<typeof NodeHealthPayloadSchema>;

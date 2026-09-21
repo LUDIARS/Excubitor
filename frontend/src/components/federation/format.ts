@@ -1,4 +1,4 @@
-import type { PeerLinkStatus, ServiceHealthState } from '../../lib/api';
+import type { OperationAction, OperationStatus, PeerLinkStatus, ServiceHealthState } from '../../lib/api';
 
 /** @implements SPEC-FEDERATION-HEALTH-CACHE */
 
@@ -16,8 +16,34 @@ export const LINK_LABEL: Record<PeerLinkStatus, string> = {
   up: '接続',
   down: '不達',
   unauthorized: '認証NG',
+  unregistered: '相互登録待ち',
   pending: '未確認',
 };
+
+export const OPERATION_LABEL: Record<OperationAction, string> = {
+  update: '最新の更新',
+  restart: '再起動',
+  deploy: 'デプロイ',
+  reflect: '反映',
+  start: '起動',
+  stop: '停止',
+};
+
+export const OPERATION_STATUS_LABEL: Record<OperationStatus, string> = {
+  queued: '順番待ち',
+  running: '実行中',
+  restarting: '再起動中',
+  succeeded: '完了',
+  failed: '失敗',
+};
+
+/** epoch ms を 「MM/DD HH:mm」 で出す。 */
+export function fmtTime(at: number | null): string {
+  if (at == null) return '—';
+  const d = new Date(at);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export const HEALTH_LABEL: Record<ServiceHealthState, string> = {
   up: '稼働',

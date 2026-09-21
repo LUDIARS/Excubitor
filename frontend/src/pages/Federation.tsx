@@ -1,32 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   fetchPeers,
-  fetchFederation,
   fetchSelfNode,
   addPeer,
   deletePeer,
   testPeer,
   updatePeer,
-  remoteControl,
-  remoteUpdate,
   fetchMesh,
   type PeerView,
-  type FederationView,
-  type FederationNode,
   type SelfNode,
   type MeshView,
 } from '../lib/api';
 import { MeshPanel } from '../components/federation/MeshPanel';
 import { CoveragePanel } from '../components/federation/CoveragePanel';
+import { NodeDetailPanel } from '../components/federation/NodeDetailPanel';
+import { LINK_LABEL } from '../components/federation/format';
 
 /** 画面の再取得間隔。 サーバ側はキャッシュを返すだけなので、 ここを縮めても他拠点への通信は増えない。 */
 const REFRESH_MS = 15_000;
 
 export default function Federation() {
   const [peers, setPeers] = useState<PeerView[]>([]);
-  const [view, setView] = useState<FederationView | null>(null);
   const [mesh, setMesh] = useState<MeshView | null>(null);
   const [self, setSelf] = useState<SelfNode | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -39,9 +36,8 @@ export default function Federation() {
 
   const reload = async () => {
     try {
-      const [p, v, m] = await Promise.all([fetchPeers(), fetchFederation(), fetchMesh()]);
+      const [p, m] = await Promise.all([fetchPeers(), fetchMesh()]);
       setPeers(p);
-      setView(v);
       setMesh(m);
       setError(null);
     } catch (e: unknown) {
@@ -49,16 +45,15 @@ export default function Federation() {
     }
   };
 
-  const reloadMesh = async () => {
+  const reloadMesh = useCallback(async () => {
     const m = await fetchMesh();
     setMesh(m);
-  };
+  }, []);
 
   useEffect(() => {
     void reload();
     void fetchSelfNode().then(setSelf).catch(() => {});
     const id = setInterval(() => {
-      void fetchFederation().then(setView).catch(() => {});
       void fetchMesh().then(setMesh).catch(() => {});
     }, REFRESH_MS);
     return () => clearInterval(id);
@@ -117,6 +112,9 @@ export default function Federation() {
     }
   };
 
+  const selectedNode = mesh?.nodes.find((n) => n.node === (selected ?? mesh.self)) ?? null;
+  const linkOfPeer = (peerId: string) => mesh?.nodes.find((n) => n.peer_id === peerId) ?? null;
+
   return (
     <div className="federation">
       {error && <div className="error-banner">エラー: {error}</div>}
@@ -126,9 +124,14 @@ export default function Federation() {
       <h2 className="mem-section-title">拠点メッシュ</h2>
       <p className="muted">
         各拠点は自分の監視ループで確かめた死活を保存しておき、 ほかの拠点はそれを巡回周期 (既定 60 秒) で
-        取りに行きます。 この画面を開いても、 死活の確認も拠点間の通信も増えません。
+        取りに行きます。 この画面を開いても、 死活の確認も拠点間の通信も増えません。 拠点をクリックすると詳細と依頼。
       </p>
-      {mesh === null ? <div className="empty-state">読み込み中…</div> : <MeshPanel mesh={mesh} />}
+      {mesh === null ? (
+        <div className="empty-state">読み込み中…</div>
+      ) : (
+        <MeshPanel mesh={mesh} selected={selectedNode?.node ?? null} onSelect={setSelected} />
+      )}
+      {mesh && selectedNode && <NodeDetailPanel mesh={mesh} node={selectedNode} onChanged={reloadMesh} />}
 
       <h2 className="mem-section-title">担保 (どの拠点がどのサービスを見るか)</h2>
       {mesh === null ? (
@@ -149,11 +152,12 @@ export default function Federation() {
         </button>
       </div>
       <p className="muted">
+        疎通には相互登録が要ります: 相手の拠点でもこの拠点を登録するまで「相互登録待ち」になり、 死活の取得も依頼もできません。
         相手ノードが Cloudflare Access の後ろにある場合のみ CF-Access の Service Token を入力 (両方揃えば送信)。 token / secret は暗号化保存。
       </p>
 
       {peers.length === 0 ? (
-        <div className="empty-state">ピア未登録。 相手 Excubitor の base_url と agent token を登録すると集約します。</div>
+        <div className="empty-state">ピア未登録。 相手 Excubitor の拠点間リスナーの URL と agent token を登録し、 相手側でもこの拠点を登録するとつながります。</div>
       ) : (
         <table className="peer-table">
           <thead>
@@ -162,35 +166,27 @@ export default function Federation() {
             </tr>
           </thead>
           <tbody>
-            {peers.map((p) => (
-              <tr key={p.id} className={p.enabled ? '' : 'disabled'}>
-                <td>{p.name}</td>
-                <td className="mono">{p.base_url}</td>
-                <td className="mono">{p.token_hint}{p.cf_access_id ? ' · CF✓' : ''}</td>
-                <td>
-                  {p.last_error ? <span className="bad">NG: {p.last_error}</span> : p.last_ok_at ? <span className="ok">OK</span> : '—'}
-                </td>
-                <td className="peer-actions">
-                  <button disabled={busy} onClick={() => void onTest(p.id)}>疎通</button>
-                  <button disabled={busy} onClick={() => void onToggle(p)}>{p.enabled ? '無効化' : '有効化'}</button>
-                  <button disabled={busy} className="danger" onClick={() => void onDelete(p.id)}>削除</button>
-                </td>
-              </tr>
-            ))}
+            {peers.map((p) => {
+              const link = linkOfPeer(p.id);
+              return (
+                <tr key={p.id} className={p.enabled ? '' : 'disabled'}>
+                  <td>{p.name}</td>
+                  <td className="mono">{p.base_url}</td>
+                  <td className="mono">{p.token_hint}{p.cf_access_id ? ' · CF✓' : ''}</td>
+                  <td>
+                    {link ? <span className={`link-badge link-${link.status}`}>{LINK_LABEL[link.status]}</span> : '—'}
+                    {p.last_error && <div className="bad small">{p.last_error}</div>}
+                  </td>
+                  <td className="peer-actions">
+                    <button disabled={busy} onClick={() => void onTest(p.id)}>疎通</button>
+                    <button disabled={busy} onClick={() => void onToggle(p)}>{p.enabled ? '無効化' : '有効化'}</button>
+                    <button disabled={busy} className="danger" onClick={() => void onDelete(p.id)}>削除</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      )}
-
-      <h2 className="mem-section-title">集約ビュー (local + ピア)</h2>
-      {view === null ? (
-        <div className="empty-state">読み込み中…</div>
-      ) : (
-        <div className="node-grid">
-          <NodeCard node={view.local} />
-          {view.peers.map((n) => (
-            <NodeCard key={n.peer_id ?? n.name} node={n} onControl={reload} />
-          ))}
-        </div>
       )}
     </div>
   );
@@ -237,81 +233,9 @@ function SelfNodePanel({ self }: { self: SelfNode | null }) {
         )}
       </div>
       <p className="self-node-hint muted">
-        この token と拠点間リスナーの URL を相手ノードの「他拠点ピア」登録に貼ると、 相手から本ノードへ接続できます
-        (Tailscale / Cloudflare Mesh の中だけで通信します)。
+        この token と拠点間リスナーの URL を相手ノードの「他拠点ピア」登録に貼り、 こちらでも相手を登録すると
+        つながります (相互登録。 Tailscale / Cloudflare Mesh の中だけで通信します)。
       </p>
     </section>
   );
-}
-
-function NodeCard({ node, onControl }: { node: FederationNode; onControl?: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const s = node.summary;
-  const isRemote = node.peer_id != null;
-
-  const doControl = async (code: string, action: 'start' | 'stop' | 'restart') => {
-    if (!node.peer_id) return;
-    setBusy(true);
-    try {
-      await remoteControl(node.peer_id, code, action);
-      if (onControl) await onControl();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doPull = async (code: string) => {
-    if (!node.peer_id) return;
-    setBusy(true);
-    try {
-      const res = await remoteUpdate(node.peer_id, code);
-      if (!res.ok) alert(`更新失敗 (${code}): ${res.error ?? 'unknown'}`);
-      if (onControl) await onControl();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <article className={`node-card ${node.ok ? '' : 'node-down'}`}>
-      <div className="node-head">
-        <span className="node-name">{node.node ?? node.name}{isRemote ? '' : ' (local)'}</span>
-        {!node.ok && <span className="bad">接続不可: {node.error ?? node.status ?? '未確認'}</span>}
-        {node.ok && node.stale && <span className="muted">古い値</span>}
-      </div>
-      {node.host && (
-        <div className="node-host">
-          CPU {node.host.cpu_pct != null ? `${node.host.cpu_pct}%` : '—'}
-          {' · '}メモリ {fmtGiB(node.host.used_mem_bytes)} / {fmtGiB(node.host.totalMemBytes)}
-        </div>
-      )}
-      {s && (
-        <div className="node-summary">
-          稼働 {s.up} / 全 {s.services_total} · エラー {s.open_errors}
-        </div>
-      )}
-      <ul className="node-services">
-        {node.services.slice(0, 50).map((svc) => (
-          <li key={svc.code} className={`svc-${svc.state}`}>
-            <span className="svc-state-dot" data-state={svc.state} />
-            <span className="svc-name">{svc.name}</span>
-            <span className="svc-branch mono">{svc.git_branch ?? ''}</span>
-            {isRemote && node.ok && (
-              <span className="svc-actions">
-                <button disabled={busy} onClick={() => void doPull(svc.code)} title="git pull (更新)">更新</button>
-                <button disabled={busy} onClick={() => void doControl(svc.code, 'restart')}>再起動</button>
-                <button disabled={busy} onClick={() => void doControl(svc.code, 'start')}>起動</button>
-                <button disabled={busy} onClick={() => void doControl(svc.code, 'stop')}>停止</button>
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </article>
-  );
-}
-
-function fmtGiB(bytes: number | null | undefined): string {
-  if (bytes == null || !isFinite(bytes)) return '—';
-  return `${(bytes / 1024 ** 3).toFixed(1)}GiB`;
 }

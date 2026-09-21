@@ -76,6 +76,20 @@ export async function emergencyServiceViaLocalTool(
   }
 }
 
+/**
+ * Excubitor 自身の再起動を supervisor に依頼する。 supervisor は受理 (deferred) を返してから
+ * backend を止めて新しい backend を起動する (design.md §16.4)。 ok は「受理された」の意味で、
+ * 再起動の完了ではない。
+ */
+export async function restartExcubitorViaLocalTool(actor: string): Promise<{ ok: boolean; error: string | null }> {
+  try {
+    const response = await requestLocalControl({ target: { kind: 'excubitor' }, action: 'restart', actor });
+    return response.ok ? { ok: true, error: null } : { ok: false, error: response.error?.message ?? 'restart rejected' };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function localControlStatus(
   options: LocalControlClientOptions = {},
 ): Promise<ExcubitorStatusPayload> {

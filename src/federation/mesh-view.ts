@@ -12,8 +12,9 @@
  *               - down:              担保している拠点のどこからも up が見えていない
  */
 
-import type { NodeHealthPayload, NodePeerLink, PeerLinkStatus, ServiceHealthState } from './health-types.js';
+import type { NodeHealthPayload, NodeInfo, NodePeerLink, PeerLinkStatus, ServiceHealthState } from './health-types.js';
 import type { PeerPollState } from './peer-cache.js';
+import type { OperationSummary } from './operations/types.js';
 
 /** @implements SPEC-FEDERATION-COVERAGE */
 
@@ -33,6 +34,12 @@ export interface MeshNode {
   services_total: number;
   covered_total: number;
   covered_down: number;
+  /** 拠点情報 (相手から取れていなければ null)。 */
+  node_info: NodeInfo | null;
+  /** マシン全体の CPU / メモリ (監視ループの直近サンプル)。 */
+  host: Record<string, unknown> | null;
+  /** その拠点が受けた依頼の直近分。 */
+  operations: OperationSummary[];
 }
 
 export interface MeshLink extends NodePeerLink {
@@ -121,6 +128,9 @@ function selfNode(self: NodeHealthPayload): MeshNode {
     error: null,
     scan_completed_at: self.scan.completed_at,
     ...counts,
+    node_info: self.node_info,
+    host: self.host,
+    operations: self.operations,
   };
 }
 
@@ -138,6 +148,9 @@ function peerNode(peer: PeerPollState, stale: boolean): MeshNode {
     error: peer.error,
     scan_completed_at: peer.payload?.scan.completed_at ?? null,
     ...counts,
+    node_info: peer.payload?.node_info ?? null,
+    host: peer.payload?.host ?? null,
+    operations: peer.payload?.operations ?? [],
   };
 }
 

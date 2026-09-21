@@ -23,13 +23,23 @@ describe('classifyPeerResponse', () => {
   });
 
   it('does not pass through a payload that breaks the contract', () => {
-    const outcome = classifyPeerResponse({ ok: true, status: 200, data: { node: 'mac' }, error: null }, 3);
+    const outcome = classifyPeerResponse({ ok: true, status: 200, data: { ...healthPayload('mac'), node: 123 }, error: null }, 3);
     expect(outcome).toMatchObject({ ok: false, status: 'down', payload: null });
     expect(outcome.error).toMatch(/invalid health payload/);
   });
 
-  it('rejects a payload from a different schema version', () => {
-    const outcome = classifyPeerResponse({ ok: true, status: 200, data: { ...healthPayload('mac'), schema: 2 }, error: null }, 3);
+  it('rejects a payload from a different schema version and says to update the peer', () => {
+    const outcome = classifyPeerResponse({ ok: true, status: 200, data: { ...healthPayload('mac'), schema: 1 }, error: null }, 3);
     expect(outcome).toMatchObject({ ok: false, status: 'down' });
+    expect(outcome.error).toMatch(/incompatible health schema \(peer=1, local=2\)/);
+  });
+
+  it('tells a missing mutual registration apart from a wrong token', () => {
+    const notRegistered = classifyPeerResponse(
+      { ok: false, status: 403, data: { error: 'peer_not_registered' }, error: 'HTTP 403 peer_not_registered' }, 4,
+    );
+    expect(notRegistered).toMatchObject({ ok: false, status: 'unregistered' });
+    const forbidden = classifyPeerResponse({ ok: false, status: 403, data: { error: 'forbidden' }, error: 'HTTP 403' }, 4);
+    expect(forbidden.status).toBe('unauthorized');
   });
 });

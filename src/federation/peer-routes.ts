@@ -1,20 +1,19 @@
 /**
  * ピア管理の HTTP 面 (loopback の本体にだけ載せる)。
  *
- *   /api/v1/peers                              ピア CRUD
- *   /api/v1/peers/:id/test                     疎通テスト (health を 1 回引き、 巡回キャッシュにも入れる)
- *   /api/v1/peers/:id/services/:code/control   ピアの 1 サービスを start / stop / restart (プロキシ)
- *   /api/v1/peers/:id/services/:code/update    ピアの 1 サービスを更新 (プロキシ)
+ *   /api/v1/peers              ピア CRUD
+ *   /api/v1/peers/:id/test     疎通テスト (health を 1 回引き、 巡回キャッシュにも入れる)
+ * ピアへの依頼 (更新 / 再起動 / デプロイ / 反映) は operations/local-routes.ts。
  *
  * ピアの base_url は相手拠点の拠点間リスナー (Tailscale / Cloudflare Mesh 上のアドレス)。
+ * 疎通には相互登録が要る: 相手もこちらを登録していないと 403 peer_not_registered になる。
  */
 
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
-import { listPeers, getPeer, createPeer, updatePeer, deletePeer, markPeerResult, toView } from './store.js';
-import { remoteControl, remoteUpdate } from './client.js';
+import { listPeers, getPeer, createPeer, updatePeer, deletePeer, toView } from './store.js';
 import { probePeer } from './peer-probe.js';
 import { federationSettings } from './settings.js';
 
@@ -71,11 +70,8 @@ export function buildPeerCrudRoutes(): Hono {
   return app;
 }
 
-/**
- * 相手拠点へ実際に通信する操作: 疎通テストと、 ピアの 1 サービスへの遠隔操作
- * (相手拠点の公開面 control / update へのプロキシ)。
- */
-export function buildPeerActionRoutes(getCatalog: () => Catalog): Hono {
+/** 相手拠点へ実際に通信する疎通テスト。 */
+export function buildPeerTestRoutes(getCatalog: () => Catalog): Hono {
   const app = new Hono();
 
   // 疎通テスト: health を 1 回引き、 結果をキャッシュにも反映する (次の巡回を待たずに画面へ出る)。
@@ -91,27 +87,6 @@ export function buildPeerActionRoutes(getCatalog: () => Catalog): Hono {
       error: outcome.error,
       node: outcome.payload?.node ?? null,
     });
-  });
-
-  app.post('/api/v1/peers/:id/services/:code/control', async (c) => {
-    const peer = getPeer(c.req.param('id'));
-    if (!peer) return c.json({ error: 'peer_not_found' }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { action?: 'start' | 'stop' | 'restart' };
-    if (!body.action || !['start', 'stop', 'restart'].includes(body.action)) {
-      return c.json({ error: 'invalid_action' }, 400);
-    }
-    const res = await remoteControl(peer, c.req.param('code'), body.action);
-    markPeerResult(peer.id, res.ok, res.error);
-    return c.json({ ok: res.ok, status: res.status, error: res.error, result: res.data }, res.ok ? 200 : 502);
-  });
-
-  app.post('/api/v1/peers/:id/services/:code/update', async (c) => {
-    const peer = getPeer(c.req.param('id'));
-    if (!peer) return c.json({ error: 'peer_not_found' }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { install?: boolean; restart?: boolean };
-    const res = await remoteUpdate(peer, c.req.param('code'), body);
-    markPeerResult(peer.id, res.ok, res.error);
-    return c.json({ ok: res.ok, status: res.status, error: res.error, result: res.data }, res.ok ? 200 : 502);
   });
 
   return app;

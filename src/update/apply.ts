@@ -3,25 +3,28 @@
  *
  * git pull --ff-only でリポを最新化し、 任意で依存再インストール、 起動中なら restart。
  * dirty (未コミット変更あり) なリポは安全のため pull せず中断する。
+ * 個々の手順は steps.ts (拠点への依頼 federation/operations と共用)。
  */
 
-import { existsSync } from 'node:fs';
 import { sql } from 'drizzle-orm';
 import { createNamedLogger } from '../shared/logger.js';
-import { execCapture } from '../shared/exec.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
-import { repoDirOf, checkUpdate } from './checker.js';
 import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { isManaged } from '../process/manager.js';
+import { currentState } from './service-state.js';
+import {
+  buildService,
+  checkRepoReady,
+  fastForwardFromOrigin,
+  installDependencies,
+  tail,
+  type StepResult,
+} from './steps.js';
 
 const logger = createNamedLogger('excubitor.update.apply');
 
-export interface ApplyStep {
-  step: string;
-  ok: boolean;
-  detail: string;
-}
+export type ApplyStep = StepResult;
 
 export interface ApplyResult {
   code: string;
@@ -44,47 +47,41 @@ export async function applyUpdate(
   const install = opts.install ?? true;
   const restart = opts.restart ?? true;
   const steps: ApplyStep[] = [];
-  const repoDir = repoDirOf(svc);
 
-  const fail = (step: string, detail: string): ApplyResult => {
-    steps.push({ step, ok: false, detail });
-    audit(svc.code, actor, false, steps);
-    return { code: svc.code, ok: false, steps };
+  const finish = (ok: boolean): ApplyResult => {
+    audit(svc.code, actor, ok, steps);
+    if (ok) logger.info({ code: svc.code, steps: steps.length }, 'update applied');
+    return { code: svc.code, ok, steps };
   };
 
-  if (!repoDir || !existsSync(`${repoDir}/.git`)) return fail('repo', 'no git repository');
+  // 1. 先に状態確認 (repo / dirty / branch)。
+  const { ready, step } = await checkRepoReady(svc);
+  if (!ready) {
+    steps.push(step!);
+    return finish(false);
+  }
 
-  // 1. 先に状態確認 (branch / dirty / behind)。
-  const status = await checkUpdate(svc, false);
-  if (status.dirty) return fail('dirty_check', '未コミット変更があるため中断 (手動で commit/stash してください)');
-  if (!status.branch) return fail('branch', 'ブランチを特定できません');
-
-  // 2. fetch + pull --ff-only。
-  const main = await updateMainBranch(repoDir, status.branch);
-  steps.push({ step: 'main', ok: main.ok, detail: tail(main.stderr || main.stdout) });
-  if (!main.ok) return fail('main', tail(main.stderr || main.stdout || 'main update failed'));
-
-  const fetch = await execCapture('git', ['fetch', '--quiet', 'origin', status.branch], repoDir, 60000);
-  steps.push({ step: 'fetch', ok: fetch.ok, detail: tail(fetch.stderr || fetch.stdout) });
-  if (!fetch.ok) return fail('fetch', tail(fetch.stderr));
-
-  const pull = await execCapture('git', ['merge', '--ff-only', `origin/${status.branch}`], repoDir, 60000);
-  steps.push({ step: 'pull', ok: pull.ok, detail: tail(pull.stdout + pull.stderr) });
-  if (!pull.ok) return fail('pull', tail(pull.stderr || 'ff-only マージ不可 (分岐あり)'));
+  // 2. main と今の branch を origin から fast-forward。
+  for (const s of await fastForwardFromOrigin(ready.repoDir, ready.branch)) {
+    steps.push(s);
+    if (!s.ok) return finish(false);
+  }
 
   // 3. 依存インストール (node 系 + package.json あり)。
-  if (install && existsSync(`${repoDir}/package.json`)) {
-    const npm = await execCapture('npm', ['install'], repoDir, 300000, true);
-    steps.push({ step: 'install', ok: npm.ok, detail: tail(npm.stderr || npm.stdout) });
-    if (!npm.ok) return fail('install', tail(npm.stderr));
+  if (install) {
+    const npm = await installDependencies(ready.repoDir);
+    if (npm) {
+      steps.push(npm);
+      if (!npm.ok) return finish(false);
+    }
   }
 
   // 3.5. ビルド (runtime=app 等で build_command 指定があれば)。
   // ネイティブ/デスクトップ製品は git ff だけでは反映されないので exe を作り直す。
-  if (svc.build_command) {
-    const build = await execCapture(svc.build_command, [], svc.cwd ?? repoDir, 1_800_000, true);
-    steps.push({ step: 'build', ok: build.ok, detail: tail(build.stderr || build.stdout) });
-    if (!build.ok) return fail('build', tail(build.stderr));
+  const build = await buildService(svc, ready.repoDir, 'catalog');
+  if (build) {
+    steps.push(build);
+    if (!build.ok) return finish(false);
   }
 
   // 4. 起動中なら restart (反映)。
@@ -92,22 +89,11 @@ export async function applyUpdate(
   if (restart && running) {
     const r = await controlServiceViaLocalTool(svc, 'restart', actor);
     steps.push({ step: 'restart', ok: r.ok, detail: tail(r.stdout + r.stderr) });
-    if (!r.ok) return fail('restart', tail(r.stderr));
+    if (!r.ok) return finish(false);
   } else {
     steps.push({ step: 'restart', ok: true, detail: running ? 'skipped (restart=false)' : '未起動のため restart 不要' });
   }
-
-  audit(svc.code, actor, true, steps);
-  logger.info({ code: svc.code, steps: steps.length }, 'update applied');
-  return { code: svc.code, ok: true, steps };
-}
-
-function currentState(code: string): string | null {
-  const rows = db().all(sql`
-    SELECT si.state AS state FROM service_instances si
-    JOIN services s ON s.id = si.service_id WHERE s.code = ${code} LIMIT 1
-  `) as Array<{ state: string }>;
-  return rows[0]?.state ?? null;
+  return finish(true);
 }
 
 function audit(code: string, actor: string, ok: boolean, steps: ApplyStep[]): void {
@@ -115,25 +101,4 @@ function audit(code: string, actor: string, ok: boolean, steps: ApplyStep[]): vo
     INSERT INTO audit_log (actor, action, target_type, target_id, payload)
     VALUES (${actor}, ${'service.update'}, ${'service'}, ${code}, ${JSON.stringify({ ok, steps })})
   `);
-}
-
-async function updateMainBranch(repoDir: string, currentBranch: string) {
-  const fetchMain = await execCapture('git', ['fetch', '--quiet', 'origin', 'main'], repoDir, 60000);
-  if (!fetchMain.ok) return fetchMain;
-
-  if (currentBranch === 'main') {
-    return execCapture('git', ['merge', '--ff-only', 'origin/main'], repoDir, 60000);
-  }
-
-  return execCapture(
-    'git',
-    ['fetch', '--quiet', 'origin', 'main:refs/heads/main'],
-    repoDir,
-    60000,
-  );
-}
-
-function tail(s: string): string {
-  const t = s.trim();
-  return t.length > 800 ? '…' + t.slice(-800) : t;
 }

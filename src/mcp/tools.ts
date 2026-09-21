@@ -276,19 +276,38 @@ export function buildMcpServer(baseUrl: string): McpServer {
     },
   );
 
+  /** @implements SPEC-FEDERATION-OPERATIONS */
   server.tool(
-    'excubitor_remote_control',
-    '他拠点ピアの 1 サービスを start / stop / restart する (federation プロキシ)。',
+    'excubitor_request_operation',
+    '拠点の Excubitor に依頼する: update (最新の取得だけ) / restart / deploy (取得+install+build+再起動) / reflect (build+版ズレ時だけ再起動) / start / stop。 target は サービスコード か "excubitor" (その拠点の Excubitor 自身。 start/stop 不可)。 peer_id を省くと自拠点への依頼。 依頼は非同期で、 返る operation.id を excubitor_operation_status で追う。 他拠点への依頼は相互登録済みのピアにだけ届く。',
     {
-      peer_id: z.string().describe('ピア ID (excubitor_list_peers で取得)'),
-      code: z.string().describe('リモートのサービスコード'),
-      action: z.enum(['start', 'stop', 'restart']),
+      peer_id: z.string().optional().describe('ピア ID (excubitor_list_peers で取得)。 省略時は自拠点'),
+      target: z.string().describe('サービスコード、 または "excubitor"'),
+      action: z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop']),
     },
-    async ({ peer_id, code, action }) => {
+    async ({ peer_id, target, action }) => {
       try {
-        return jsonContent(
-          await apiPost(`/api/v1/peers/${encodeURIComponent(peer_id)}/services/${encodeURIComponent(code)}/control`, { action }),
-        );
+        const body = { target: target === 'excubitor' ? { kind: 'excubitor' } : { kind: 'service', code: target }, action };
+        const path = peer_id ? `/api/v1/peers/${encodeURIComponent(peer_id)}/operations` : '/api/v1/operations';
+        return jsonContent(await apiPost(path, body));
+      } catch (err) {
+        return errorContent(err);
+      }
+    },
+  );
+
+  server.tool(
+    'excubitor_operation_status',
+    '依頼の状態 (queued / running / restarting / succeeded / failed) と実行した手順。 peer_id を省くと自拠点の依頼。',
+    {
+      operation_id: z.string().describe('excubitor_request_operation が返した operation.id'),
+      peer_id: z.string().optional().describe('依頼先のピア ID。 省略時は自拠点'),
+    },
+    async ({ operation_id, peer_id }) => {
+      try {
+        const id = encodeURIComponent(operation_id);
+        const path = peer_id ? `/api/v1/peers/${encodeURIComponent(peer_id)}/operations/${id}` : `/api/v1/operations/${id}`;
+        return jsonContent(await apiGet(path));
       } catch (err) {
         return errorContent(err);
       }

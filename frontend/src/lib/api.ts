@@ -1070,23 +1070,55 @@ export function fetchFederation(): Promise<FederationView> {
   return getJSON<FederationView>('/api/v1/federation/services');
 }
 
-export function remoteControl(peerId: string, code: string, action: ControlAction) {
-  return postJSON<{ ok: boolean; status: number | null; error: string | null; result: unknown }>(
-    `/api/v1/peers/${encodeURIComponent(peerId)}/services/${encodeURIComponent(code)}/control`,
-    { action },
-  );
+// ─────────────── 拠点への依頼 (更新 / 再起動 / デプロイ / 反映 / 起動 / 停止) ───────────────
+export type OperationAction = 'update' | 'restart' | 'deploy' | 'reflect' | 'start' | 'stop';
+export type OperationTarget = { kind: 'service'; code: string } | { kind: 'excubitor' };
+export type OperationStatus = 'queued' | 'running' | 'restarting' | 'succeeded' | 'failed';
+
+export interface OperationSummary {
+  id: string;
+  requested_by: string;
+  target: OperationTarget;
+  action: OperationAction;
+  status: OperationStatus;
+  source: 'origin' | 'mesh';
+  error: string | null;
+  last_step: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
 }
 
-/** リモートピアの 1 サービスを pull (更新) する (federation プロキシ)。 */
-export function remoteUpdate(peerId: string, code: string, opts: { install?: boolean; restart?: boolean } = {}) {
-  return postJSON<{ ok: boolean; status: number | null; error: string | null; result: unknown }>(
-    `/api/v1/peers/${encodeURIComponent(peerId)}/services/${encodeURIComponent(code)}/update`,
-    opts,
-  );
+export interface OperationDetail extends OperationSummary {
+  steps: Array<{ step: string; ok: boolean; detail: string }>;
 }
 
-// ─────────────── 拠点メッシュ (担保 / 拠点間ヘルス) ───────────────
-export type PeerLinkStatus = 'up' | 'down' | 'unauthorized' | 'pending';
+/** 拠点に依頼を出す。 peerId が null なら自拠点。 */
+export function requestOperation(peerId: string | null, target: OperationTarget, action: OperationAction) {
+  const path = peerId ? `/api/v1/peers/${encodeURIComponent(peerId)}/operations` : '/api/v1/operations';
+  return postJSON<{ operation: OperationSummary }>(path, { target, action });
+}
+
+/** 依頼の状態と手順。 peerId が null なら自拠点。 */
+export function fetchOperation(peerId: string | null, id: string): Promise<OperationDetail> {
+  const path = peerId
+    ? `/api/v1/peers/${encodeURIComponent(peerId)}/operations/${encodeURIComponent(id)}`
+    : `/api/v1/operations/${encodeURIComponent(id)}`;
+  return getJSON<{ operation: OperationDetail }>(path).then((d) => d.operation);
+}
+
+// ─────────────── 拠点メッシュ (担保 / 拠点間ヘルス / 拠点情報) ───────────────
+export type PeerLinkStatus = 'up' | 'down' | 'unauthorized' | 'unregistered' | 'pending';
+
+export interface NodeInfo {
+  node: string;
+  excubitor: { version: string; git_branch: string | null; git_hash: string | null; started_at: number };
+  platform: { os: string; release: string; arch: string; hostname: string; node_version: string };
+  listener: { enabled: boolean; listening: string[]; error: string | null };
+  peers: { registered: number; enabled: number };
+  services: { catalog_total: number; covered: number; managed: number };
+  update_source: 'origin' | 'mesh' | null;
+}
 export type ServiceHealthState = 'up' | 'down' | 'unmonitored' | 'unknown';
 export type CoverageIssue = 'duplicate_managed' | 'uncovered' | 'down';
 
@@ -1104,6 +1136,9 @@ export interface MeshNode {
   services_total: number;
   covered_total: number;
   covered_down: number;
+  node_info: NodeInfo | null;
+  host: NodeHost | null;
+  operations: OperationSummary[];
 }
 
 export interface MeshLink {

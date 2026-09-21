@@ -85,7 +85,10 @@ export function buildSelfRoutes(getListenerStatus: () => FederationListenerStatu
 }
 
 /** メッシュ集約・担保・旧形式の集約ビュー。 */
-export function buildMeshRoutes(getCatalog: () => Catalog): Hono {
+export function buildMeshRoutes(
+  getCatalog: () => Catalog,
+  getListenerStatus: () => FederationListenerStatus,
+): Hono {
   const app = new Hono();
 
   app.get('/api/v1/federation/mesh', (c) => {
@@ -93,13 +96,13 @@ export function buildMeshRoutes(getCatalog: () => Catalog): Hono {
     return c.json(buildMeshView({
       now: Date.now(),
       staleAfterMs: federationSettings(catalog).staleAfterMs,
-      self: localHealthPayload(catalog),
+      self: localHealthPayload(catalog, getListenerStatus()),
       peers: enabledPeerStates(),
     }));
   });
 
   app.get('/api/v1/federation/coverage', (c) => {
-    const payload = localHealthPayload(getCatalog());
+    const payload = localHealthPayload(getCatalog(), getListenerStatus());
     return c.json({ node: payload.node, scan: payload.scan, services: payload.services });
   });
 

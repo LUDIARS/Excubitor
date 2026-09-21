@@ -11,6 +11,7 @@ import { openDb, closeDb } from './db/index.js';
 import { db, resetDbClientForTests } from './db/client.js';
 import type { BootObservabilityOptions } from './index.js';
 import type { DowntimeSummary } from './scanner/downtime.js';
+import { signatureHeaders } from './federation/request-signature.js';
 
 type AnyCatalog = {
   project_versions: Record<string, { major: number; minor: number }>;
@@ -242,7 +243,7 @@ const mocks = vi.hoisted(() => ({
     status: 200,
     error: null,
     data: {
-      schema: 1,
+      schema: 2,
       node: 'remote-a',
       generated_at: 1,
       scan: { started_at: 1, completed_at: 1, duration_ms: 0, interval_ms: 60_000 },
@@ -254,11 +255,27 @@ const mocks = vi.hoisted(() => ({
         health: { state: 'up', reason: 'http', detail: 'HTTP 200', checked_at: 1, reported_version: null },
       }],
       links: [],
+      node_info: {
+        node: 'remote-a',
+        excubitor: { version: '1.4.0', git_branch: 'main', git_hash: 'abcdef123456', started_at: 1 },
+        platform: { os: 'darwin', release: '22.6.0', arch: 'arm64', hostname: 'remote-a', node_version: 'v24.0.0' },
+        listener: { enabled: true, listening: ['100.64.0.2:17335'], error: null },
+        peers: { registered: 1, enabled: 1 },
+        services: { catalog_total: 1, covered: 1, managed: 1 },
+        update_source: 'mesh',
+      },
+      operations: [],
     },
   })),
+  requestOperation: vi.fn(async () => ({
+    ok: true, status: 202, error: null,
+    data: { operation: { id: 'op-1', status: 'queued' } },
+  })),
+  fetchOperation: vi.fn(async () => ({
+    ok: true, status: 200, error: null,
+    data: { operation: { id: 'op-1', status: 'running', steps: [] } },
+  })),
   startPeerPoller: vi.fn(() => ({ stop: vi.fn() })),
-  remoteControl: vi.fn(async () => ({ ok: true, status: 200, error: null, data: { ok: true } })),
-  remoteUpdate: vi.fn(async () => ({ ok: true, status: 200, error: null, data: { ok: true } })),
   updateServiceCatalogInfo: vi.fn(() => ({ updated: true })),
   startMemoryLoop: vi.fn(() => ({ stop: vi.fn() })),
 }));
@@ -429,8 +446,9 @@ vi.mock('./federation/secret-box.js', () => ({
 vi.mock('./federation/client.js', () => ({
   fetchNode: mocks.fetchNode,
   fetchHealth: mocks.fetchHealth,
-  remoteControl: mocks.remoteControl,
-  remoteUpdate: mocks.remoteUpdate,
+  requestOperation: mocks.requestOperation,
+  fetchOperation: mocks.fetchOperation,
+  downloadBundle: vi.fn(),
 }));
 vi.mock('./federation/peer-poller.js', () => ({ startPeerPoller: mocks.startPeerPoller }));
 
@@ -1201,99 +1219,112 @@ describe('Excubitor HTTP APIs', () => {
   });
 
   it('protects and mutates federation APIs', async () => {
+    // 呼び出し側 (remote-a) の agent token。 本拠点が remote-a をこの token で登録して初めて署名を検証できる。
+    const callerToken = 'remote-token';
+    const signed = (method: string, path: string, body = '') => ({
+      authorization: 'Bearer good',
+      ...signatureHeaders(callerToken, 'remote-a', { method, path, body }),
+    });
+
     const unauthorized = await requestJson(router, 'GET', '/api/v1/federation/node');
     expect(unauthorized.res.status).toBe(401);
-
-    const node = await requestJson(router, 'GET', '/api/v1/federation/node', undefined, { authorization: 'Bearer good' });
-    expect(node.res.status).toBe(200);
-    expect(node.data).toHaveProperty('summary');
-
-    const unauthorizedHealth = await requestJson(router, 'GET', '/api/v1/federation/health');
-    expect(unauthorizedHealth.res.status).toBe(401);
-    const health = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, { authorization: 'Bearer good' });
-    expect(health.res.status).toBe(200);
-    expect(health.data).toMatchObject({ schema: 1, services: expect.any(Array), links: expect.any(Array) });
-
-    // 管理面は同じ /api/v1/federation/ 配下でも token 無しで loopback から使える。
-    const coverage = await requestJson(router, 'GET', '/api/v1/federation/coverage');
-    expect(coverage.res.status).toBe(200);
-    expect(coverage.data).toHaveProperty('services');
-    const override = await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: false });
-    expect(override.res.status).toBe(200);
-    expect(override.data).toMatchObject({ ok: true, code: 'svc-a', covered: false });
-    const unknownOverride = await requestJson(router, 'PUT', '/api/v1/federation/coverage/nope', { covered: false });
-    expect(unknownOverride.res.status).toBe(404);
-
-    const localControl = await requestJson(
-      router,
-      'POST',
-      '/api/v1/federation/control',
-      { code: 'svc-a', action: 'restart' },
-      { authorization: 'Bearer good', 'x-excubitor-peer': 'peer-a' },
+    // token は正しいが署名が無い → 401。
+    const unsigned = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, { authorization: 'Bearer good' });
+    expect(unsigned.res.status).toBe(401);
+    expect(unsigned.data).toMatchObject({ error: 'signature_required' });
+    // 署名はあるが、 本拠点がまだ呼び出し側を登録していない → 403 (相互登録待ち)。
+    const notRegistered = await requestJson(
+      router, 'GET', '/api/v1/federation/health', undefined, signed('GET', '/api/v1/federation/health'),
     );
-    expect(localControl.res.status).toBe(200);
-    expect(localControl.data).toMatchObject({ ok: true, action: 'restart' });
-
-    mocks.controlService.mockResolvedValueOnce({
-      ok: false,
-      exit_code: -1,
-      command: 'excubitorctl service svc-a restart',
-      stdout: '',
-      stderr: 'connect ENOENT',
-      local_control_error: 'unavailable',
-    });
-    const unavailableControl = await requestJson(
-      router,
-      'POST',
-      '/api/v1/federation/control',
-      { code: 'svc-a', action: 'restart' },
-      { authorization: 'Bearer good' },
-    );
-    expect(unavailableControl.res.status).toBe(503);
-    expect(unavailableControl.data).toMatchObject({
-      ok: false,
-      error: 'local_control_unavailable',
-      stderr: 'connect ENOENT',
-      command: 'excubitorctl service svc-a restart',
-    });
-    expect(unavailableControl.data).toHaveProperty('cli');
-
-    mocks.controlService.mockResolvedValueOnce({
-      ok: false,
-      exit_code: 17,
-      command: 'excubitorctl service svc-a restart',
-      stdout: '',
-      stderr: 'restart rejected',
-      local_control_error: 'invalid_response',
-    });
-    const rejectedControl = await requestJson(
-      router,
-      'POST',
-      '/api/v1/federation/control',
-      { code: 'svc-a', action: 'restart' },
-      { authorization: 'Bearer good' },
-    );
-    expect(rejectedControl.res.status).toBe(502);
-    expect(rejectedControl.data).toMatchObject({ ok: false, error: 'control_failed', stderr: 'restart rejected' });
-
-    const localUpdate = await requestJson(
-      router,
-      'POST',
-      '/api/v1/federation/update',
-      { code: 'svc-a', install: false, restart: false },
-      { authorization: 'Bearer good' },
-    );
-    expect(localUpdate.res.status).toBe(200);
-    expect(localUpdate.data).toMatchObject({ ok: true, code: 'svc-a' });
+    expect(notRegistered.res.status).toBe(403);
+    expect(notRegistered.data).toMatchObject({ error: 'peer_not_registered' });
 
     const created = await requestJson<{ ok: boolean; peer: { id: string } }>(router, 'POST', '/api/v1/peers', {
       name: 'Remote A',
       base_url: 'https://remote.example/',
-      token: 'remote-token',
+      token: callerToken,
       enabled: true,
     });
     expect(created.res.status).toBe(201);
     const peerId = created.data.peer.id;
+
+    const node = await requestJson(router, 'GET', '/api/v1/federation/node', undefined, signed('GET', '/api/v1/federation/node'));
+    expect(node.res.status).toBe(200);
+    expect(node.data).toHaveProperty('summary');
+
+    const healthHeaders = signed('GET', '/api/v1/federation/health');
+    const health = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, healthHeaders);
+    expect(health.res.status).toBe(200);
+    expect(health.data).toMatchObject({
+      schema: 2,
+      services: expect.any(Array),
+      links: expect.any(Array),
+      node_info: expect.objectContaining({ platform: expect.any(Object), listener: expect.any(Object) }),
+      operations: expect.any(Array),
+    });
+    // 同じ署名 (nonce) の再送は拒否する。
+    const replayed = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, healthHeaders);
+    expect(replayed.res.status).toBe(401);
+    expect(replayed.data).toMatchObject({ error: 'replayed_request' });
+
+    // 管理面は同じ /api/v1/federation/ 配下でも署名無しで loopback から使える。
+    const coverage = await requestJson(router, 'GET', '/api/v1/federation/coverage');
+    expect(coverage.res.status).toBe(200);
+    expect(coverage.data).toHaveProperty('services');
+
+    // 他拠点からの依頼: 受け付けて 202、 状態は依頼 id で引ける。
+    const opRequest = { target: { kind: 'service', code: 'svc-a' }, action: 'restart' };
+    const opBody = JSON.stringify(opRequest);
+    const accepted = await requestJson<{ operation: { id: string; status: string; requested_by: string } }>(
+      router, 'POST', '/api/v1/federation/operations', opRequest,
+      signed('POST', '/api/v1/federation/operations', opBody),
+    );
+    expect(accepted.res.status).toBe(202);
+    expect(accepted.data.operation).toMatchObject({ status: 'queued', requested_by: 'remote-a' });
+    const opId = accepted.data.operation.id;
+    const opPath = `/api/v1/federation/operations/${opId}`;
+    const detail = await requestJson<{ operation: { id: string; steps: unknown[] } }>(router, 'GET', opPath, undefined, signed('GET', opPath));
+    expect(detail.res.status).toBe(200);
+    expect(detail.data.operation.id).toBe(opId);
+
+    // 本文を改ざんすると署名が合わない (= どの登録ピアとも一致しない)。
+    const tampered = await requestJson(
+      router, 'POST', '/api/v1/federation/operations',
+      { target: { kind: 'service', code: 'svc-a' }, action: 'stop' },
+      signed('POST', '/api/v1/federation/operations', opBody),
+    );
+    expect(tampered.res.status).toBe(403);
+
+    // Excubitor 自身に stop は頼めない / 知らないサービスは 404 / 担保しないサービスは 409。
+    const selfStop = { target: { kind: 'excubitor' }, action: 'stop' };
+    const selfStopRes = await requestJson(
+      router, 'POST', '/api/v1/federation/operations', selfStop,
+      signed('POST', '/api/v1/federation/operations', JSON.stringify(selfStop)),
+    );
+    expect(selfStopRes.res.status).toBe(400);
+    const unknown = { target: { kind: 'service', code: 'nope' }, action: 'restart' };
+    const unknownRes = await requestJson(
+      router, 'POST', '/api/v1/federation/operations', unknown,
+      signed('POST', '/api/v1/federation/operations', JSON.stringify(unknown)),
+    );
+    expect(unknownRes.res.status).toBe(404);
+    const override = await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: false });
+    expect(override.res.status).toBe(200);
+    const notCovered = await requestJson(
+      router, 'POST', '/api/v1/federation/operations', opRequest,
+      signed('POST', '/api/v1/federation/operations', opBody),
+    );
+    expect(notCovered.res.status).toBe(409);
+    await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: null });
+
+    // 自拠点への依頼 (loopback の管理面)。
+    const local = await requestJson<{ operation: { id: string; requested_by: string } }>(
+      router, 'POST', '/api/v1/operations', opRequest,
+    );
+    expect(local.res.status).toBe(202);
+    expect(local.data.operation.requested_by).toBe('local');
+    const localList = await requestJson<{ operations: Array<{ id: string }> }>(router, 'GET', '/api/v1/operations');
+    expect(localList.data.operations.map((o) => o.id)).toEqual(expect.arrayContaining([opId, local.data.operation.id]));
 
     const patched = await requestJson(router, 'PATCH', `/api/v1/peers/${peerId}`, { name: 'Remote B' });
     expect(patched.res.status).toBe(200);
@@ -1313,21 +1344,22 @@ describe('Excubitor HTTP APIs', () => {
     );
     expect(mesh.res.status).toBe(200);
     expect(mesh.data.nodes.map((n) => n.node)).toContain('remote-a');
+    expect(mesh.data.nodes.find((n) => n.node === 'remote-a')).toMatchObject({ node_info: expect.any(Object) });
     expect(mesh.data.coverage.some((row) => row.code === 'remote-svc')).toBe(true);
     expect(mocks.fetchHealth.mock.calls.length).toBe(fetchCalls);
 
-    const remoteControl = await requestJson(router, 'POST', `/api/v1/peers/${peerId}/services/remote-svc/control`, {
-      action: 'start',
+    // ピアへの依頼は相手の公開面へ中継する。
+    const remoteOp = await requestJson(router, 'POST', `/api/v1/peers/${peerId}/operations`, {
+      target: { kind: 'excubitor' },
+      action: 'deploy',
     });
-    expect(remoteControl.res.status).toBe(200);
-    expect(remoteControl.data).toMatchObject({ ok: true });
-
-    const remoteUpdate = await requestJson(router, 'POST', `/api/v1/peers/${peerId}/services/remote-svc/update`, {
-      install: false,
-      restart: false,
-    });
-    expect(remoteUpdate.res.status).toBe(200);
-    expect(remoteUpdate.data).toMatchObject({ ok: true });
+    expect(remoteOp.res.status).toBe(202);
+    expect(mocks.requestOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ id: peerId }),
+      { target: { kind: 'excubitor' }, action: 'deploy' },
+    );
+    const remoteStatus = await requestJson(router, 'GET', `/api/v1/peers/${peerId}/operations/op-1`);
+    expect(remoteStatus.res.status).toBe(200);
 
     const deleted = await requestJson(router, 'DELETE', `/api/v1/peers/${peerId}`);
     expect(deleted.res.status).toBe(200);

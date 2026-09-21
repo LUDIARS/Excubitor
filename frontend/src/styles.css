@@ -942,6 +942,31 @@ tr.stale, td.stale, .coverage-cell.stale { opacity: 0.55; }
 .issue-badge { display: inline-block; font-size: 11px; padding: 1px 7px; margin: 0 4px 4px 0; border-radius: 999px; border: 1px solid var(--border); }
 .issue-badge.issue-duplicate_managed { color: var(--warn); border-color: var(--warn); }
 .issue-badge.issue-uncovered, .issue-badge.issue-down { color: var(--err); border-color: rgba(248,113,113,0.5); }
+.link-unregistered { color: var(--warn); }
+.link-badge.link-unregistered { border-color: var(--warn); }
+.mesh-node-row { cursor: pointer; }
+.mesh-node-row:hover { background: var(--bg-card); }
+.mesh-node-row.selected { outline: 1px solid var(--accent); }
+
+/* 拠点詳細 (拠点情報 / 依頼) */
+.node-detail { margin: 12px 0 24px; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+.node-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.node-detail-head h3 { margin: 0; font-size: 15px; }
+.node-info-grid { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0 0 12px; font-size: 12px; }
+.node-info-grid dt { color: var(--fg-muted); }
+.node-info-grid dd { margin: 0; overflow-wrap: anywhere; }
+.node-ops { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.node-ops button, .node-services .peer-actions button { padding: 3px 8px; font-size: 11px; }
+.node-services .peer-actions { flex-wrap: wrap; }
+.op-tracker { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.op-tracker.op-failed { border-color: rgba(248,113,113,0.5); }
+.op-tracker.op-succeeded { border-color: rgba(52,211,153,0.4); }
+.op-steps { margin: 6px 0 0; padding-left: 18px; }
+.op-steps li.ok { color: var(--fg); }
+.op-steps li.bad { color: var(--err); }
+.op-status-succeeded { color: var(--ok); }
+.op-status-failed { color: var(--err); }
+.op-status-running, .op-status-restarting, .op-status-queued { color: var(--warn); }
 
 /* ブランチ状況 (Monitor) */
 .cc-branch { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }

@@ -245,6 +245,31 @@ export const federationCoveragePrefs = sqliteTable('federation_coverage_prefs', 
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
+/**
+ * federation: この拠点が受けた依頼 (更新 / 再起動 / デプロイ / 反映 / 起動 / 停止) の履歴と状態。
+ * 依頼は受け付けた順に 1 件ずつ実行する (src/federation/operations/runner.ts)。
+ * - requester_peer_id: 依頼元ピア (本拠点の remote_peers.id)。 自拠点からの依頼は null
+ * - target_kind / target_code: 'service' + サービスコード、 または 'excubitor' (自身)
+ * - steps: 実行した手順の JSON 配列 ({step, ok, detail})
+ * - meta: 自己再起動の検証に使う値 (期待する git hash 等) の JSON
+ */
+export const federationOperations = sqliteTable('federation_operations', {
+  id: text('id').primaryKey(),
+  requested_by: text('requested_by').notNull(),
+  requester_peer_id: text('requester_peer_id'),
+  target_kind: text('target_kind').notNull(),
+  target_code: text('target_code'),
+  action: text('action').notNull(),
+  source: text('source').notNull(),
+  status: text('status').notNull(),
+  steps: text('steps').notNull(),
+  error: text('error'),
+  meta: text('meta'),
+  created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  started_at: integer('started_at', { mode: 'timestamp_ms' }),
+  finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+});
+
 export const auditLog = sqliteTable('audit_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   ts: integer('ts', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
@@ -290,6 +315,9 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   // federation: 拠点ごとの担保上書き (行が無い code は catalog の既定に従う)。
   `CREATE TABLE IF NOT EXISTS federation_coverage_prefs (code TEXT PRIMARY KEY, covered INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
+  // federation: 受けた依頼の履歴と状態 (1 件ずつ実行、 自己再起動をまたいで結果を確定する)。
+  `CREATE TABLE IF NOT EXISTS federation_operations (id TEXT PRIMARY KEY, requested_by TEXT NOT NULL, requester_peer_id TEXT, target_kind TEXT NOT NULL, target_code TEXT, action TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, steps TEXT NOT NULL DEFAULT '[]', error TEXT, meta TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS idx_federation_operations_status ON federation_operations (status, created_at)`,
 ];
 
 /**

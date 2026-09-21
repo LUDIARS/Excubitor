@@ -4,6 +4,7 @@ import { NodeHealthPayloadSchema } from './health-types.js';
 import type { HealthCacheSnapshot } from '../scanner/health-cache.js';
 import type { NodeSnapshot } from './node-snapshot.js';
 import type { ServiceCoverage } from './coverage.js';
+import { nodeInfo } from './test-fixtures.js';
 
 const snapshot: NodeSnapshot = {
   node: 'win',
@@ -35,7 +36,7 @@ const cache: HealthCacheSnapshot = {
 };
 
 describe('buildHealthPayload', () => {
-  const payload = buildHealthPayload({ now: 2_000, snapshot, coverage, cache, links: [] });
+  const payload = buildHealthPayload({ now: 2_000, snapshot, coverage, cache, links: [], nodeInfo: nodeInfo('win'), operations: [] });
 
   it('reports only cached health values, with the time each was checked', () => {
     const byCode = new Map(payload.services.map((svc) => [svc.code, svc]));

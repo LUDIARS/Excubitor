@@ -13,6 +13,7 @@ import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
 import type { Catalog } from '../catalog/loader.js';
+import type { FederationEnv } from './peer-auth.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { parseFederationListenConfig, type ListenAddress } from './listen-config.js';
 import { createSourceGuard, normalizeAddress } from './source-guard.js';
@@ -47,7 +48,7 @@ export interface FederationListenerHandle {
 }
 
 export interface FederationListenerOptions {
-  publicRouter: Hono;
+  publicRouter: Hono<FederationEnv>;
   catalog: Catalog;
   env?: Record<string, string | undefined>;
 }
