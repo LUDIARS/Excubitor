@@ -361,6 +361,10 @@ vi.mock('./secrets/config-store.js', () => ({
   applyInfisicalToEnv: vi.fn(() => false),
   getServiceMap: () => mocks.serviceMap,
   setServiceMap: (next: Record<string, Record<string, unknown>>) => { mocks.serviceMap = next; },
+  setServiceInfisical: (code: string, mapping: Record<string, unknown>) => {
+    mocks.serviceMap = { ...mocks.serviceMap, [code]: mapping };
+    return mocks.serviceMap;
+  },
   getServiceRuntimeConfigStatus: () => ({ configured: false, keys: [] }),
   saveServiceRuntimeConfig: () => ({ configured: false, keys: [] }),
   resolveServiceInfisical: (code: string, fallback?: Record<string, unknown>) => mocks.serviceMap[code] ?? fallback,
@@ -1186,6 +1190,19 @@ describe('Excubitor HTTP APIs', () => {
     });
     expect(services.res.status).toBe(200);
     expect(services.data).toHaveProperty('services');
+
+    // A single-service write keeps the other rows and rejects a malformed code.
+    const single = await requestJson(router, 'PUT', '/api/v1/config/infisical/services/svc-b', {
+      project_id: 'proj-b', environment: 'dev', include: ['ONLY_THIS'],
+    });
+    expect(single.res.status).toBe(200);
+    expect(single.data).toMatchObject({ ok: true, code: 'svc-b', service: { project_id: 'proj-b', include: ['ONLY_THIS'] } });
+    expect(mocks.serviceMap).toHaveProperty('svc-a');
+    expect(mocks.serviceMap).toHaveProperty('svc-b');
+    const badCode = await requestJson(router, 'PUT', '/api/v1/config/infisical/services/Bad_Code', {
+      project_id: 'proj-b', environment: 'dev',
+    });
+    expect(badCode.res.status).toBe(400);
 
     const unauthorized = await requestJson(router, 'POST', '/api/v1/secrets/resolve', { service: 'svc-a' });
     expect(unauthorized.res.status).toBe(401);

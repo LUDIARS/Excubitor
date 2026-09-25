@@ -568,6 +568,16 @@ export function setServiceMap(services: Record<string, ServiceInfisical>): void 
   logger.info({ count: Object.keys(services).length }, 'saved service Infisical map (encrypted)');
 }
 
+/**
+ * 1 サービス分のマッピングだけを差し替える。マップ全体の置換 (setServiceMap) を
+ * 各サービスに使わせると他サービスの行を消せてしまうため、自サービスの登録はこちらを使う。
+ */
+export function setServiceInfisical(code: string, mapping: ServiceInfisical): Record<string, ServiceInfisical> {
+  const services = { ...getServiceMap(), [code]: mapping };
+  setServiceMap(services);
+  return services;
+}
+
 // ─────────────── per-service runtime configuration ───────────────
 
 function normalizeServiceCode(code: string): string {

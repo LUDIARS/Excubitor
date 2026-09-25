@@ -14,6 +14,7 @@ import {
   applyInfisicalToEnv,
   getServiceMap,
   setServiceMap,
+  setServiceInfisical,
   getDomainRootStatus,
   setDomainRootOverride,
   getDiscordNotificationConfig,
@@ -47,6 +48,8 @@ const ServiceInfisicalSchema = z.object({
   exclude: z.array(z.string()).optional(),
   required_env: z.array(z.string()).optional(),
 });
+
+const SERVICE_CODE_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 const ServicesSchema = z.object({
   services: z.record(z.string(), ServiceInfisicalSchema),
@@ -256,6 +259,18 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
   });
 
   // 各サービスの Infisical マッピングを一括保存。
+  // 1 サービス分だけを登録する口。サービス自身の初回設定が自分のマッピングを置くときに使い、
+  // 他サービスの行には触れない (全体置換は下の UI 用 API に限る)。
+  app.put('/api/v1/config/infisical/services/:code', async (c) => {
+    const code = c.req.param('code');
+    if (!SERVICE_CODE_PATTERN.test(code)) return c.json({ error: 'invalid_service_code' }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = ServiceInfisicalSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    const services = setServiceInfisical(code, parsed.data);
+    return c.json({ ok: true, code, service: services[code] });
+  });
+
   app.put('/api/v1/config/infisical/services', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const parsed = ServicesSchema.safeParse(body);
