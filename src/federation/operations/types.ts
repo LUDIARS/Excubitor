@@ -76,7 +76,3 @@ export type OperationDetail = z.infer<typeof OperationDetailSchema>;
 export function isActionAllowed(target: OperationTarget, action: OperationAction): boolean {
   return target.kind === 'service' || SELF_ACTIONS.has(action);
 }
-
-export function targetLabel(target: OperationTarget): string {
-  return target.kind === 'excubitor' ? 'excubitor (self)' : target.code;
-}

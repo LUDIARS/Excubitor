@@ -36,8 +36,3 @@ export async function readCurrentHead(dir: string): Promise<{ branch: string | n
   const head = checkout ? await readGitHead(checkout) : null;
   return { branch: head?.branch ?? null, hash: head?.hash ?? null };
 }
-
-/** テスト用。 */
-export function resetSelfVersion(): void {
-  current = null;
-}

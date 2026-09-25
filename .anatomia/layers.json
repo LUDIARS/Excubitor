@@ -1,0 +1,49 @@
+{
+  "$what": "Anatomia のプログラムドメイン層宣言 (spec/feature/domain-dual-layer.md)。これが無いと全 symbol が unclassified になり、PR レビューで『変更アンカーが未分類』の所見が出る。",
+
+  "layers": [
+    { "glob": "frontend/**", "layer": "presentation" },
+    { "glob": "src/mcp/**", "layer": "presentation" },
+    { "glob": "src/viewer/**", "layer": "presentation" },
+    { "glob": "src/villa/**", "layer": "presentation" },
+    { "glob": "villa/**", "layer": "presentation" },
+
+    { "glob": "src/*", "layer": "application" },
+    { "glob": "src/auto_fix/**", "layer": "application" },
+    { "glob": "src/control/**", "layer": "application" },
+    { "glob": "src/deploy/**", "layer": "application" },
+    { "glob": "src/discovery/**", "layer": "application" },
+    { "glob": "src/federation/**", "layer": "application" },
+    { "glob": "src/hub/**", "layer": "application" },
+    { "glob": "src/local-control/**", "layer": "application" },
+    { "glob": "src/notify/**", "layer": "application" },
+    { "glob": "src/ops/**", "layer": "application" },
+    { "glob": "src/release/**", "layer": "application" },
+    { "glob": "src/reviews/**", "layer": "application" },
+    { "glob": "src/scanner/**", "layer": "application" },
+    { "glob": "src/startup/**", "layer": "application" },
+    { "glob": "src/update/**", "layer": "application" },
+
+    { "glob": "src/catalog/**", "layer": "domain-logic" },
+    { "glob": "src/log/**", "layer": "domain-logic" },
+    { "glob": "src/memory/**", "layer": "domain-logic" },
+    { "glob": "src/process/**", "layer": "domain-logic" },
+    { "glob": "src/process-snapshot/**", "layer": "domain-logic" },
+    { "glob": "src/secrets/**", "layer": "domain-logic" },
+
+    { "glob": "migrations/**", "layer": "infrastructure" },
+    { "glob": "scripts/**", "layer": "infrastructure" },
+    { "glob": "shared/**", "layer": "infrastructure" },
+    { "glob": "src/android/**", "layer": "infrastructure" },
+    { "glob": "src/cf-tunnel/**", "layer": "infrastructure" },
+    { "glob": "src/db/**", "layer": "infrastructure" },
+    { "glob": "src/docker/**", "layer": "infrastructure" },
+    { "glob": "src/launch/**", "layer": "infrastructure" },
+    { "glob": "src/shared/**", "layer": "infrastructure" },
+    { "glob": "workers/**", "layer": "infrastructure" }
+  ],
+
+  "mergeCouplingThreshold": 1,
+
+  "$no-allow": "依存方針 (allow) はまだ宣言しない。既存コードの層間依存を棚卸ししていない段階で allow を書くと、実態と違う方針を誰も決めていないのに敷くことになる。まず分類を全域にし、層間依存の実測 (crossDomainCoupling) を見てから order / allow を足す。"
+}

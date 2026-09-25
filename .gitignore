@@ -22,4 +22,6 @@ frontend/logs/
 catalog/services.auto.yaml
 
 # Anatomia のローカル状態 (ドメイン定義の正本は spec/domains/)
-.anatomia/
+.anatomia/*
+# 層宣言だけはリポジトリの持ち物 (無いとプログラムドメインが全件未分類になる)
+!.anatomia/layers.json
