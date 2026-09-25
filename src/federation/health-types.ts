@@ -36,6 +36,7 @@ export const NodeServiceHealthSchema = z.object({
   state: z.string(),
   port: z.number().nullable(),
   git_branch: z.string().nullable(),
+  startup: z.boolean().nullable().optional(),
   health: z.object({
     state: ServiceHealthStateSchema,
     reason: z.string().nullable(),

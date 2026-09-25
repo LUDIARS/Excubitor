@@ -21,6 +21,7 @@
     { "glob": "src/release/**", "layer": "application" },
     { "glob": "src/reviews/**", "layer": "application" },
     { "glob": "src/scanner/**", "layer": "application" },
+    { "glob": "src/overview/**", "layer": "application" },
     { "glob": "src/startup/**", "layer": "application" },
     { "glob": "src/update/**", "layer": "application" },
 

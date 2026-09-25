@@ -1,3 +1,5 @@
+import { startOverviewCache } from './overview/cache.js';
+import { startFederationPayloadCache } from './federation/payload-cache.js';
 /**
  * Observability layer の bootstrap + router.
  *
@@ -589,7 +591,10 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   let federationListener: FederationListenerHandle | null = null;
   const getListenerStatus = (): FederationListenerStatus =>
     federationListener?.status() ?? { enabled: false, listening: [], error: null };
+  const federationPayloadCache = startFederationPayloadCache(() => currentCatalog!, getListenerStatus);
+  const overviewCache = startOverviewCache(() => currentCatalog!);
   const federationPublicRouter = buildFederationPublicRouter({
+    readHealth: federationPayloadCache.read,
     getCatalog: () => currentCatalog!,
     getListenerStatus,
     runner: operationRunner,
@@ -774,6 +779,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // MCP (Streamable HTTP, stateless)。 セッション毎 stdio プロセス (≈100MB×N) の置き換え。
   app.route('/', buildMcpHttpRouter(`http://127.0.0.1:${backendPort()}`));
 
+  app.route('/', overviewCache.router);
   app.route('/', buildReviewsRouter());
 
   // Corpus multi-hub backend (/api/hub/*)
@@ -1261,6 +1267,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     router: app,
     shutdown: async () => {
       stopViewerPublication();
+      overviewCache.stop();
+      federationPayloadCache.stop();
       // 監視・スキャン系のみ停止する。 spawn したサービスは detached なので
       // ここでは kill しない (= Excubitor 再起動でサービスを道連れにしない)。
       // 明示停止は stop API / launcher stop からのみ行う。

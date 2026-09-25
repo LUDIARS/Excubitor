@@ -1,3 +1,4 @@
+import Overview from './overview/Overview';
 import { useEffect, useState } from 'react';
 import Dashboard from './pages/Dashboard';
 import Monitor from './pages/Monitor';
@@ -12,11 +13,12 @@ import { fetchSystem } from './lib/api';
 import type { SystemInfo } from './lib/api';
 import { config } from '../config';
 
-type Tab = 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
+type Tab = 'overview' | 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
 
-const TAB_IDS: Tab[] = ['dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['overview', 'dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'サービス' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'logs', label: 'Logs' },
   { id: 'config', label: 'Config' },
@@ -36,9 +38,20 @@ const frontendUrls = (config.allowedHosts as readonly string[])
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.replace('#', '') as Tab;
-    return TAB_IDS.includes(h) ? h : 'monitor';
+    return h.startsWith('overview') ? 'overview' : TAB_IDS.includes(h) ? h : 'overview';
   });
 
+  const [route, setRoute] = useState(() => window.location.hash.slice(1));
+  useEffect(() => {
+    const changed = () => {
+      const hash = window.location.hash.slice(1);
+      setRoute(hash);
+      const id = hash.split('/')[0] as Tab;
+      setTab(TAB_IDS.includes(id) ? id : 'overview');
+    };
+    window.addEventListener('hashchange', changed);
+    return () => window.removeEventListener('hashchange', changed);
+  }, []);
   const [safeMode, setSafeMode] = useState(false);
   const [serviceMode, setServiceMode] = useState(false);
   const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
@@ -60,11 +73,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    window.location.hash = tab;
+    if (window.location.hash.slice(1).split('/')[0] !== tab) window.location.hash = tab;
   }, [tab]);
 
   return (
-    <div className="app">
+    <div className={tab === 'overview' ? 'app ex-shell' : 'app'}>
       <header className="app-header">
         <h1>Excubitor</h1>
         <span
@@ -88,13 +101,14 @@ export default function App() {
         )}
         <nav className="tabs">
           {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
+            <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => { setTab(t.id); window.location.hash = t.id; }}>
               {t.label}
             </button>
           ))}
         </nav>
       </header>
       <main className="container">
+        {tab === 'overview' && <Overview route={route} />}
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'monitor' && <Monitor />}
         {tab === 'function-metrics' && <FunctionMetrics />}

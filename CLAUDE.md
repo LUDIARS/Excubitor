@@ -129,3 +129,7 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
 - catalog の全サービス化 (dev.ps1 16 サービスの autostart 登録) と Corpus コネクタ・dev.bat 移行は
   設計書 §9 の Phase C/D で対応予定。 ローカルアプリ (local-app) の catalog 追加 (#90) は exec
   パスを各リポのビルド出力で実在確認してから (hora-app 以外は follow-up)。
+
+## Health の絶対ルール
+
+health のリクエスト経路に DB 照会、PR/レビュー取得、履歴集計、外部通信、プロセス起動、ファイル走査を追加しない。状態はバックグラウンドで収集してメモリへ公開し、health はキャッシュとプロセス識別情報だけを返す。初回未取得と古い観測を明示し、要求時の再収集へフォールバックしない。認証のピア情報もメモリ参照し、変更・失効時は即座に更新する。詳細: spec/feature/service-overview.md#SPEC-EX-HEALTH-CACHE-ONLY。

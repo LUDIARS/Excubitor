@@ -1,0 +1,21 @@
+{
+  "projectId": "01M3CKBF6EEVVWNPPSCJYXW43R",
+  "domainId": "01M3CKDPREG0J94F1ZG71CRDWD",
+  "anatomiaRepo": "excubitor",
+  "specifications": [
+    {
+      "code": "SPEC-EX-SERVICE-OVERVIEW",
+      "id": "01M3CKDPSD8F92SJZHAVK62N68"
+    },
+    {
+      "code": "SPEC-EX-SERVICE-SETTINGS",
+      "id": "01M3CKDPTVVFY90Q4SE9T6RP8W"
+    },
+    {
+      "code": "SPEC-EX-HEALTH-CACHE-ONLY",
+      "id": "01M3CKDPVXC3P3AMG67FSMEFBC"
+    }
+  ],
+  "source": "spec/feature/service-overview.md",
+  "verification": "implementation in progress"
+}

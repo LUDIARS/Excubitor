@@ -445,6 +445,9 @@ interface ProjectView {
   project_code: string;
   project_name: string;
   components: Array<{
+    package_version: string | null;
+    autostart: boolean;
+    disabled: boolean;
     code: string;
     name: string;
     project_code: string;

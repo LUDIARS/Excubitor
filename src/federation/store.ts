@@ -78,9 +78,14 @@ function rowToPeer(r: Record<string, unknown>): RemotePeer {
   };
 }
 
+let authenticationPeers: RemotePeer[] = [];
+/** Health authentication reads memory; mutations refresh this before returning. */
+export function cachedAuthenticationPeers(): RemotePeer[] { return authenticationPeers; }
+
 export function listPeers(): RemotePeer[] {
   const rows = db().all(sql`SELECT * FROM remote_peers ORDER BY name ASC`) as Array<Record<string, unknown>>;
-  return rows.map(rowToPeer);
+  authenticationPeers = rows.map(rowToPeer);
+  return authenticationPeers;
 }
 
 export interface PeerIdentity {
@@ -118,6 +123,7 @@ export function createPeer(input: CreatePeerInput): RemotePeer {
     VALUES (${id}, ${input.name}, ${base}, ${sealSecret(input.token)},
             ${input.cf_access_id ?? null}, ${cfSecret}, ${input.enabled === false ? 0 : 1})
   `);
+  listPeers();
   return getPeer(id)!;
 }
 
@@ -152,11 +158,15 @@ export function updatePeer(id: string, patch: UpdatePeerInput): RemotePeer | nul
       updated_at = unixepoch() * 1000
     WHERE id = ${id}
   `);
+  authenticationPeers = []; // Fail closed if refreshing credentials fails after a mutation.
+  listPeers();
   return getPeer(id);
 }
 
 export function deletePeer(id: string): boolean {
   const res = db().run(sql`DELETE FROM remote_peers WHERE id = ${id}`);
+  authenticationPeers = [];
+  listPeers();
   return (res.changes ?? 0) > 0;
 }
 

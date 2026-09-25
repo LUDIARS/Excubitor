@@ -24,12 +24,16 @@
     },
     {
       "pathPattern": "(^|/)src/scanner/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)src/overview/"
     }
   ],
   "cardTemplate": "Summarise the \"scanner\" domain: Periodic scanning of docker, host processes, git, versions, and ports to derive liveness/death state for each service.",
   "specRefs": [
     "構成 / src/scanner/",
-    "scanner/ports.ts"
+    "scanner/ports.ts",
+    "spec/feature/service-overview.md#SPEC-EX-HEALTH-CACHE-ONLY"
   ],
   "rationale": "src/scanner (21 files) is the observability/health-derivation subsystem, independent of control and logging."
 }

@@ -22,7 +22,7 @@ import {
   verifyRequestSignature,
   type SignedRequestParts,
 } from './request-signature.js';
-import { listPeers } from './store.js';
+import { cachedAuthenticationPeers } from './store.js';
 
 /** @implements SPEC-FEDERATION-MUTUAL-AUTH */
 
@@ -47,7 +47,7 @@ export interface PeerAuthDeps {
 export function requireMutualPeer(deps: PeerAuthDeps = {}): MiddlewareHandler<FederationEnv> {
   const now = deps.now ?? Date.now;
   const verifyBearer = deps.verifyBearer ?? verifyAgentToken;
-  const peers = deps.peers ?? listPeers;
+  const peers = deps.peers ?? cachedAuthenticationPeers;
   const nonces = createNonceCache(SIGNATURE_MAX_SKEW_MS * 2);
 
   return async (c, next) => {

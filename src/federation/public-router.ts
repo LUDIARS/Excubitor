@@ -15,7 +15,7 @@
 import { Hono } from 'hono';
 import type { Catalog } from '../catalog/loader.js';
 import { localNodeSnapshot } from './node-snapshot.js';
-import { localHealthPayload } from './node-health.js';
+import type { NodeHealthPayload } from './health-types.js';
 import { requireMutualPeer, type FederationEnv } from './peer-auth.js';
 import type { FederationListenerStatus } from './listener.js';
 import { buildOperationPublicRoutes } from './operations/public-routes.js';
@@ -28,6 +28,7 @@ export interface FederationPublicDeps {
   getCatalog: () => Catalog;
   getListenerStatus: () => FederationListenerStatus;
   runner: OperationRunner;
+  readHealth: () => NodeHealthPayload | null;
 }
 
 export function buildFederationPublicRouter(deps: FederationPublicDeps): Hono<FederationEnv> {
@@ -36,8 +37,10 @@ export function buildFederationPublicRouter(deps: FederationPublicDeps): Hono<Fe
   // `/api/v1/federation/*` 全体に掛けると同じ prefix の管理面 (loopback 用) まで塞いでしまう。
   const auth = requireMutualPeer();
 
-  app.get('/api/v1/federation/health', auth, (c) =>
-    c.json(localHealthPayload(deps.getCatalog(), deps.getListenerStatus())));
+  app.get('/api/v1/federation/health', auth, (c) => {
+    const snapshot = deps.readHealth();
+    return snapshot ? c.json(snapshot) : c.json({ error: 'snapshot_pending' }, 503);
+  });
 
   app.get('/api/v1/federation/node', auth, (c) => c.json(localNodeSnapshot()));
 

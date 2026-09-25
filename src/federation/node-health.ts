@@ -1,3 +1,4 @@
+import { getLaunchProfile } from '../launch/profile.js';
 /**
  * 本拠点の health 応答 (`GET /api/v1/federation/health`) を組み立てる。
  *
@@ -41,6 +42,7 @@ export interface HealthPayloadInput {
   links: NodePeerLink[];
   nodeInfo: NodeInfo;
   operations: OperationSummary[];
+  startupCodes?: ReadonlySet<string>;
 }
 
 /** 集めた値から health 応答を組む (pure)。 */
@@ -51,6 +53,7 @@ export function buildHealthPayload(input: HealthPayloadInput): NodeHealthPayload
     const cached = input.cache.services.get(entry.code);
     return {
       ...entry,
+      startup: input.startupCodes?.has(entry.code) ?? null,
       state: row?.state ?? 'unknown',
       port: row?.port ?? null,
       git_branch: row?.git_branch ?? null,
@@ -100,10 +103,15 @@ export function localHealthPayload(
   now = Date.now(),
 ): NodeHealthPayload {
   const snapshot = localNodeSnapshot();
+  const profile = getLaunchProfile();
+  const startupCodes = new Set(profile.configured
+    ? (profile.autoLaunch ? profile.selection : [])
+    : catalog.services.filter(s => s.autostart).map(s => s.code));
   const coverage = resolveCoverage(catalog.services, readCoveragePrefs());
   return buildHealthPayload({
     now,
     snapshot,
+    startupCodes,
     coverage,
     cache: getHealthCache(),
     links: localPeerLinks(),
