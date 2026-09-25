@@ -5,10 +5,11 @@ import type { ViewerDirectory } from './manifest.js';
 import { readVillaDocument } from '../villa/documents.js';
 import { proxyViewer } from './proxy.js';
 import { rewriteHtml } from './rewrite.js';
+import { viewerServiceEntries } from './service-status.js';
 
 export function buildViewerRouter(directory: ViewerDirectory): Hono {
   const app = new Hono();
-  app.get('/api/v1/viewer/services', (c) => c.json({ services: directory.entries() }));
+  app.get('/api/v1/viewer/services', (c) => c.json({ services: viewerServiceEntries(directory) }));
   app.get('/viewer', (c) => c.redirect('/viewer/', 308));
   app.get('/viewer/', async (c) => {
     try {

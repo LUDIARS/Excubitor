@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import './viewer.css';
 
-interface ServiceEntry { code: string; name: string; href: string; excludedReason: string | null }
+interface ServiceEntry {
+  code: string;
+  name: string;
+  href: string;
+  excludedReason: string | null;
+  status: 'up' | 'down' | 'unknown';
+}
 
 function selectedFromUrl(): string {
   return new URLSearchParams(location.search).get('service') ?? 'villa';
@@ -63,8 +69,11 @@ export default function Viewer() {
           onChange={(event) => setQuery(event.target.value)} placeholder="名前で検索" /></label>
         {error && <p role="alert">{error}</p>}
         {visible.map((service) => <button key={service.code} disabled={!!service.excludedReason}
-          className={selected === service.code ? 'active' : ''} onClick={() => select(service)}>
-          <span>{service.name}</span>{service.excludedReason && <small>{service.excludedReason}</small>}
+          className={[selected === service.code ? 'active' : '', service.status === 'down' ? 'is-down' : ''].filter(Boolean).join(' ')}
+          onClick={() => select(service)}>
+          <span>{service.name}</span>
+          {service.status === 'down' && <small className="viewer-service-status">停止中</small>}
+          {service.excludedReason && <small>{service.excludedReason}</small>}
         </button>)}
         {!error && services.length > 0 && visible.length === 0 && <p>該当するサービスはありません。</p>}
       </aside>}

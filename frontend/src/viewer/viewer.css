@@ -9,6 +9,8 @@ html, body, #root { margin: 0; height: 100%; }
 .viewer button:disabled { cursor: default; opacity: .55; }
 .viewer button:focus-visible, .viewer input:focus-visible { outline: 2px solid #84b9ff; outline-offset: 2px; }
 .viewer-menu > button.active { background: #253f63; }
+.viewer-menu > button.is-down { background: #3b2025; border-color: #b8505a; }
+.viewer-menu > button.is-down.active { background: #5a2931; }
 .viewer-toolbar { position: relative; z-index: 2; flex-shrink: 0; background: var(--bg);
   min-height: 52px; display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 .viewer-toolbar strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -21,6 +23,7 @@ html, body, #root { margin: 0; height: 100%; }
 .viewer-menu input { width: 100%; margin: 8px 0 16px; padding: 10px; font-size: 16px; }
 .viewer-menu > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 10px; margin: 5px 0; text-align: left; }
 .viewer-menu small { margin-top: 4px; }
+.viewer-menu .viewer-service-status { color: #ffabb1; }
 .viewer-content { flex: 1; min-width: 0; position: relative; z-index: 0; isolation: isolate; }
 .viewer-menu-backdrop { display: none; }
 .viewer-content iframe { border: 0; width: 100%; height: 100%; display: block; background: white; }
