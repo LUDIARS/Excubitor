@@ -27,7 +27,7 @@ import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
 import { assertHotReloadAllowed, type HotReloadSource } from './hot-reload.js';
 import { prepareSpawnEnv } from './cernere-launch-credential.js';
-import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV } from './service-version.js';
+import { injectServiceRuntimeVersion, SERVICE_VERSION_ENV, type ServiceRuntimeVersion } from './service-version.js';
 import {
   checkProcessIdentity,
   verifyProcessIdentity,
@@ -399,7 +399,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
       command: resolved.command,
       args,
       shell: resolved.shell,
-    });
+    }, version);
   }
 
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
@@ -524,21 +524,28 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     logger.error({ code: svc.code, err: (error as Error).message }, 'failed to promote spawned service state to running');
   });
 
-  // Network failure must never alter a successful service start. The persisted
-  // hash also deduplicates subsequent restart-loop notifications.
-  // Services that opt out (catalog `deploy_notify: false`) share a repo with a
-  // notifying service, so dispatching here would duplicate the notification.
-  if (svc.deploy_notify !== false) {
-    void dispatchServiceDeployment({
-      code: svc.code,
-      gitHash: version.gitHash,
-      version: version.value,
-      startedAt: spawnedAt,
-      restartCount,
-    });
-  }
+  notifyDeployment(svc, version, spawnedAt, restartCount);
 
   return spawned;
+}
+
+/**
+ * 起動成功後のデプロイ通知。child / job-breakaway の両戦略から呼ぶ (win32 は
+ * breakaway しか通らないので、片方にだけ置くと Windows で通知が一度も出ない)。
+ * Network failure must never alter a successful service start. The persisted
+ * hash also deduplicates subsequent restart-loop notifications.
+ * Services that opt out (catalog `deploy_notify: false`) share a repo with a
+ * notifying service, so dispatching here would duplicate the notification.
+ */
+function notifyDeployment(svc: Service, version: ServiceRuntimeVersion, startedAt: Date, restartCount: number): void {
+  if (svc.deploy_notify === false) return;
+  void dispatchServiceDeployment({
+    code: svc.code,
+    gitHash: version.gitHash,
+    version: version.value,
+    startedAt,
+    restartCount,
+  });
 }
 
 export async function killService(code: string, signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
@@ -792,6 +799,7 @@ async function spawnBreakawayService(
   childEnv: Record<string, string>,
   resolvedCwd: string | undefined,
   command: { command: string; args: string[]; shell: boolean },
+  version: ServiceRuntimeVersion,
 ): Promise<SpawnedProcess> {
   // 前回 child 戦略の fd が残っていれば閉じる。breakaway ではログの fd を短命 launcher が
   // 開いて子へ渡すため、supervisor は fd を所有しない。
@@ -875,6 +883,8 @@ async function spawnBreakawayService(
     { code: svc.code, pid, strategy: 'job-breakaway', version: childEnv[SERVICE_VERSION_ENV] },
     'spawned outside the supervisor job (windowless)',
   );
+  const restartCount = opts.initialRestartCount ?? 0;
+  notifyDeployment(svc, version, identity.startedAt, restartCount);
   return {
     code: svc.code,
     child: null,

@@ -505,6 +505,21 @@ describe('job-breakaway spawn (win32)', () => {
     );
   });
 
+  it('notifies the deployment after a breakaway spawn, honoring the catalog opt-out', async () => {
+    // Windows only ever spawns through this path; the child-path dispatch does not run here.
+    const startedAt = new Date();
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: true, identity: { pid: 4324, startedAt, verified: true } });
+    await spawnService(service('breakaway-notify'), { breakaway: breakawayOptions(995, 4324) });
+    expect(dispatchServiceDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'breakaway-notify', startedAt, restartCount: 0 }),
+    );
+
+    vi.mocked(dispatchServiceDeployment).mockClear();
+    mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: true, identity: { pid: 4325, startedAt, verified: true } });
+    await spawnService({ ...service('breakaway-quiet'), deploy_notify: false }, { breakaway: breakawayOptions(994, 4325) });
+    expect(dispatchServiceDeployment).not.toHaveBeenCalled();
+  });
+
   it('fails fast and points at the orphan when the identity is unreadable', async () => {
     // pid は生き残りうるので、 §17.4.3 の回収手順へ回せる文言でなければならない。
     mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: false, reason: 'unreadable' });
