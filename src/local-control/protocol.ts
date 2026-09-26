@@ -105,6 +105,8 @@ export const ExcubitorStatusPayloadSchema = z.object({
   last_signal: z.string().nullable(),
   last_error: z.string().nullable(),
   instance_token: z.string().nullable().default(null),
+  /** 直近に成功した backend 起動の spawn → readiness 成立までの ms (spec/plan/local-control.md §2.1)。 */
+  last_startup_ms: z.number().int().nonnegative().nullable().default(null),
 }).strict();
 export type ExcubitorStatusPayload = z.infer<typeof ExcubitorStatusPayloadSchema>;
 

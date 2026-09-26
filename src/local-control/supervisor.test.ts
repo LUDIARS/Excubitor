@@ -433,5 +433,6 @@ function status(state: ExcubitorStatusPayload['state']): ExcubitorStatusPayload 
     last_signal: null,
     last_error: null,
     instance_token: state === 'stopped' ? null : 'test-token',
+    last_startup_ms: null,
   };
 }

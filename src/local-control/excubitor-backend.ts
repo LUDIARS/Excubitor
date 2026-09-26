@@ -3,16 +3,27 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { execCapture } from '../shared/exec.js';
 import { startProcessLog } from '../log/process-file.js';
+import { readinessDecision } from './backend-readiness-decision.js';
+import { DEFAULT_BACKEND_READINESS_TIMEOUT_MS } from './backend-readiness-timeout.js';
 import type { ExcubitorStatusPayload } from './protocol.js';
 
 /** backend の stdout/stderr の落とし先 (`data/process-logs/<code>.{out,err}.log`)。 */
 const BACKEND_LOG_CODE = 'excubitor-backend';
 
+/** readiness 待ちの節目。supervisor がログへ出す (spec/plan/local-control.md §2.1)。 */
+export type BackendReadinessEvent =
+  | { kind: 'extended'; pid: number | null; timeoutMs: number; lastError: string }
+  | { kind: 'ready'; pid: number | null; startupMs: number };
+
 export interface ExcubitorBackendOptions {
   rootDir: string;
   spawnBackend?: (instanceToken: string) => ChildProcess;
   waitUntilReady?: (child: ChildProcess) => Promise<void>;
+  /** 固定値 (テスト用)。指定が無ければ resolveReadinessTimeoutMs → 既定値の順。 */
   readinessTimeoutMs?: number;
+  /** backend を待つたびに readiness timeout を解決する (env / config store)。 */
+  resolveReadinessTimeoutMs?: () => number;
+  onReadiness?: (event: BackendReadinessEvent) => void;
   readinessPollMs?: number;
   restartBaseDelayMs?: number;
   restartMaxDelayMs?: number;
@@ -47,6 +58,7 @@ export class ExcubitorBackendController {
   private lastExitCode: number | null = null;
   private lastSignal: string | null = null;
   private lastError: string | null = null;
+  private lastStartupMs: number | null = null;
   private restartTimer: NodeJS.Timeout | null = null;
   private lifecycleTail: Promise<void> = Promise.resolve();
   private statusTail: Promise<void> = Promise.resolve();
@@ -66,6 +78,7 @@ export class ExcubitorBackendController {
       last_signal: this.lastSignal,
       last_error: this.lastError,
       instance_token: this.instanceToken,
+      last_startup_ms: this.lastStartupMs,
     };
   }
 
@@ -97,7 +110,7 @@ export class ExcubitorBackendController {
     // backend into the same port.
     const recoveredPid = await this.waitForPersistedIdentity(expectedPid, token);
     if (recoveredPid !== null) {
-      await this.acceptAdoptedIdentity(recoveredPid, token, previous.restart_count);
+      await this.acceptAdoptedIdentity(recoveredPid, token, previous);
       return true;
     }
     if (expectedPid !== null && this.pidIsAlive(expectedPid)) {
@@ -124,6 +137,7 @@ export class ExcubitorBackendController {
     this.lastExitCode = previous.last_exit_code;
     this.lastSignal = previous.last_signal;
     this.lastError = previous.last_error;
+    this.lastStartupMs = previous.last_startup_ms ?? null;
 
     const pid = previous.pid ?? null;
     const token = previous.instance_token ?? null;
@@ -166,19 +180,22 @@ export class ExcubitorBackendController {
   private async adoptInternal(previous: ExcubitorStatusPayload | undefined): Promise<boolean> {
     const pid = previous?.pid ?? null;
     const token = previous?.instance_token ?? null;
-    if (!pid || !token || !this.pidIsAlive(pid)) return false;
+    if (!previous || !pid || !token || !this.pidIsAlive(pid)) return false;
     if (!(await this.matchesHealthIdentity(pid, token))) return false;
-    await this.acceptAdoptedIdentity(pid, token, previous?.restart_count ?? 0);
+    await this.acceptAdoptedIdentity(pid, token, previous);
     return true;
   }
 
-  private async acceptAdoptedIdentity(pid: number, token: string, restartCount: number): Promise<void> {
+  private async acceptAdoptedIdentity(pid: number, token: string, previous: ExcubitorStatusPayload): Promise<void> {
     this.child = null;
     this.adoptedPid = pid;
     this.instanceToken = token;
     this.desiredState = 'running';
     this.state = 'running';
-    this.restartCount = restartCount;
+    this.restartCount = previous.restart_count;
+    // The persisted startup time describes this pid only if it had already
+    // become ready; a backend adopted mid-start was never measured.
+    this.lastStartupMs = previous.state === 'running' ? previous.last_startup_ms ?? null : null;
     this.lastError = null;
     await this.emitStatus();
     this.startAdoptedMonitor();
@@ -239,6 +256,7 @@ export class ExcubitorBackendController {
       this.scheduleRestart();
       throw persistError;
     }
+    const spawnedAt = Date.now();
     try {
       child = this.spawnBackend(instanceToken);
     } catch (error) {
@@ -267,9 +285,12 @@ export class ExcubitorBackendController {
       const waitUntilReady = this.options.waitUntilReady ?? ((candidate) => this.waitForHealth(candidate));
       await waitUntilReady(child);
       if (this.child !== child) throw new Error('Excubitor backend exited before becoming ready');
+      const startupMs = Math.max(0, Date.now() - spawnedAt);
       this.state = 'running';
       this.restartCount = 0;
       this.lastError = null;
+      this.lastStartupMs = startupMs;
+      this.options.onReadiness?.({ kind: 'ready', pid: child.pid ?? null, startupMs });
       this.startOwnedMonitor(child, instanceToken);
       await this.emitStatus();
       return this.status();
@@ -417,18 +438,35 @@ export class ExcubitorBackendController {
   }
 
   private async waitForHealth(child: ChildProcess): Promise<void> {
-    const timeoutMs = this.options.readinessTimeoutMs ?? 30_000;
+    const timeoutMs = this.readinessTimeoutMs();
     const pollMs = this.options.readinessPollMs ?? 100;
     const rawPort = Number(process.env.EXCUBITOR_PORT ?? 17332);
     if (!Number.isInteger(rawPort) || rawPort <= 0 || rawPort > 65_535) {
       throw new Error(`invalid EXCUBITOR_PORT: ${process.env.EXCUBITOR_PORT ?? ''}`);
     }
     const url = `http://127.0.0.1:${rawPort}/health`;
-    const deadline = Date.now() + timeoutMs;
+    const startedAt = Date.now();
+    let extended = false;
     let lastError = 'health endpoint did not respond';
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null || child.signalCode !== null || this.child !== child) {
+    while (true) {
+      const decision = readinessDecision({
+        elapsedMs: Date.now() - startedAt,
+        timeoutMs,
+        processAlive: child.exitCode === null && child.signalCode === null && this.child === child,
+        extended,
+      });
+      if (decision === 'exited') {
         throw new Error(`Excubitor backend exited before health readiness (${lastError})`);
+      }
+      if (decision === 'timeout') {
+        throw new Error(
+          `Excubitor backend health readiness timed out after ${timeoutMs * 2}ms `
+          + `(${timeoutMs}ms extended once while the process was alive): ${lastError}`,
+        );
+      }
+      if (decision === 'extend') {
+        extended = true;
+        this.options.onReadiness?.({ kind: 'extended', pid: child.pid ?? null, timeoutMs, lastError });
       }
       try {
         const response = await fetch(url, { signal: AbortSignal.timeout(1_000) });
@@ -444,7 +482,12 @@ export class ExcubitorBackendController {
       }
       await delay(pollMs);
     }
-    throw new Error(`Excubitor backend health readiness timed out after ${timeoutMs}ms: ${lastError}`);
+  }
+
+  private readinessTimeoutMs(): number {
+    return this.options.readinessTimeoutMs
+      ?? this.options.resolveReadinessTimeoutMs?.()
+      ?? DEFAULT_BACKEND_READINESS_TIMEOUT_MS;
   }
 
   private async matchesHealthIdentity(pid: number, token: string): Promise<boolean> {
@@ -453,7 +496,7 @@ export class ExcubitorBackendController {
   }
 
   private async waitForPersistedIdentity(expectedPid: number | null, token: string): Promise<number | null> {
-    const deadline = Date.now() + (this.options.readinessTimeoutMs ?? 30_000);
+    const deadline = Date.now() + this.readinessTimeoutMs();
     const pollMs = this.options.readinessPollMs ?? 100;
     while (true) {
       const health = await this.readHealthIdentity();

@@ -13,8 +13,9 @@ import { createNamedLogger } from '../shared/logger.js';
 import { androidStatus } from '../android/control.js';
 import { AdoptedProcessReaper } from './adopted-process-reaper.js';
 import { SupervisorCatalogRuntime } from './catalog-runtime.js';
+import { loadBackendReadinessTimeout } from './backend-readiness-timeout.js';
 import { localControlEndpoint } from './endpoint.js';
-import { ExcubitorBackendController } from './excubitor-backend.js';
+import { ExcubitorBackendController, type BackendReadinessEvent } from './excubitor-backend.js';
 import {
   boundEmergencyResult,
   boundControlResult,
@@ -99,6 +100,8 @@ export class LocalControlSupervisor {
       // publication before it begins backend readiness checks.
       onStatus: (status) => this.stateStore.recordExcubitor(status),
       onError: (error) => logger.error({ err: error.message }, 'Excubitor backend lifecycle error'),
+      resolveReadinessTimeoutMs: resolveBackendReadinessTimeoutMs,
+      onReadiness: logBackendReadiness,
     });
     this.server = new LocalControlServer({
       endpoint: options.endpoint ?? localControlEndpoint(),
@@ -540,6 +543,29 @@ async function serviceStatus(code: string, runtime: string): Promise<ServiceStat
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** @implements SPEC-EX-BACKEND-READINESS */
+function resolveBackendReadinessTimeoutMs(): number {
+  const resolution = loadBackendReadinessTimeout();
+  for (const ignored of resolution.ignored) {
+    logger.warn({ source: ignored.source, detail: ignored.detail }, 'ignoring invalid Excubitor backend readiness timeout');
+  }
+  return resolution.value;
+}
+
+function logBackendReadiness(event: BackendReadinessEvent): void {
+  if (event.kind === 'extended') {
+    logger.warn(
+      { pid: event.pid, readiness_timeout_ms: event.timeoutMs, last_error: event.lastError },
+      'Excubitor backend readiness timeout reached while the process is alive; extending once',
+    );
+    return;
+  }
+  logger.info(
+    { pid: event.pid, startup_ms: event.startupMs, startup_sec: Math.round(event.startupMs / 100) / 10 },
+    'Excubitor backend became ready',
+  );
 }
 
 async function collectCleanupError(errors: unknown[], cleanup: () => Promise<void>): Promise<void> {

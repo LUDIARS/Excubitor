@@ -55,6 +55,8 @@ interface ExcubitorConfig {
   serviceRuntimeConfigs?: Record<string, ServiceRuntimeConfig>;
   settings?: {
     domainRoot?: string;
+    /** supervisor が Ex backend の health readiness を待つ ms (範囲検証は読み手側)。 */
+    backendReadinessTimeoutMs?: number;
     cfTunnel?: CfTunnelSettings;
     notifications?: {
       discord?: DiscordNotificationConfig;
@@ -234,6 +236,17 @@ export function getDomainRootStatus(): DomainRootStatus {
     default_value: DEFAULT_DOMAIN_ROOT,
     storePath: configPath(),
   };
+}
+
+/**
+ * 保存済みの backend readiness timeout (ms) の生値。 未設定は null。
+ * env `EXCUBITOR_BACKEND_READINESS_TIMEOUT_MS` が優先し、範囲検証は
+ * local-control/backend-readiness-timeout.ts が行う (domainRoot と同じ規則)。
+ *
+ * @implements SPEC-EX-BACKEND-READINESS
+ */
+export function getBackendReadinessTimeoutOverride(): unknown {
+  return readConfig().settings?.backendReadinessTimeoutMs ?? null;
 }
 
 // ─────────────── CF Tunnel (cf-tunnel ブローカー設定) ───────────────

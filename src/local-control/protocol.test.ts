@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NewlineJsonFramer } from './line-framer.js';
 import {
+  ExcubitorStatusPayloadSchema,
   LOCAL_CONTROL_PROTOCOL_VERSION,
   LocalControlRequestSchema,
   LocalControlResponseSchema,
@@ -34,6 +35,23 @@ describe('local-control protocol', () => {
       ok: false,
       state: 'failed',
     }).success).toBe(false);
+  });
+
+  it('reads a persisted Excubitor status written before last_startup_ms existed', () => {
+    const legacy = {
+      kind: 'excubitor-status',
+      state: 'running',
+      desired_state: 'running',
+      pid: 4321,
+      restart_count: 0,
+      last_exit_code: null,
+      last_signal: null,
+      last_error: null,
+      instance_token: 'token',
+    };
+    expect(ExcubitorStatusPayloadSchema.parse(legacy).last_startup_ms).toBeNull();
+    expect(ExcubitorStatusPayloadSchema.parse({ ...legacy, last_startup_ms: 26_400 }).last_startup_ms).toBe(26_400);
+    expect(ExcubitorStatusPayloadSchema.safeParse({ ...legacy, last_startup_ms: -1 }).success).toBe(false);
   });
 
   it('frames fragmented CRLF and LF JSON without changing payloads', () => {

@@ -52,6 +52,45 @@ Windows は同一アカウント・Limited 権限の per-user scheduled task、L
 未導入または起動失敗時は `scripts/install-service.ps1` / `scripts/install-service.sh`、あるいは開発時だけ
 foreground の `npm run service` を案内し、同じ command を再実行する。
 
+### 2.1 Ex backend の起動 readiness {#SPEC-EX-BACKEND-READINESS}
+
+supervisor は backend を spawn したあと `http://127.0.0.1:<EXCUBITOR_PORT>/health` が spawn した
+pid と instance token を返すまで待つ (readiness)。平常時は 4 秒前後で listen するが、CPU 100% の
+ときは catalog 同期・file-tail・Redis キャッシュ初期化で 26〜35 秒かかる (2026-09-26 実測)。
+readiness が固定 30 秒だった頃は、この遅い起動を殺して再起動を繰り返していた。
+
+readiness timeout は次の順で解決する (domain root と同じ「env 優先 → config store → 既定」):
+
+| 順 | source | 値 |
+|---|---|---|
+| 1 | env `EXCUBITOR_BACKEND_READINESS_TIMEOUT_MS` | 10 進整数 (ms) |
+| 2 | config store (`config.enc` の `settings.backendReadinessTimeoutMs`) | 整数 (ms) |
+| 3 | 既定 | **90000** |
+
+- 有効範囲は **10000〜600000 ms**。整数でない値・範囲外の値は丸めずに無視して次の source へ進み、
+  supervisor ログに warn を 1 行出す。空文字の env は未設定と同じ扱い。
+- 値は backend を spawn するたび (と、supervisor 再起動時の再採用待ち) に解決する。env の変更は
+  supervisor 自体の再起動で、config store の変更は次の backend 起動で反映される。
+- supervisor 再起動時の再採用 (永続化済み token が health に現れるのを待つ) も同じ timeout を使う。
+  ここでは延長しない (待ち切れなくても生きている pid は殺さず adopted monitor に渡すため)。
+
+延長規則 (判定は純関数 `readinessDecision({ elapsedMs, timeoutMs, processAlive, extended })`):
+
+| 条件 | 判定 |
+|---|---|
+| backend プロセスが exit 済み | `exited` — 即座に失敗 |
+| 経過 < timeout (延長後は 2×timeout) | `wait` — health を polling し続ける |
+| 経過 ≥ timeout、生存中、未延長 | `extend` — 同じ長さの猶予を **1 回だけ** 与える |
+| 延長後に経過 ≥ 2×timeout | `timeout` — backend を停止して再起動 backoff へ |
+
+延長の判断は「プロセスが exit していないこと」だけを見る。起動ログが進んでいるかは見ない。
+
+起動にかかった時間 (spawn から readiness 成立まで) は supervisor ログ
+(`Excubitor backend became ready`、`startup_ms` / `startup_sec`) と `excubitor status` の payload
+`last_startup_ms` に出す。延長したときは warn ログ (`extending once`) を出す。`last_startup_ms` は
+直近に成功した起動 1 回分だけを持ち、起動失敗では上書きしない。supervisor の再起動で `running` の
+backend を再採用したときは永続化済みの値を引き継ぎ、起動途中の backend を再採用したときは `null` にする。
+
 ## 3. Web proxy 障害時
 
 UI の lifecycle action は `/api/v1/services/:code/control` から local IPC へ中継される。エラー表示に
@@ -124,6 +163,8 @@ in-process process manager へ切り替えず、supervisor の service/log/state
 3. repo の `dist` 更新中でも稼働中 supervisor が operation を完了する。
 4. UI の停止・異常 service が非表示にならず、control error に実行可能な CLI fallback が出る。
 5. relative Markdown link checker と frontend/backend build/typecheck を CI で実行する。
+6. backend の listen が readiness timeout を超えても、プロセスが生きていれば 1 回だけ延長して起動を
+   完了し、`excubitor status` の `last_startup_ms` と supervisor ログに起動時間が出る (§2.1)。
 
 ## 6. 最小確認コマンド
 

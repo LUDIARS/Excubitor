@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { ExcubitorBackendController } from './excubitor-backend.js';
+import { ExcubitorBackendController, type BackendReadinessEvent } from './excubitor-backend.js';
 
 describe('Excubitor backend controller', () => {
   it('coalesces concurrent start calls into one backend process', async () => {
@@ -83,6 +83,7 @@ describe('Excubitor backend controller', () => {
       last_signal: null,
       last_error: null,
       instance_token: 'reserved-token',
+      last_startup_ms: null,
     })).resolves.toMatchObject({ state: 'running', pid: 1006, instance_token: 'reserved-token' });
 
     expect(spawnBackend).not.toHaveBeenCalled();
@@ -203,6 +204,7 @@ describe('Excubitor backend controller', () => {
       last_signal: null,
       last_error: null,
       instance_token: 'token-1',
+      last_startup_ms: null,
     })).resolves.toBe(true);
     await expect(controller.stop()).resolves.toMatchObject({ state: 'stopped', pid: null });
     expect(terminateAdopted).toHaveBeenCalledWith(2001);
@@ -225,6 +227,7 @@ describe('Excubitor backend controller', () => {
       last_signal: null,
       last_error: null,
       instance_token: null,
+      last_startup_ms: null,
     })).resolves.toMatchObject({
       state: 'stopped',
       desired_state: 'stopped',
@@ -255,6 +258,7 @@ describe('Excubitor backend controller', () => {
       last_signal: null,
       last_error: null,
       instance_token: 'stopping-token',
+      last_startup_ms: null,
     })).resolves.toMatchObject({ state: 'stopped', desired_state: 'stopped', pid: null });
 
     expect(terminateAdopted).toHaveBeenCalledWith(2004);
@@ -289,6 +293,7 @@ describe('Excubitor backend controller', () => {
         last_signal: null,
         last_error: null,
         instance_token: 'token-2',
+        last_startup_ms: null,
       });
 
       healthIdentity = { pid: 9999, instance_token: 'foreign-token' };
@@ -415,6 +420,158 @@ describe('Excubitor backend controller', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('records the spawn-to-ready duration in status and reports it', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild(4001, true);
+      let token = '';
+      const events: BackendReadinessEvent[] = [];
+      const controller = new ExcubitorBackendController({
+        rootDir: process.cwd(),
+        spawnBackend: (instanceToken) => {
+          token = instanceToken;
+          return child;
+        },
+        waitUntilReady: () => new Promise((resolve) => setTimeout(resolve, 26_400)),
+        probeHealthIdentity: async () => ({ pid: 4001, instance_token: token }),
+        onReadiness: (event) => events.push(event),
+      });
+
+      const starting = controller.start();
+      expect(controller.status().last_startup_ms).toBeNull();
+      await vi.advanceTimersByTimeAsync(26_400);
+
+      await expect(starting).resolves.toMatchObject({ state: 'running', last_startup_ms: 26_400 });
+      expect(events).toEqual([{ kind: 'ready', pid: 4001, startupMs: 26_400 }]);
+      await controller.stop();
+      expect(controller.status().last_startup_ms).toBe(26_400);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('extends health readiness once while the backend is alive and then becomes ready', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild(4002, true);
+      let token = '';
+      let healthy = false;
+      const events: BackendReadinessEvent[] = [];
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        if (!healthy) throw new Error('fetch failed');
+        return new Response(JSON.stringify({ pid: 4002, instance_token: token }), { status: 200 });
+      }));
+      const controller = new ExcubitorBackendController({
+        rootDir: process.cwd(),
+        spawnBackend: (instanceToken) => {
+          token = instanceToken;
+          return child;
+        },
+        readinessTimeoutMs: 20,
+        readinessPollMs: 5,
+        probeHealthIdentity: async () => ({ pid: 4002, instance_token: token }),
+        onReadiness: (event) => {
+          events.push(event);
+          // The slow backend finally listens during the granted extension.
+          if (event.kind === 'extended') healthy = true;
+        },
+      });
+
+      const starting = controller.start();
+      await vi.advanceTimersByTimeAsync(30);
+
+      await expect(starting).resolves.toMatchObject({ state: 'running', pid: 4002 });
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(events.map((event) => event.kind)).toEqual(['extended', 'ready']);
+      expect(events[0]).toMatchObject({ kind: 'extended', pid: 4002, timeoutMs: 20, lastError: 'fetch failed' });
+      expect(controller.status().last_startup_ms).toEqual(expect.any(Number));
+      await controller.stop();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after one extension with the resolved timeout and terminates the backend', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild(4003, true);
+      const events: BackendReadinessEvent[] = [];
+      const resolveReadinessTimeoutMs = vi.fn(() => 20);
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        throw new Error('fetch failed');
+      }));
+      const controller = new ExcubitorBackendController({
+        rootDir: process.cwd(),
+        spawnBackend: () => child,
+        resolveReadinessTimeoutMs,
+        readinessPollMs: 5,
+        stopTimeoutMs: 20,
+        forceStopTimeoutMs: 20,
+        restartBaseDelayMs: 60_000,
+        onReadiness: (event) => events.push(event),
+      });
+
+      const outcome = expect(controller.start()).rejects.toThrow(
+        'Excubitor backend health readiness timed out after 40ms (20ms extended once while the process was alive): fetch failed',
+      );
+      await vi.advanceTimersByTimeAsync(60);
+      await outcome;
+
+      expect(resolveReadinessTimeoutMs).toHaveBeenCalledTimes(1);
+      expect(events.map((event) => event.kind)).toEqual(['extended']);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(controller.status()).toMatchObject({ state: 'crashed', last_startup_ms: null });
+      await controller.stop();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the persisted startup time only when re-adopting an already running backend', async () => {
+    const running = new ExcubitorBackendController({
+      rootDir: process.cwd(),
+      isPidAlive: () => true,
+      probeHealthIdentity: async () => ({ pid: 4004, instance_token: 'token-4004' }),
+      terminateAdopted: async () => undefined,
+    });
+    await expect(running.adopt({
+      kind: 'excubitor-status',
+      state: 'running',
+      desired_state: 'running',
+      pid: 4004,
+      restart_count: 0,
+      last_exit_code: null,
+      last_signal: null,
+      last_error: null,
+      instance_token: 'token-4004',
+      last_startup_ms: 26_400,
+    })).resolves.toBe(true);
+    expect(running.status().last_startup_ms).toBe(26_400);
+    await running.preserveForSupervisorShutdown();
+
+    const midStart = new ExcubitorBackendController({
+      rootDir: process.cwd(),
+      isPidAlive: (pid) => pid === 4005,
+      probeHealthIdentity: async () => ({ pid: 4005, instance_token: 'reserved-4005' }),
+      terminateAdopted: async () => undefined,
+    });
+    await expect(midStart.recover({
+      kind: 'excubitor-status',
+      state: 'starting',
+      desired_state: 'running',
+      pid: null,
+      restart_count: 0,
+      last_exit_code: null,
+      last_signal: null,
+      last_error: null,
+      instance_token: 'reserved-4005',
+      last_startup_ms: 26_400,
+    })).resolves.toMatchObject({ state: 'running', pid: 4005, last_startup_ms: null });
+    await midStart.preserveForSupervisorShutdown();
   });
 });
 

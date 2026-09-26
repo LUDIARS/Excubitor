@@ -112,6 +112,17 @@ Web API は supervisor を自動生成せず 503 で fail-fast する。詳し�
 
 backend の readiness は http://localhost:17332/health で確認する。
 
+supervisor が読む環境変数 (Scheduled Task / systemd / launchd の環境に置く。変更は supervisor の再起動で反映):
+
+| env | 既定 | 内容 |
+|-----|------|------|
+| `EXCUBITOR_PORT` | `17332` | backend の listen port。supervisor は readiness をこの port の `/health` で確認する |
+| `EXCUBITOR_BACKEND_READINESS_TIMEOUT_MS` | `90000` | backend 起動の readiness timeout (ms、10000〜600000)。未設定なら config store の `settings.backendReadinessTimeoutMs`、それも無ければ既定。範囲外・非整数は無視して warn。timeout 時にプロセスが生きていれば同じ長さを 1 回だけ延長する |
+
+起動にかかった時間は `excubitorctl excubitor status --json` の `last_startup_ms` と supervisor ログ
+(`Excubitor backend became ready`) に出る。規則の詳細は
+[`spec/plan/local-control.md`](spec/plan/local-control.md) §2.1。
+
 ## パッケージ日次監査
 
 `npm run packages:audit` は catalog 管理下の Node プロジェクトと `npm ls -g` の実測
