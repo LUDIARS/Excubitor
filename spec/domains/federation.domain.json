@@ -36,12 +36,16 @@
     },
     {
       "namePattern": "nodeName"
+    },
+    {
+      "pathPattern": "(^|/)src/mcp/site-tools\\.ts$"
     }
   ],
   "cardTemplate": "Summarise the \"federation\" domain: Cross-node peering: stores remote peers, aggregates local + peer service/host state, and proxies remote control/update under agent-token auth.",
   "specRefs": [
     "構成 / src/federation/",
-    "注意 (federation)"
+    "注意 (federation)",
+    "spec/feature/aws-site.md"
   ],
   "rationale": "src/federation (6 files) is the multi-site coordination domain with its own auth surface."
 }

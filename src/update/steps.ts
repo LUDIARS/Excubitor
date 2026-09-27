@@ -75,7 +75,8 @@ export async function installDependencies(
 ): Promise<StepResult | null> {
   const dir = opts.prefix ? join(repoDir, opts.prefix) : repoDir;
   if (!existsSync(join(dir, 'package.json'))) return null;
-  const args = ['install', ...(opts.preferOffline ? ['--prefer-offline', '--no-audit', '--no-fund'] : [])];
+  // Deployment builds require their compiler/bundler even when the site uses NODE_ENV=production.
+  const args = ['install', '--include=dev', ...(opts.preferOffline ? ['--prefer-offline', '--no-audit', '--no-fund'] : [])];
   const npm = await execCapture('npm', args, dir, INSTALL_TIMEOUT_MS, true);
   return { step: opts.prefix ? `install:${opts.prefix}` : 'install', ok: npm.ok, detail: tail(npm.ok ? npm.stdout : npm.stderr) };
 }

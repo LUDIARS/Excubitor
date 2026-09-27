@@ -8,6 +8,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { registerSiteTools } from './site-tools.js';
 
 /** ツール結果を text content にまとめる。 */
 function jsonContent(data: unknown) {
@@ -53,6 +54,7 @@ export function buildMcpServer(baseUrl: string): McpServer {
   }
 
   const server = new McpServer({ name: 'excubitor', version: '0.2.0' });
+  registerSiteTools(server, baseUrl);
 
   server.tool(
     'excubitor_list_services',
