@@ -31,9 +31,10 @@ export function validateOperationRequest(
   if (request.target.kind === 'service') {
     const code = request.target.code;
     const svc = catalog.services.find((s) => s.code === code && !s.disabled);
-    if (!svc) return { ok: false, status: 404, error: 'service_not_found' };
+    if (!svc && request.action !== 'bootstrap') return { ok: false, status: 404, error: 'service_not_found' };
     if (coveragePrefs.get(code) === false) return { ok: false, status: 409, error: 'service_not_covered_by_this_node' };
   }
+  if (request.action === 'bootstrap' && source !== 'origin') return { ok: false, status: 409, error: 'bootstrap_requires_origin_access' };
   if (!source) return { ok: false, status: 500, error: 'invalid_update_source_config' };
   return { ok: true, request, source };
 }

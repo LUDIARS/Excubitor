@@ -10,6 +10,7 @@
  * - queued は残っていれば実行を始める
  */
 
+import { runBootstrapOperation } from '../../bootstrap/operation.js';
 import type { Catalog } from '../../catalog/loader.js';
 import { createNamedLogger } from '../../shared/logger.js';
 import type { StepResult } from '../../update/steps.js';
@@ -37,6 +38,7 @@ export const executeOperation: OperationExecutor = async (op, ctx, catalog) => {
   if (op.target.kind === 'excubitor') return runSelfOperation(selfRepoOf(catalog), ctx);
   const code = op.target.code;
   const svc = catalog.services.find((s) => s.code === code);
+  if (['bootstrap', 'data-export', 'data-import'].includes(op.action)) return runBootstrapOperation(ctx, svc);
   if (!svc) return { kind: 'finished', ok: false, error: `service ${code} は catalog にありません` };
   return runServiceOperation(svc, ctx);
 };

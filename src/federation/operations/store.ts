@@ -34,6 +34,7 @@ export interface NewOperation {
   action: OperationAction;
   source: UpdateSource;
   now: number;
+  meta?: Record<string, unknown>;
 }
 
 interface OperationRow {
@@ -111,10 +112,10 @@ export function createOperation(input: NewOperation): OperationRecord {
   const code = input.target.kind === 'service' ? input.target.code : null;
   db().run(sql`
     INSERT INTO federation_operations (
-      id, requested_by, requester_peer_id, target_kind, target_code, action, source, status, steps, created_at
+      id, requested_by, requester_peer_id, target_kind, target_code, action, source, status, steps, created_at, meta
     ) VALUES (
       ${id}, ${input.requestedBy}, ${input.requesterPeerId}, ${input.target.kind}, ${code},
-      ${input.action}, ${input.source}, ${'queued'}, ${'[]'}, ${input.now}
+      ${input.action}, ${input.source}, ${'queued'}, ${'[]'}, ${input.now}, ${JSON.stringify(input.meta ?? {})}
     )
   `);
   return getOperation(id)!;

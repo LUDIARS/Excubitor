@@ -27,6 +27,9 @@ export const OPERATION_LABEL: Record<OperationAction, string> = {
   reflect: '反映',
   start: '起動',
   stop: '停止',
+  bootstrap: '新規導入',
+  'data-export': 'データ書き出し',
+  'data-import': 'データ取り込み',
 };
 
 export const OPERATION_STATUS_LABEL: Record<OperationStatus, string> = {

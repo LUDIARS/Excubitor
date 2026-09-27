@@ -11,10 +11,11 @@
  */
 
 import { z } from 'zod';
+import { BootstrapOptionsSchema, DataOptionsSchema } from '../../bootstrap/options.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
-export const OperationActionSchema = z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop']);
+export const OperationActionSchema = z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'bootstrap', 'data-export', 'data-import']);
 export type OperationAction = z.infer<typeof OperationActionSchema>;
 
 /** Excubitor 自身に対して受け付ける依頼 (自分を止めたら依頼を受けられなくなるので stop / start は無い)。 */
@@ -29,6 +30,14 @@ export type OperationTarget = z.infer<typeof OperationTargetSchema>;
 export const OperationRequestSchema = z.object({
   target: OperationTargetSchema,
   action: OperationActionSchema,
+  bootstrap: BootstrapOptionsSchema.optional(),
+  data: DataOptionsSchema.optional(),
+}).superRefine((value, ctx) => {
+  const issue = (message: string): void => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  if ((value.action === 'bootstrap') !== Boolean(value.bootstrap)) issue('bootstrap options required only for bootstrap');
+  const migration = value.action === 'data-export' || value.action === 'data-import';
+  if (migration !== Boolean(value.data)) issue('data options required only for data operations');
+  if (value.action === 'data-import' && !value.data?.sha256) issue('import requires sha256');
 });
 export type OperationRequest = z.infer<typeof OperationRequestSchema>;
 

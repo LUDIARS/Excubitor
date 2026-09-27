@@ -31,6 +31,7 @@ export function acceptOperation(body: unknown, catalog: Catalog, runner: Operati
     target: checked.request.target,
     action: checked.request.action,
     source: checked.source,
+    meta: { bootstrap: checked.request.bootstrap, data: checked.request.data },
   });
   return { ok: true, operation: toSummary(op) };
 }
