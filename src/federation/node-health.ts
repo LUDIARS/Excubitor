@@ -1,3 +1,4 @@
+import { isServerInstallCandidate } from '../bootstrap/candidate.js';
 import { BootstrapOptionsSchema } from '../bootstrap/options.js';
 import { getLaunchProfile } from '../launch/profile.js';
 /**
@@ -33,7 +34,10 @@ import { resolveUpdateSource } from './operations/update-source.js';
 /** health 応答に載せる依頼の件数 (新しい順)。 */
 export const RECENT_OPERATIONS_IN_HEALTH = 20;
 
-/** @implements SPEC-FEDERATION-HEALTH-CACHE */
+/**
+ * @implements SPEC-FEDERATION-HEALTH-CACHE
+ * @implements SPEC-SERVICE-INSTALL-CANDIDATES
+ */
 
 export interface HealthPayloadInput {
   now: number;
@@ -45,6 +49,7 @@ export interface HealthPayloadInput {
   operations: OperationSummary[];
   startupCodes?: ReadonlySet<string>;
   repositories?: ReadonlyMap<string, string | undefined>;
+  serverInstallCandidates?: ReadonlyMap<string, boolean>;
 }
 
 /** 集めた値から health 応答を組む (pure)。 */
@@ -57,6 +62,7 @@ export function buildHealthPayload(input: HealthPayloadInput): NodeHealthPayload
     return {
       ...entry,
       repository: repository.success ? repository.data.repository : null,
+      server_install_candidate: input.serverInstallCandidates?.get(entry.code),
       startup: input.startupCodes?.has(entry.code) ?? null,
       state: row?.state ?? 'unknown',
       port: row?.port ?? null,
@@ -117,6 +123,7 @@ export function localHealthPayload(
     snapshot,
     startupCodes,
     repositories: new Map(catalog.services.map(s => [s.code, s.repo])),
+    serverInstallCandidates: new Map(catalog.services.map(s => [s.code, isServerInstallCandidate(s)])),
     coverage,
     cache: getHealthCache(),
     links: localPeerLinks(),

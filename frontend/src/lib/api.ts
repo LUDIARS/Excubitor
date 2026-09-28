@@ -1165,6 +1165,7 @@ export interface MeshCoverageEntry {
 }
 
 export interface MeshCoverageRow {
+  server_install_candidate?: boolean | null;
   repository?: string | null;
   code: string;
   name: string;

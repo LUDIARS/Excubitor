@@ -17,6 +17,9 @@
       "pathPattern": "(^|/)src/startup/[^/]+$"
     },
     {
+      "pathPattern": "(^|/)src/bootstrap/"
+    },
+    {
       "pathPattern": "(^|/)src/safe-mode(\\.test)?\\.ts$"
     },
     {

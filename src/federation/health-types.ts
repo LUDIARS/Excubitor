@@ -8,7 +8,10 @@
 import { z } from 'zod';
 import { OperationSummarySchema, UpdateSourceSchema } from './operations/types.js';
 
-/** @implements SPEC-FEDERATION-HEALTH-CACHE */
+/**
+ * @implements SPEC-FEDERATION-HEALTH-CACHE
+ * @implements SPEC-SERVICE-INSTALL-CANDIDATES
+ */
 
 /**
  * 応答形式の版。 互換性のない変更をしたら上げる。
@@ -31,6 +34,8 @@ export const NodeServiceHealthSchema = z.object({
   project_code: z.string().nullable(),
   /** Optional for older peers; only canonical repository identifiers, never credentials/URLs. */
   repository: z.string().regex(/^LUDIARS\/[A-Za-z0-9][A-Za-z0-9_-]*$/).nullable().optional(),
+  /** Catalog classification only; setup availability is checked by bootstrap. */
+  server_install_candidate: z.boolean().optional(),
   kind: z.enum(['managed', 'observed']),
   covered: z.boolean(),
   source: z.enum(['catalog', 'override']),

@@ -3,6 +3,8 @@ import { buildMeshView, coverageIssues } from './mesh-view.js';
 import type { PeerPollState } from './peer-cache.js';
 import { healthPayload, serviceHealth } from './test-fixtures.js';
 
+/** @implements SPEC-SERVICE-INSTALL-CANDIDATES */
+
 const NOW = 100_000;
 const STALE_MS = 180_000;
 
@@ -20,6 +22,15 @@ function peerState(overrides: Partial<PeerPollState> & { peer_id: string; name: 
 }
 
 describe('buildMeshView', () => {
+  it('uses HQ classifications without letting peers add installation candidates', () => {
+    const view = buildMeshView({ now: NOW, staleAfterMs: STALE_MS,
+      self: healthPayload('hq', { services: [serviceHealth('tabula', { server_install_candidate: true }), serviceHealth('memoria-server', { server_install_candidate: false })] }),
+      peers: [peerState({ peer_id: 'p', name: 'remote', payload: healthPayload('remote', { services: [serviceHealth('peer-only', { server_install_candidate: true }), serviceHealth('memoria-server', { server_install_candidate: true })] }) })],
+    });
+    expect(view.coverage.find(row => row.code === 'tabula')?.server_install_candidate).toBe(true);
+    expect(view.coverage.find(row => row.code === 'memoria-server')?.server_install_candidate).toBe(false);
+    expect(view.coverage.find(row => row.code === 'peer-only')?.server_install_candidate).toBeNull();
+  });
   it('lists self and peers with reachability and coverage counts', () => {
     const self = healthPayload('win', {
       services: [serviceHealth('cernere'), serviceHealth('memoria', { health: { state: 'down' } })],

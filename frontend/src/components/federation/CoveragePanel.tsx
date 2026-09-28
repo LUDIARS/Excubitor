@@ -5,7 +5,10 @@ import { useServiceInstall } from './useServiceInstall';
 import { installationBlock } from './install-policy';
 import { OperationTracker } from './OperationTracker';
 
-/** @implements SPEC-FEDERATION-COVERAGE */
+/**
+ * @implements SPEC-FEDERATION-COVERAGE
+ * @implements SPEC-SERVICE-INSTALL-CANDIDATES
+ */
 
 const ISSUE_LABEL: Record<CoverageIssue, string> = {
   duplicate_managed: '複数拠点が管理',
@@ -18,15 +21,20 @@ const ISSUE_LABEL: Record<CoverageIssue, string> = {
  * その拠点がキャッシュしている死活。 この拠点の列だけは担保の上書きができる。
  */
 export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: () => Promise<void> }) {
-  const hasIssues = mesh.coverage.some((row) => row.issues.length > 0);
-  const [issuesOnly, setIssuesOnly] = useState(hasIssues);
+  const [issuesOnly, setIssuesOnly] = useState(false);
+  const [serversOnly, setServersOnly] = useState(true);
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const names = mesh.nodes.map((n) => n.node);
   const installation = useServiceInstall(onChanged);
   const rows = useMemo(
-    () => (issuesOnly ? mesh.coverage.filter((row) => row.issues.length > 0) : mesh.coverage),
-    [issuesOnly, mesh.coverage],
+    () => mesh.coverage.filter(row => {
+      if (serversOnly && row.server_install_candidate !== true) return false;
+      if (issuesOnly && row.issues.length === 0) return false;
+      return [row.name, row.code, row.project_code, row.repository].join(' ').toLowerCase().includes(query.trim().toLowerCase());
+    }),
+    [issuesOnly, serversOnly, query, mesh.coverage],
   );
 
   const onOverride = async (code: string, value: string) => {
@@ -45,12 +53,15 @@ export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: 
   return (
     <section className="coverage-panel">
       <div className="coverage-toolbar">
+        <label><input type="checkbox" checked={serversOnly} onChange={e => setServersOnly(e.target.checked)} />サーバー向けサービスだけ</label>
+        <input aria-label="サービスを検索" placeholder="名前・コード・リポジトリで検索" value={query} onChange={e => setQuery(e.target.value)} />
         <label>
           <input type="checkbox" checked={issuesOnly} onChange={(e) => setIssuesOnly(e.target.checked)} />
           指摘のあるサービスだけ
         </label>
-        <span className="muted">全 {mesh.coverage.length} 件 / 指摘 {mesh.coverage.filter((r) => r.issues.length > 0).length} 件</span>
+        <span className="muted">表示 {rows.length} 件 / 全 {mesh.coverage.length} 件 / 指摘 {mesh.coverage.filter((r) => r.issues.length > 0).length} 件</span>
       </div>
+      <p className="muted small">この拠点のカタログから設置先を選びます。導入時に各サービスのセットアップ定義を確認します。</p>
       {error && <div className="error-banner">担保の変更に失敗: {error}</div>}
       {installation.error && <div className="error-banner">{installation.error}</div>}
       {installation.tracked && <div>
@@ -59,7 +70,7 @@ export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: 
           operationId={installation.tracked.id} onDone={installation.onDone} />
       </div>}
       {rows.length === 0 ? (
-        <div className="empty-state">{issuesOnly ? '指摘のあるサービスはありません。' : 'サービスがありません。'}</div>
+        <div className="empty-state">条件に一致するサービスがありません。検索や絞り込みを変更してください。</div>
       ) : (
         <div className="mesh-matrix-wrap">
           <table className="peer-table coverage-table">

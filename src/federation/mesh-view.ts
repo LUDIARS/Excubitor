@@ -16,7 +16,10 @@ import type { NodeHealthPayload, NodeInfo, NodePeerLink, PeerLinkStatus, Service
 import type { PeerPollState } from './peer-cache.js';
 import type { OperationSummary } from './operations/types.js';
 
-/** @implements SPEC-FEDERATION-COVERAGE */
+/**
+ * @implements SPEC-FEDERATION-COVERAGE
+ * @implements SPEC-SERVICE-INSTALL-CANDIDATES
+ */
 
 export interface MeshNode {
   node: string;
@@ -68,6 +71,7 @@ export interface MeshCoverageRow {
   project_code: string | null;
   /** Unambiguous repository reported by a fresh node; null when unknown/conflicting. */
   repository: string | null;
+  server_install_candidate?: boolean | null;
   nodes: MeshCoverageEntry[];
   /** covered かつ managed の拠点。 */
   managed_by: string[];
@@ -179,6 +183,8 @@ function buildLinks(sources: readonly NodeSource[]): MeshLink[] {
 function buildCoverage(sources: readonly NodeSource[]): MeshCoverageRow[] {
   const rows = new Map<string, MeshCoverageRow>();
   const repositories = new Map<string, Set<string>>();
+  // The initiating HQ catalog owns install policy; peer health must not add candidates.
+  const installCandidates = new Map(sources[0]?.payload?.services.map(svc => [svc.code, svc.server_install_candidate]) ?? []);
   for (const source of sources) {
     if (!source.payload) continue;
     for (const svc of source.payload.services) {
@@ -211,6 +217,7 @@ function buildCoverage(sources: readonly NodeSource[]): MeshCoverageRow[] {
   for (const row of rows.values()) {
     const candidates = repositories.get(row.code);
     row.repository = candidates?.size === 1 ? [...candidates][0]! : null;
+    row.server_install_candidate = installCandidates.get(row.code) ?? null;
     row.managed_by = row.nodes.filter((n) => n.covered && n.kind === 'managed').map((n) => n.node);
     row.issues = coverageIssues(row);
   }

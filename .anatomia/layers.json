@@ -10,6 +10,7 @@
 
     { "glob": "src/*", "layer": "application" },
     { "glob": "src/auto_fix/**", "layer": "application" },
+    { "glob": "src/bootstrap/**", "layer": "application" },
     { "glob": "src/control/**", "layer": "application" },
     { "glob": "src/deploy/**", "layer": "application" },
     { "glob": "src/discovery/**", "layer": "application" },

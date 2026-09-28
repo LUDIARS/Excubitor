@@ -61,6 +61,17 @@ describe('buildHealthPayload', () => {
   it('matches the contract the receiving side validates against', () => {
     expect(NodeHealthPayloadSchema.safeParse(payload).success).toBe(true);
   });
+
+  /** @implements SPEC-SERVICE-INSTALL-CANDIDATES */
+  it('publishes catalog-owned install candidate classifications', () => {
+    const result = buildHealthPayload({ now: 2_000, snapshot, coverage, cache, links: [],
+      nodeInfo: nodeInfo('win'), operations: [],
+      serverInstallCandidates: new Map([['cernere', true], ['memoria', false]]),
+    });
+    expect(result.services.find(s => s.code === 'cernere')?.server_install_candidate).toBe(true);
+    expect(result.services.find(s => s.code === 'memoria')?.server_install_candidate).toBe(false);
+    expect(NodeHealthPayloadSchema.safeParse(result).success).toBe(true);
+  });
 });
 
 /** @implements SPEC-SERVICE-BOOTSTRAP */
