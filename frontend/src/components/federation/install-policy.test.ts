@@ -21,6 +21,12 @@ describe('install eligibility', () => {
     expect(installationBlock(row, node)).toBeNull();
     expect(installationBlock(row, { ...node, is_self: true, peer_id: null })).toBeNull();
   });
+  it('allows only the approved external repository', () => {
+    expect(installationBlock({ ...row, repository: 'VGA-GLAB/GLAB-Hub' }, node)).toBeNull();
+    for (const repository of ['VGA-GLAB/Other', 'other/GLAB-Hub', 'VGA-GLAB/GLAB-Hub/../Other']) {
+      expect(installationBlock({ ...row, repository }, node)).not.toBeNull();
+    }
+  });
   it('blocks old/offline observations and missing remote identity', () => {
     expect(installationBlock(row, { ...node, stale: true })).not.toBeNull();
     expect(installationBlock(row, { ...node, status: 'down' })).not.toBeNull();

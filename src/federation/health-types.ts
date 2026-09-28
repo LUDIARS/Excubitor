@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { BootstrapRepositorySchema } from '../bootstrap/repository.js';
 import { OperationSummarySchema, UpdateSourceSchema } from './operations/types.js';
 
 /**
@@ -33,7 +34,7 @@ export const NodeServiceHealthSchema = z.object({
   name: z.string(),
   project_code: z.string().nullable(),
   /** Optional for older peers; only canonical repository identifiers, never credentials/URLs. */
-  repository: z.string().regex(/^LUDIARS\/[A-Za-z0-9][A-Za-z0-9_-]*$/).nullable().optional(),
+  repository: BootstrapRepositorySchema.nullable().optional(),
   /** Catalog classification only; setup availability is checked by bootstrap. */
   server_install_candidate: z.boolean().optional(),
   kind: z.enum(['managed', 'observed']),

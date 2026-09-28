@@ -2,7 +2,7 @@ import { lstat, mkdir, realpath, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execCapture } from '../shared/exec.js';
 import { arsRoot } from '../shared/roots.js';
-import { BootstrapOptionsSchema } from './options.js';
+import { bootstrapCheckoutName } from './repository.js';
 
 /** @implements SPEC-SERVICE-BOOTSTRAP */
 export async function directory(path: string): Promise<string> {
@@ -15,9 +15,8 @@ export async function directory(path: string): Promise<string> {
 }
 
 export async function serviceCheckout(repository: string, clone: boolean): Promise<string> {
-  BootstrapOptionsSchema.parse({ repository });
+  const name = bootstrapCheckoutName(repository);
   const root = await directory(arsRoot());
-  const name = repository.split('/')[1]!;
   if (['excubitor', 'castra'].includes(name.toLowerCase())) throw new Error('Bootstrap cannot clone Excubitor or the workspace root');
   const target = join(root, name);
   let exists = true;

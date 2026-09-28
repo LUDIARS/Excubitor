@@ -20,7 +20,7 @@ Use scripts/service-bootstrap.mjs --url <local Ex origin> [--peer <id>] --reques
 
 ### Clone / setup / start
 
-Only LUDIARS GitHub repositories, fixed main, ordinary checkouts directly under EXCUBITOR_ARS_ROOT are supported. Excubitor self-bootstrap is refused. A destination must be writable by the existing Ex service account; root-owned workspaces require a human to precreate each service directory (as with prepare-host.sh). No sudo, chmod of the workspace, clone of Castra, OS package installation or credential provisioning is implied.
+Only LUDIARS GitHub repositories and the exact approved source VGA-GLAB/GLAB-Hub, fixed main, ordinary checkouts directly under EXCUBITOR_ARS_ROOT are supported. GLAB-Hub is checked out as GLAB; other repositories retain their repository name. Requests cannot override the destination directory. The GLAB catalog still requires explicit destination-side fragment trust (EXCUBITOR_TRUSTED_FRAGMENT_REPOS=GLAB); accepting its source does not grant catalog execution trust or imply public-service eligibility. Excubitor self-bootstrap is refused. A destination must be writable by the existing Ex service account; root-owned workspaces require a human to precreate each service directory (as with prepare-host.sh). No sudo, chmod of the workspace, clone of Castra, OS package installation or credential provisioning is implied.
 
 For AWS's root-owned /var/share/LUDIARS, the human can precreate an approved repository directory with install -d -o <Ex-user> -g <Ex-group> -m 0750 /var/share/LUDIARS/<Repository>. Do not recursively change ownership of the workspace.
 
