@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { setCoverage, type CoverageIssue, type MeshCoverageEntry, type MeshView } from '../../lib/api';
 import { fmtAgo, HEALTH_LABEL } from './format';
+import { useServiceInstall } from './useServiceInstall';
+import { installationBlock } from './install-policy';
+import { OperationTracker } from './OperationTracker';
 
 /** @implements SPEC-FEDERATION-COVERAGE */
 
@@ -20,6 +23,7 @@ export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const names = mesh.nodes.map((n) => n.node);
+  const installation = useServiceInstall(onChanged);
   const rows = useMemo(
     () => (issuesOnly ? mesh.coverage.filter((row) => row.issues.length > 0) : mesh.coverage),
     [issuesOnly, mesh.coverage],
@@ -48,6 +52,12 @@ export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: 
         <span className="muted">全 {mesh.coverage.length} 件 / 指摘 {mesh.coverage.filter((r) => r.issues.length > 0).length} 件</span>
       </div>
       {error && <div className="error-banner">担保の変更に失敗: {error}</div>}
+      {installation.error && <div className="error-banner">{installation.error}</div>}
+      {installation.tracked && <div>
+        <strong>{installation.tracked.node} へのインストール</strong>
+        <OperationTracker key={installation.tracked.id} peerId={installation.tracked.peerId}
+          operationId={installation.tracked.id} onDone={installation.onDone} />
+      </div>}
       {rows.length === 0 ? (
         <div className="empty-state">{issuesOnly ? '指摘のあるサービスはありません。' : 'サービスがありません。'}</div>
       ) : (
@@ -69,14 +79,20 @@ export function CoveragePanel({ mesh, onChanged }: { mesh: MeshView; onChanged: 
                       <div>{row.name}</div>
                       <div className="mono muted small">{row.code}</div>
                     </td>
-                    {names.map((name) => (
-                      <td key={name}>
+                    {mesh.nodes.map((node) => (
+                      <td key={node.node}>
+                        {!byNode.has(node.node) ? <button type="button" className="btn btn-sm"
+                          disabled={installation.busy || installationBlock(row, node) !== null}
+                          title={installationBlock(row, node) ?? (node.node + ' に取得・セットアップ・起動')}
+                          onClick={() => void installation.install(row, node)}>
+                          インストール
+                        </button> :
                         <CoverageCell
-                          entry={byNode.get(name)}
-                          editable={name === mesh.self}
+                          entry={byNode.get(node.node)}
+                          editable={node.node === mesh.self}
                           busy={busy === row.code}
                           onOverride={(value) => void onOverride(row.code, value)}
-                        />
+                        />}
                       </td>
                     ))}
                     <td>

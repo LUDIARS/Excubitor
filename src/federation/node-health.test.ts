@@ -62,3 +62,14 @@ describe('buildHealthPayload', () => {
     expect(NodeHealthPayloadSchema.safeParse(payload).success).toBe(true);
   });
 });
+
+/** @implements SPEC-SERVICE-BOOTSTRAP */
+it('publishes only canonical catalog repository identifiers without URLs or credentials', () => {
+  const result = buildHealthPayload({ now: 2_000, snapshot, coverage, cache, links: [],
+    nodeInfo: nodeInfo('win'), operations: [], repositories: new Map([
+      ['cernere', 'LUDIARS/Cernere'], ['memoria', 'https://secret@github.com/LUDIARS/Memoria.git'],
+    ]) });
+  expect(result.services.find(s => s.code === 'cernere')?.repository).toBe('LUDIARS/Cernere');
+  expect(result.services.find(s => s.code === 'memoria')?.repository).toBeNull();
+  expect(NodeHealthPayloadSchema.safeParse(result).success).toBe(true);
+});

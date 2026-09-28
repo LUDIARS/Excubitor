@@ -124,3 +124,24 @@ describe('coverageIssues', () => {
     })).toEqual([]);
   });
 });
+
+/** @implements SPEC-SERVICE-BOOTSTRAP */
+describe('bootstrap repository selection', () => {
+  const view = (repositories: Array<string | undefined>, stale = false) => buildMeshView({
+    now: NOW, staleAfterMs: STALE_MS,
+    self: healthPayload('self', { services: [serviceHealth('tabula', { repository: repositories[0] })] }),
+    peers: repositories.slice(1).map((repository, index) => peerState({
+      peer_id: String(index), name: String(index), payload_received_at: stale ? NOW - STALE_MS - 1 : NOW,
+      payload: healthPayload(String(index), { services: [serviceHealth('tabula', { repository })] }),
+    })),
+  }).coverage[0]!.repository;
+  it('supports older peers without guessing a repository from the service code', () => {
+    expect(view([undefined])).toBeNull();
+    expect(view([undefined, 'LUDIARS/Tabula'])).toBe('LUDIARS/Tabula');
+  });
+  it('rejects conflicting repositories and ignores stale provenance', () => {
+    expect(view(['LUDIARS/Tabula', 'LUDIARS/Other'])).toBeNull();
+    expect(view([undefined, 'LUDIARS/Tabula'], true)).toBeNull();
+    expect(view(['LUDIARS/Tabula', 'LUDIARS/Tabula'])).toBe('LUDIARS/Tabula');
+  });
+});

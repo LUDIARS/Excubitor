@@ -16,7 +16,7 @@ The existing loopback POST /api/v1/operations and authenticated peer relay POST 
 
 The import hash above is a placeholder and deliberately fails validation. Use the actual export hash. No new action is allowed for the Excubitor self target. Extra bootstrap/data fields on unrelated actions are rejected. Options persist in the existing operation meta column, including through a backend restart. Interrupted running operations fail; queued operations retain their options. Existing update/deploy behavior is unchanged.
 
-Use scripts/service-bootstrap.mjs --url <local Ex origin> [--peer <id>] --request <UTF-8 JSON file>. Check with the same command and --operation <returned id> instead of --request. The CLI does not retry POST and contains no peer credentials. HTTP 202 is not completion; the operation must become succeeded. Frontend history labels include the new actions; submission uses API/CLI rather than a new UI form.
+Use scripts/service-bootstrap.mjs --url <local Ex origin> [--peer <id>] --request <UTF-8 JSON file>. Check with the same command and --operation <returned id> instead of --request. The CLI does not retry POST and contains no peer credentials. HTTP 202 is not completion; the operation must become succeeded. Frontend history labels include the new actions. Bootstrap can also be submitted from an absent-service cell in the WebUI coverage table; data transfer remains API/CLI only.
 
 ### Clone / setup / start
 
@@ -58,3 +58,9 @@ Existing federation contracts: SPEC-FEDERATION-OPERATIONS. Implementation: src/b
 Anatomia deterministic plan on 2026-09-28 identified service-startup/http-api as existing domains. Praeforma's returned project listing contained no Excubitor match; no spec registration was created. Actio taskflow lookup returned taskflow_internal_error, so task status/link is unknown.
 
 Acceptance: unknown service can be bootstrapped through the authenticated operation path; clone validation rejects unsafe/existing mismatched paths; setup failure prevents start; start:false supports migration; export refuses existing output; import reads Taildrop and rejects checksum mismatch; state and step failures persist. Tests and actual service operations are not executed without human instruction.
+
+## WebUIからのインストール
+
+拠点×サービスの担保表で、対象拠点にcatalog登録がないセルは「インストール」を表示する。新鮮なhealth payloadのcatalog由来repositoryが一意に決まる場合だけ使用し、コードから取得元を推測しない。古いpeerとの互換性のためrepositoryは省略可能。未登録・競合・接続不能・stale・対象外リポジトリ・mesh取得元の場合は理由付きで操作不可にする。
+
+対象拠点とサービスの確認後、既存bootstrap APIにrepositoryとstart=trueを送る。受付は完了ではなく、OperationTrackerで取得・setup・起動の結果を表示する。実行中は再送不可。受付応答が失われた場合は自動再送せず拠点履歴の確認を案内する。既存checkoutを自動pull/resetしないAPI契約は維持する。

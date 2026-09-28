@@ -29,6 +29,8 @@ export const NodeServiceHealthSchema = z.object({
   code: z.string(),
   name: z.string(),
   project_code: z.string().nullable(),
+  /** Optional for older peers; only canonical repository identifiers, never credentials/URLs. */
+  repository: z.string().regex(/^LUDIARS\/[A-Za-z0-9][A-Za-z0-9_-]*$/).nullable().optional(),
   kind: z.enum(['managed', 'observed']),
   covered: z.boolean(),
   source: z.enum(['catalog', 'override']),

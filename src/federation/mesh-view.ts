@@ -66,6 +66,8 @@ export interface MeshCoverageRow {
   code: string;
   name: string;
   project_code: string | null;
+  /** Unambiguous repository reported by a fresh node; null when unknown/conflicting. */
+  repository: string | null;
   nodes: MeshCoverageEntry[];
   /** covered かつ managed の拠点。 */
   managed_by: string[];
@@ -176,6 +178,7 @@ function buildLinks(sources: readonly NodeSource[]): MeshLink[] {
 
 function buildCoverage(sources: readonly NodeSource[]): MeshCoverageRow[] {
   const rows = new Map<string, MeshCoverageRow>();
+  const repositories = new Map<string, Set<string>>();
   for (const source of sources) {
     if (!source.payload) continue;
     for (const svc of source.payload.services) {
@@ -183,6 +186,7 @@ function buildCoverage(sources: readonly NodeSource[]): MeshCoverageRow[] {
         code: svc.code,
         name: svc.name,
         project_code: svc.project_code,
+        repository: null,
         nodes: [],
         managed_by: [],
         issues: [],
@@ -196,10 +200,17 @@ function buildCoverage(sources: readonly NodeSource[]): MeshCoverageRow[] {
         checked_at: svc.health.checked_at,
         stale: source.stale,
       });
+      if (!source.stale && svc.repository) {
+        const candidates = repositories.get(svc.code) ?? new Set<string>();
+        candidates.add(svc.repository);
+        repositories.set(svc.code, candidates);
+      }
       rows.set(svc.code, row);
     }
   }
   for (const row of rows.values()) {
+    const candidates = repositories.get(row.code);
+    row.repository = candidates?.size === 1 ? [...candidates][0]! : null;
     row.managed_by = row.nodes.filter((n) => n.covered && n.kind === 'managed').map((n) => n.node);
     row.issues = coverageIssues(row);
   }

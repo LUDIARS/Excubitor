@@ -1094,9 +1094,10 @@ export interface OperationDetail extends OperationSummary {
 }
 
 /** 拠点に依頼を出す。 peerId が null なら自拠点。 */
-export function requestOperation(peerId: string | null, target: OperationTarget, action: OperationAction) {
+export function requestOperation(peerId: string | null, target: OperationTarget, action: OperationAction,
+  bootstrap?: { repository: string; start: boolean }) {
   const path = peerId ? `/api/v1/peers/${encodeURIComponent(peerId)}/operations` : '/api/v1/operations';
-  return postJSON<{ operation: OperationSummary }>(path, { target, action });
+  return postJSON<{ operation: OperationSummary }>(path, { target, action, ...(bootstrap ? { bootstrap } : {}) });
 }
 
 /** 依頼の状態と手順。 peerId が null なら自拠点。 */
@@ -1164,6 +1165,7 @@ export interface MeshCoverageEntry {
 }
 
 export interface MeshCoverageRow {
+  repository?: string | null;
   code: string;
   name: string;
   project_code: string | null;

@@ -1,3 +1,4 @@
+import { BootstrapOptionsSchema } from '../bootstrap/options.js';
 import { getLaunchProfile } from '../launch/profile.js';
 /**
  * 本拠点の health 応答 (`GET /api/v1/federation/health`) を組み立てる。
@@ -43,6 +44,7 @@ export interface HealthPayloadInput {
   nodeInfo: NodeInfo;
   operations: OperationSummary[];
   startupCodes?: ReadonlySet<string>;
+  repositories?: ReadonlyMap<string, string | undefined>;
 }
 
 /** 集めた値から health 応答を組む (pure)。 */
@@ -51,8 +53,10 @@ export function buildHealthPayload(input: HealthPayloadInput): NodeHealthPayload
   const services: NodeServiceHealth[] = input.coverage.map((entry) => {
     const row = rows.get(entry.code);
     const cached = input.cache.services.get(entry.code);
+    const repository = BootstrapOptionsSchema.safeParse({ repository: input.repositories?.get(entry.code) });
     return {
       ...entry,
+      repository: repository.success ? repository.data.repository : null,
       startup: input.startupCodes?.has(entry.code) ?? null,
       state: row?.state ?? 'unknown',
       port: row?.port ?? null,
@@ -112,6 +116,7 @@ export function localHealthPayload(
     now,
     snapshot,
     startupCodes,
+    repositories: new Map(catalog.services.map(s => [s.code, s.repo])),
     coverage,
     cache: getHealthCache(),
     links: localPeerLinks(),
