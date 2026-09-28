@@ -116,6 +116,9 @@ export function buildUpdateRouter(getCatalog: () => Catalog): Hono {
 
   app.post('/api/v1/services/:code/update', async (c) => {
     const code = c.req.param('code');
+    if (['excubitor', 'excubitor-viewer-dmz'].includes(code)) {
+      return c.json({ error: 'use_excubitor_service_target', detail: 'Federation の Excubitor サービス本体からデプロイしてください', target: { kind: 'excubitor' } }, 409);
+    }
     const svc = getCatalog().services.find((s) => s.code === code);
     if (!svc) return c.json({ error: 'not_found' }, 404);
     const body = await c.req.json().catch(() => ({}));

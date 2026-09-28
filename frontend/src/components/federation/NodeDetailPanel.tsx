@@ -39,10 +39,10 @@ export function NodeDetailPanel({ mesh, node, onChanged }: {
 
   const services = mesh.coverage
     .map((row) => ({ row, entry: row.nodes.find((n) => n.node === node.node) }))
-    .filter(({ entry }) => entry?.covered);
+    .filter(({ entry, row }) => entry?.covered && !['excubitor', 'excubitor-viewer-dmz'].includes(row.code));
 
   const onRequest = async (target: OperationTarget, action: OperationAction) => {
-    const label = `${node.node} の ${target.kind === 'excubitor' ? 'Excubitor' : target.code} を${OPERATION_LABEL[action]}`;
+    const label = `${node.node} の ${target.kind === 'excubitor' ? 'Excubitor サービス本体' : target.code} を${OPERATION_LABEL[action]}`;
     if (CONFIRM_ACTIONS.has(action) && !window.confirm(`${label}します。よろしいですか？`)) return;
     setBusy(true);
     try {
@@ -89,7 +89,7 @@ export function NodeDetailPanel({ mesh, node, onChanged }: {
       {tracked && <OperationTracker peerId={peerId} operationId={tracked} onDone={onTrackedDone} />}
 
       <div className="node-ops">
-        <span className="muted">Excubitor 自身:</span>
+        <span className="muted">Excubitor サービス本体:</span>
         {SELF_ACTIONS.map((action) => (
           <button key={action} disabled={busy || !reachable} onClick={() => void onRequest({ kind: 'excubitor' }, action)}>
             {OPERATION_LABEL[action]}
@@ -97,6 +97,8 @@ export function NodeDetailPanel({ mesh, node, onChanged }: {
         ))}
         {!reachable && <span className="muted small">つながっていないため依頼できません</span>}
       </div>
+
+      <p className="muted small">Excubitor の更新は本体の操作に統一しています。ExView のリポジトリを個別に更新する必要はありません。</p>
 
       <table className="peer-table node-services">
         <thead>

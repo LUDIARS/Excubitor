@@ -32,7 +32,7 @@ services:
   # 載せないと `Ex` が `excubitor-viewer-dmz` (:17334、 既定で停止) に解決され、
   # 走っている本体 (:17332) の版が引けない。
   - code: excubitor
-    name: Excubitor (Supervisor)
+    name: Excubitor サービス本体
     description: サービス監視・起動制御の本体。observability と control plane を提供する。
     project_code: Ex
     component: supervisor

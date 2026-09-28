@@ -27,6 +27,7 @@ function deps(overrides: Partial<SelfOperationDeps> = {}) {
     readHead: vi.fn(async () => ({ branch: 'main', hash: 'newhash' })),
     isDirty: vi.fn(async () => false),
     bootHash: vi.fn(() => 'oldhash'),
+    supervisorHash: vi.fn(async () => 'newhash'),
     requestRestart: vi.fn(async () => ({ ok: true, error: null })),
     markRestarting: vi.fn(),
     hasFrontend: vi.fn(() => true),

@@ -6,7 +6,7 @@
  *
  * 起動時 (recover):
  * - running のまま残った依頼は、 実行中に Excubitor が止まったので failed にする
- * - restarting の依頼 (自己再起動) は、 起動した版が期待どおりなら succeeded、 違えば failed
+ * - restarting の依頼 (自己再起動) は、 backend・supervisor・ExView の復旧を確認して succeeded、 失敗なら failed
  * - queued は残っていれば実行を始める
  */
 
@@ -16,6 +16,7 @@ import { createNamedLogger } from '../../shared/logger.js';
 import type { StepResult } from '../../update/steps.js';
 import { getPeer, type RemotePeer } from '../store.js';
 import type { ExecutionOutcome, OperationContext } from './context.js';
+import { recoverSelfService } from './self-recovery.js';
 import { runSelfOperation, selfRepoOf } from './self-operation.js';
 import { runServiceOperation } from './service-operation.js';
 import {
@@ -47,6 +48,7 @@ export interface OperationRunnerDeps {
   getCatalog: () => Catalog;
   now?: () => number;
   execute?: OperationExecutor;
+  recoverSelf?: typeof recoverSelfService;
   findPeer?: (id: string) => RemotePeer | null;
 }
 
@@ -117,16 +119,26 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
         appendStep(op.id, { step: 'interrupted', ok: false, detail: '実行中に Excubitor が止まった' });
         finishOperation(op.id, false, 'interrupted: 実行中に Excubitor が止まった', now());
       }
-      for (const op of listByStatus('restarting')) {
-        const expected = typeof op.meta.expected_hash === 'string' ? op.meta.expected_hash : null;
-        const ok = expected !== null && expected === bootHash;
-        const detail = ok
-          ? `再起動して ${bootHash} で起動した`
-          : `再起動後の版 ${bootHash ?? 'unknown'} が期待した ${expected ?? 'unknown'} と違う`;
-        appendStep(op.id, { step: 'restart', ok, detail });
-        finishOperation(op.id, ok, ok ? null : `restart: ${detail}`, now());
-      }
-      kick();
+      active = (async () => {
+        for (const op of listByStatus('restarting')) {
+          const expected = typeof op.meta.expected_hash === 'string' ? op.meta.expected_hash : null;
+          let error: string | null = expected && expected === bootHash
+            ? null : '再起動後の版 ' + (bootHash ?? 'unknown') + ' が期待した ' + (expected ?? 'unknown') + ' と違う';
+          if (!error && expected) {
+            try {
+              await (deps.recoverSelf ?? recoverSelfService)(op, expected, deps.getCatalog(), () => stopped);
+            } catch (failure) {
+              error = failure instanceof Error ? failure.message : String(failure);
+            }
+          }
+          const detail = error ?? 'Excubitor サービス本体を ' + expected + ' で更新しました';
+          appendStep(op.id, { step: 'restart', ok: error === null, detail });
+          finishOperation(op.id, error === null, error ? 'restart: ' + error : null, now());
+        }
+        if (!stopped) await drain();
+      })().catch((error: unknown) => {
+        logger.error({ err: error instanceof Error ? error.message : String(error) }, 'self-service recovery failed');
+      }).finally(() => { active = null; });
     },
     idle: async () => {
       while (active) await active;

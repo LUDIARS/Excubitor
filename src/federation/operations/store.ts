@@ -152,6 +152,10 @@ export function appendStep(id: string, step: OperationStep): void {
   db().run(sql`UPDATE federation_operations SET steps = ${JSON.stringify(steps)} WHERE id = ${id}`);
 }
 
+export function updateOperationMeta(id: string, meta: Record<string, unknown>): void {
+  db().run(sql`UPDATE federation_operations SET meta = ${JSON.stringify(meta)} WHERE id = ${id}`);
+}
+
 export function markRestarting(id: string, meta: Record<string, unknown>): void {
   db().run(sql`
     UPDATE federation_operations SET status = 'restarting', meta = ${JSON.stringify(meta)} WHERE id = ${id}

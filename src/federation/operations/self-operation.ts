@@ -21,6 +21,7 @@ import { getSelfVersion, readCurrentHead } from '../self-version.js';
 import { failed, failedAt, recordSteps, succeeded, type ExecutionOutcome, type OperationContext } from './context.js';
 import { fetchLatest, type FetchLatest } from './fetch-latest.js';
 import { markRestarting } from './store.js';
+import { readSupervisorVersion } from '../../local-control/supervisor-version.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
@@ -45,6 +46,7 @@ export interface SelfOperationDeps {
   readHead?: (dir: string) => Promise<{ branch: string | null; hash: string | null }>;
   isDirty?: (dir: string) => Promise<boolean | null>;
   bootHash?: () => string | null;
+  supervisorHash?: (dir: string) => Promise<string | null>;
   requestRestart?: (actor: string) => Promise<{ ok: boolean; error: string | null }>;
   markRestarting?: (id: string, meta: Record<string, unknown>) => void;
   hasFrontend?: (dir: string) => boolean;
@@ -63,7 +65,8 @@ export async function runSelfOperation(
   if (action === 'reflect') {
     const head = await readHead(self.dir);
     const boot = (deps.bootHash ?? (() => getSelfVersion()?.hash ?? null))();
-    if (head.hash && boot && head.hash === boot) {
+    const supervisorHash = deps.supervisorHash ? await deps.supervisorHash(self.dir) : (await readSupervisorVersion(self.dir))?.hash;
+    if (head.hash && boot && head.hash === boot && supervisorHash === head.hash) {
       ctx.record({ step: 'reflect', ok: true, detail: `走っている版 (${boot}) がディスクと同じため何もしない` });
       return succeeded();
     }

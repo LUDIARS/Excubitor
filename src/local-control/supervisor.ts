@@ -29,6 +29,7 @@ import {
 } from './protocol.js';
 import { LocalControlServer, type LocalControlDispatch } from './server.js';
 import { LocalControlStateStore } from './state-store.js';
+import { publishSupervisorVersion } from './supervisor-version.js';
 import { TargetOperationQueue } from './target-queue.js';
 import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
 
@@ -140,7 +141,9 @@ export class LocalControlSupervisor {
       if (shouldStop()) return;
       resumeProcessRestarts();
       openDb(this.databasePath);
-      await this.stateStore.initialize({ pid: process.pid, startedAt: this.now() });
+      const supervisorStartedAt = this.now();
+      await this.stateStore.initialize({ pid: process.pid, startedAt: supervisorStartedAt });
+      await publishSupervisorVersion(this.rootDir, { pid: process.pid, started_at: supervisorStartedAt });
       if (shouldStop()) return;
       // Reserve backend recovery as one lifecycle operation before exposing IPC
       // readiness. Any CLI start/restart arriving now queues behind recovery

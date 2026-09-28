@@ -34,6 +34,11 @@ export function validateOperationRequest(
     if (!svc && request.action !== 'bootstrap') return { ok: false, status: 404, error: 'service_not_found' };
     if (coveragePrefs.get(code) === false) return { ok: false, status: 409, error: 'service_not_covered_by_this_node' };
   }
+  if (request.target.kind === 'service'
+      && ['excubitor', 'excubitor-viewer-dmz'].includes(request.target.code)
+      && ['update', 'deploy', 'reflect'].includes(request.action)) {
+    return { ok: false, status: 409, error: 'use_excubitor_service_target', detail: { target: { kind: 'excubitor' }, action: request.action } };
+  }
   if (request.action === 'bootstrap' && source !== 'origin') return { ok: false, status: 409, error: 'bootstrap_requires_origin_access' };
   if (!source) return { ok: false, status: 500, error: 'invalid_update_source_config' };
   return { ok: true, request, source };

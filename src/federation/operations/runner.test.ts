@@ -96,7 +96,7 @@ describe('operation runner', () => {
     expect(getOperation(after.id)!.status).toBe('queued');
   });
 
-  it('settles operations on boot: restart verified by hash, interrupted runs failed, queue resumed', async () => {
+  it('settles operations on boot: restart verified by hash and service recovery, interrupted runs failed, queue resumed', async () => {
     const ok = createOperation({ ...serviceRestart, target: { kind: 'excubitor' }, action: 'deploy', now: 1 });
     markRunning(ok.id, 2);
     markRestarting(ok.id, { expected_hash: 'newhash' });
@@ -108,8 +108,16 @@ describe('operation runner', () => {
     const queued = createOperation({ ...serviceRestart, now: 7 });
 
     const execute = vi.fn<OperationExecutor>(async () => ({ kind: 'finished', ok: true, error: null }));
-    const runner = createOperationRunner({ getCatalog: () => catalog, execute, findPeer: () => null });
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>((resolve) => { finishRecovery = resolve; });
+    const recoverSelf = vi.fn(async () => recovery);
+    const runner = createOperationRunner({ getCatalog: () => catalog, execute, recoverSelf, findPeer: () => null });
     runner.recover('newhash');
+    expect(getOperation(ok.id)!.status).toBe('restarting');
+    expect(getOperation(queued.id)!.status).toBe('queued');
+    expect(execute).not.toHaveBeenCalled();
+    expect(recoverSelf).toHaveBeenCalledWith(expect.objectContaining({ id: ok.id }), 'newhash', catalog, expect.any(Function));
+    finishRecovery();
     await runner.idle();
 
     expect(getOperation(ok.id)).toMatchObject({ status: 'succeeded', last_step: 'restart' });
