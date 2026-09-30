@@ -157,7 +157,7 @@ export function normalizeDomainRoot(input: string): string {
 }
 
 /** 保存先: env override → AppData (Win) / ~/.config (他)。 いずれもリポジトリ外。 */
-function configPath(): string {
+export function configPath(): string {
   const override = process.env.EXCUBITOR_CONFIG_PATH;
   if (override && override.length > 0) return override;
   const base =

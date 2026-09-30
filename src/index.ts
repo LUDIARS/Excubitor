@@ -52,6 +52,8 @@ import { readCorpusPrefs } from './launch/corpus-prefs.js';
 import { buildLaunchRouter, readProjectView } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
+import { buildVaultRouter } from './vault/vault-router.js';
+import { sharedVault } from './vault/vault.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv } from './secrets/config-store.js';
 import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode, detectLogSafeMode, setLogSafeMode, isLogSafeMode } from './safe-mode.js';
@@ -803,6 +805,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // secret-agent (/api/v1/secrets/resolve — service code → resolved secret、 token 認証)
   app.route('/', buildSecretAgentRouter((code) => findService(code)?.infisical));
+
+  // Vault (/api/v1/vault/* — 暗号化した環境変数と「使用する環境変数」。値は返さない)
+  app.route('/', buildVaultRouter({ vault: sharedVault, getCatalogInfisical: (code) => findService(code)?.infisical }));
 
   // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)
   app.route('/', buildUpdateRouter(() => currentCatalog!));

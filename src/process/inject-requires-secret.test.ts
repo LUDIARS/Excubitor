@@ -40,6 +40,11 @@ vi.mock('./service-registry.js', () => ({
   getServiceByCode: mocks.getServiceByCode,
 }));
 
+// Vault は実ファイル (config.enc の隣) と鍵保管を読むので、ここでは空として切り離す。
+vi.mock('../vault/vault-inject.js', () => ({
+  resolveVaultEnv: async () => ({}),
+}));
+
 const { resolveInjectEnv, resolveRequiresSecretEnv } = await import('./inject.js');
 
 function service(patch: Partial<Service>): Service {

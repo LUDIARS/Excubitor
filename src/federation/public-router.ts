@@ -7,6 +7,7 @@
  *   POST /api/v1/federation/operations        依頼 (更新 / 再起動 / デプロイ / 反映 / 起動 / 停止)
  *   GET  /api/v1/federation/operations/:id    依頼の状態
  *   GET  /api/v1/federation/git/bundle        外部に出られない拠点への git bundle
+ *   POST /api/v1/federation/vault/env         本社から拠点へ Vault の値 (担保サービス分だけ)
  *
  * このルーターだけが拠点間リスナー (listener.ts、 メッシュ側アドレス) に載る。 ピア管理や
  * 設定などの管理面は載せない。 loopback の本体 (17332) にも同じルーターを載せる。
@@ -21,6 +22,8 @@ import type { FederationListenerStatus } from './listener.js';
 import { buildOperationPublicRoutes } from './operations/public-routes.js';
 import { buildBundleRoutes } from './operations/bundle-routes.js';
 import type { OperationRunner } from './operations/runner.js';
+import { buildVaultPublicRoutes } from '../vault/vault-federation.js';
+import { sharedVault } from '../vault/vault.js';
 
 /** @implements SPEC-FEDERATION-MUTUAL-AUTH */
 
@@ -46,6 +49,7 @@ export function buildFederationPublicRouter(deps: FederationPublicDeps): Hono<Fe
 
   app.route('/', buildOperationPublicRoutes({ getCatalog: deps.getCatalog, runner: deps.runner, auth }));
   app.route('/', buildBundleRoutes(deps.getCatalog, auth));
+  app.route('/', buildVaultPublicRoutes({ auth, vault: sharedVault }));
 
   return app;
 }

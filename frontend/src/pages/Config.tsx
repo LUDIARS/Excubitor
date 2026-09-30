@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { VaultCard } from '../components/VaultCard';
 import {
   fetchConfig,
   fetchCatalogServices,
@@ -251,6 +252,8 @@ export default function Config() {
 
   return (
     <div className="config">
+      <VaultCard />
+
       <section className="config-card">
         <h2>Domain root</h2>
         <p className="muted">

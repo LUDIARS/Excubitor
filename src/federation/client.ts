@@ -99,6 +99,11 @@ export function requestOperation(peer: RemotePeer, request: OperationRequest): P
   return call<unknown>(peer, 'POST', '/api/v1/federation/operations', request, 15_000);
 }
 
+/** 本社 (Vault の取得元) からサービスの Vault 値を受け取る。応答は未検証 (vault-inject.ts で検証)。 */
+export function fetchVaultEnv(peer: RemotePeer, service: string): Promise<PeerCallResult<unknown>> {
+  return call<unknown>(peer, 'POST', '/api/v1/federation/vault/env', { service }, 10_000);
+}
+
 /** ピアに出した依頼の状態 (手順つき) を取得。 */
 export function fetchOperation(peer: RemotePeer, id: string): Promise<PeerCallResult<unknown>> {
   return call<unknown>(peer, 'GET', `/api/v1/federation/operations/${encodeURIComponent(id)}`);

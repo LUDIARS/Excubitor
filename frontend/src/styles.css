@@ -1402,3 +1402,8 @@ tr.stale, td.stale, .coverage-cell.stale { opacity: 0.55; }
   .detail-backdrop { padding: 8px; }
   .env-window-grid { grid-template-columns: 1fr; }
 }
+
+/* Vault card */
+.config-card h3 { margin: 12px 0 4px; font-size: 13px; }
+.config-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.config-row input { flex: 1 1 160px; min-width: 0; }

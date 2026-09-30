@@ -18,6 +18,7 @@ import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
 import { getServiceByCode } from './service-registry.js';
 import { injectServiceRuntimeVersion } from './service-version.js';
+import { resolveVaultEnv } from '../vault/vault-inject.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -131,9 +132,10 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
 
   const cfg = resolveServiceInfisical(svc.code, svc.infisical);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
-  //           < encrypted runtime config < secret < requires_secret。
+  //           < encrypted runtime config < secret < requires_secret < Vault。
   if (!cfg || !cfg.inject) {
     const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
+    const vaultEnv = await resolveVaultEnv(svc.code);
     return (await injectServiceRuntimeVersion(
       svc,
       {
@@ -144,6 +146,7 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
         ...staticEnv,
         ...runtimeConfigEnv,
         ...requiresSecretEnv,
+        ...vaultEnv,
       },
     )).env;
   }
@@ -167,8 +170,9 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     'resolved inject env (topology + infisical)',
   );
   const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
+  const vaultEnv = await resolveVaultEnv(svc.code);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
-  //           < encrypted runtime config < secret < requires_secret。
+  //           < encrypted runtime config < secret < requires_secret < Vault (Infisical の置き換え)。
   return (await injectServiceRuntimeVersion(
     svc,
     {
@@ -180,6 +184,7 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
       ...runtimeConfigEnv,
       ...env,
       ...requiresSecretEnv,
+      ...vaultEnv,
     },
   )).env;
 }
