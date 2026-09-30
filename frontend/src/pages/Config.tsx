@@ -65,6 +65,7 @@ export default function Config() {
   const [discordEnabled, setDiscordEnabled] = useState(false);
   const [discordThreshold, setDiscordThreshold] = useState(60);
   const [discordRecovery, setDiscordRecovery] = useState(true);
+  const [discordPeerAlerts, setDiscordPeerAlerts] = useState(false);
   const [discordTest, setDiscordTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [packageAuditDiscord, setPackageAuditDiscord] = useState<PackageAuditDiscordStatus | null>(null);
   const [packageAuditWebhook, setPackageAuditWebhook] = useState('');
@@ -96,6 +97,7 @@ export default function Config() {
     setDiscordEnabled(notification.discord.enabled);
     setDiscordThreshold(notification.discord.downtime_threshold_sec);
     setDiscordRecovery(notification.discord.notify_recovery);
+    setDiscordPeerAlerts(notification.discord.peer_alerts);
     setPackageAuditDiscord(notification.package_audit_discord);
     setPackageAuditEnabled(notification.package_audit_discord.enabled);
   };
@@ -181,6 +183,7 @@ export default function Config() {
         enabled: discordEnabled,
         downtime_threshold_sec: discordThreshold,
         notify_recovery: discordRecovery,
+        peer_alerts: discordPeerAlerts,
       });
       setDiscordWebhook('');
       await load();
@@ -389,6 +392,13 @@ export default function Config() {
               checked={discordRecovery}
               onChange={(event) => setDiscordRecovery(event.target.checked)}
             /> Notify when the service recovers
+          </label>
+          <label title="相互登録で全拠点が互いを巡回するので、本社 1 拠点だけで有効にする">
+            <input
+              type="checkbox"
+              checked={discordPeerAlerts}
+              onChange={(event) => setDiscordPeerAlerts(event.target.checked)}
+            /> 本社として拠点の応答なし・資源アラート (ストレージ / メモリ / CPU) を通知する
           </label>
           <div className="config-actions">
             <button className="primary" disabled={busy !== null} onClick={() => void submitDiscord()}>

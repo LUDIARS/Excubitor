@@ -17,8 +17,9 @@ const logger = createNamedLogger('excubitor.federation.alerts');
 const store = createAlertStateStore();
 
 export async function dispatchFederationAlerts(settings: FederationSettings, now = Date.now()): Promise<void> {
-  if (!settings.alertNotify) return;
   const config = getDiscordNotificationConfig();
+  // 拠点ごとの暗号化 config (Config 画面) が正本。env は config を触れない拠点向けの上書き。
+  if (!settings.alertNotify && !config?.peerAlerts) return;
   if (!config?.enabled) {
     logger.debug('federation alert notify is on but Discord notifications are not configured');
     return;

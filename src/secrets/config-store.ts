@@ -70,6 +70,8 @@ export interface DiscordNotificationConfig {
   enabled: boolean;
   downtimeThresholdSec: number;
   notifyRecovery: boolean;
+  /** 本社として、ピアの応答なし・資源アラートもこの webhook へ流す (拠点ごとの設定)。 */
+  peerAlerts: boolean;
 }
 
 export interface DiscordNotificationStatus {
@@ -78,6 +80,7 @@ export interface DiscordNotificationStatus {
   source: 'env' | 'config' | 'unset';
   downtime_threshold_sec: number;
   notify_recovery: boolean;
+  peer_alerts: boolean;
   storePath: string;
 }
 
@@ -86,6 +89,7 @@ export interface DiscordNotificationInput {
   enabled: boolean;
   downtimeThresholdSec?: number;
   notifyRecovery?: boolean;
+  peerAlerts?: boolean;
   clearWebhook?: boolean;
 }
 
@@ -393,6 +397,7 @@ export function getDiscordNotificationConfig(): DiscordNotificationConfig | null
     enabled: stored?.enabled ?? true,
     downtimeThresholdSec: normalizeDowntimeThreshold(stored?.downtimeThresholdSec),
     notifyRecovery: stored?.notifyRecovery ?? true,
+    peerAlerts: stored?.peerAlerts ?? false,
   };
 }
 
@@ -405,6 +410,7 @@ export function getDiscordNotificationStatus(): DiscordNotificationStatus {
     source: envUrl ? 'env' : config ? 'config' : 'unset',
     downtime_threshold_sec: config?.downtimeThresholdSec ?? 60,
     notify_recovery: config?.notifyRecovery ?? true,
+    peer_alerts: config?.peerAlerts ?? false,
     storePath: configPath(),
   };
 }
@@ -425,6 +431,7 @@ export function saveDiscordNotificationConfig(input: DiscordNotificationInput): 
     enabled: input.enabled,
     downtimeThresholdSec: normalizeDowntimeThreshold(input.downtimeThresholdSec),
     notifyRecovery: input.notifyRecovery ?? true,
+    peerAlerts: input.peerAlerts ?? current?.peerAlerts ?? false,
   };
   cfg.settings = {
     ...(cfg.settings ?? {}),

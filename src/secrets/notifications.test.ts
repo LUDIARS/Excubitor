@@ -59,6 +59,23 @@ describe('Discord notification config API', () => {
     });
   });
 
+  it('keeps the per-node peer alert switch across saves that omit it', async () => {
+    const app = buildConfigRouter();
+    const save = (body: Record<string, unknown>) => app.request('/api/v1/config/notifications/discord', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, downtime_threshold_sec: 60, notify_recovery: true, ...body }),
+    });
+    expect((await save({ webhook_url: webhookUrl('123', 'secret-token'), peer_alerts: true })).status).toBe(200);
+    expect((await save({})).status).toBe(200);
+    const status = await app.request('/api/v1/config/notifications');
+    expect(await status.json()).toMatchObject({ discord: { peer_alerts: true } });
+
+    expect((await save({ peer_alerts: false })).status).toBe(200);
+    const off = await app.request('/api/v1/config/notifications');
+    expect(await off.json()).toMatchObject({ discord: { peer_alerts: false } });
+  });
+
   it('tests the saved webhook without exposing it', async () => {
     const app = buildConfigRouter();
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));

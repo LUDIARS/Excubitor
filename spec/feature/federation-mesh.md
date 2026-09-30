@@ -160,7 +160,8 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
      平均が `memory_critical_pct` (97) 以上なら critical。macOS は `vm_stat` の free + inactive + speculative を空きとみなす
      (`os.freemem()` はキャッシュを空きに数えず、平常時でも 90% 超に見えるため)。
    - CPU: host の CPU 系列に `memory_monitor.cpu_alert` と同じ継続判定 (瞬間スパイクでは鳴らさない)。
-2. **本社での通知** — `EXCUBITOR_FEDERATION_ALERT_NOTIFY=1` の拠点だけが、巡回 1 周ごとに `federation/alert-dispatch.ts` で
+2. **本社での通知** — Config 画面の Discord 設定で「本社として拠点の応答なし・資源アラートを通知する」を有効にした拠点
+   (拠点ごとの暗号化 config `notifications.discord.peerAlerts`。env `EXCUBITOR_FEDERATION_ALERT_NOTIFY=1` でも可) だけが、巡回 1 周ごとに `federation/alert-dispatch.ts` で
    downtime 通知と同じ Discord webhook へ流す。自拠点の資源アラートも含む。
    - 応答なし: ピアの状態が up 以外 (down / unauthorized / unregistered) のまま `peer_down_after_sec` 続いたら 1 回、
      応答が戻ったら再開を 1 回。猶予内の瞬断は通知しない。
@@ -214,7 +215,8 @@ WebUI: Federation タブに「拠点メッシュ」(拠点状態とつながり�
 | 〃 | `federation.stale_after_sec` | 180 | stale 判定 |
 | 〃 | `federation.peer_down_after_sec` | 300 | この秒数応答が続かなければ「拠点が応答しません」を通知 |
 | 〃 | `memory_monitor.resource_alert.*` | 下記 | 自拠点の資源アラートの閾値 |
-| env (拠点ごと) | `EXCUBITOR_FEDERATION_ALERT_NOTIFY` | 未設定 = 通知しない | 本社だけ `1`。ピアの応答なし・資源アラートを Discord へ流す |
+| config.enc (拠点ごと) | `notifications.discord.peerAlerts` | false | 本社だけ有効。ピアの応答なし・資源アラートを Discord へ流す (Config 画面) |
+| env (拠点ごと) | `EXCUBITOR_FEDERATION_ALERT_NOTIFY` | 未設定 | `1` で上記を config に関わらず有効化 |
 | DB (拠点ごと) | `remote_peers` | — | ピアの base_url / token (暗号化) |
 | DB (拠点ごと) | `federation_coverage_prefs` | — | 担保の上書き |
 | DB (拠点ごと) | `federation_operations` | — | 受けた依頼の履歴と状態 |

@@ -11,6 +11,7 @@ const CONFIG: DiscordNotificationConfig = {
   enabled: true,
   downtimeThresholdSec: 60,
   notifyRecovery: true,
+  peerAlerts: false,
 };
 
 const DOWN: HealthObservation = {

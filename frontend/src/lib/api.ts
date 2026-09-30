@@ -342,6 +342,7 @@ export interface DiscordNotificationStatus {
   source: 'env' | 'config' | 'unset';
   downtime_threshold_sec: number;
   notify_recovery: boolean;
+  peer_alerts: boolean;
   storePath: string;
 }
 
@@ -711,6 +712,7 @@ export function saveDiscordNotificationConfig(input: {
   enabled: boolean;
   downtime_threshold_sec: number;
   notify_recovery: boolean;
+  peer_alerts: boolean;
 }) {
   return putJSON<{ ok: boolean; discord: DiscordNotificationStatus }>(
     '/api/v1/config/notifications/discord',

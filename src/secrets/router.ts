@@ -70,6 +70,7 @@ const NotificationSchema = z.object({
   enabled: z.boolean(),
   downtime_threshold_sec: z.number().int().min(60).max(86_400).default(60),
   notify_recovery: z.boolean().default(true),
+  peer_alerts: z.boolean().optional(),
   clear_webhook: z.boolean().optional(),
 });
 
@@ -151,6 +152,7 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
         enabled: parsed.data.enabled,
         downtimeThresholdSec: parsed.data.downtime_threshold_sec,
         notifyRecovery: parsed.data.notify_recovery,
+        peerAlerts: parsed.data.peer_alerts,
         clearWebhook: parsed.data.clear_webhook,
       });
       return c.json({ ok: true, discord });
