@@ -12,6 +12,7 @@ import type { Catalog } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { mapWithLimit } from '../shared/map-limit.js';
 import { startPeriodicTask, type PeriodicTaskHandle } from '../shared/periodic.js';
+import { dispatchFederationAlerts } from './alert-dispatch.js';
 import { prunePeerStates } from './peer-cache.js';
 import { probePeer, type PeerProbeDeps } from './peer-probe.js';
 import { federationSettings } from './settings.js';
@@ -44,7 +45,11 @@ export interface PeerPollerOptions {
 
 export function startPeerPoller(options: PeerPollerOptions, deps: PeerPollerDeps = {}): PeriodicTaskHandle {
   return startPeriodicTask({
-    run: () => pollPeersOnce(federationSettings(options.getCatalog()).peerTimeoutMs, deps),
+    run: async () => {
+      const settings = federationSettings(options.getCatalog());
+      await pollPeersOnce(settings.peerTimeoutMs, deps);
+      await dispatchFederationAlerts(settings);
+    },
     intervalMs: () => federationSettings(options.getCatalog()).peerPollMs,
     onError: (err) => logger.warn({ err: (err as Error).message }, 'peer poll pass failed'),
   });

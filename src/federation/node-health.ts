@@ -21,12 +21,14 @@ import {
   FEDERATION_HEALTH_SCHEMA,
   type NodeHealthPayload,
   type NodeInfo,
+  type NodeResourceAlert,
   type NodePeerLink,
   type NodeServiceHealth,
   type ServiceHealthState,
 } from './health-types.js';
 import type { FederationListenerStatus } from './listener.js';
 import { localNodeInfo } from './node-info.js';
+import { currentResourceAlerts } from '../memory/resource-alerts.js';
 import { listRecentOperations, toSummary } from './operations/store.js';
 import type { OperationSummary } from './operations/types.js';
 import { resolveUpdateSource } from './operations/update-source.js';
@@ -47,6 +49,7 @@ export interface HealthPayloadInput {
   links: NodePeerLink[];
   nodeInfo: NodeInfo;
   operations: OperationSummary[];
+  alerts?: NodeResourceAlert[];
   startupCodes?: ReadonlySet<string>;
   repositories?: ReadonlyMap<string, string | undefined>;
   serverInstallCandidates?: ReadonlyMap<string, boolean>;
@@ -92,6 +95,7 @@ export function buildHealthPayload(input: HealthPayloadInput): NodeHealthPayload
     links: input.links,
     node_info: input.nodeInfo,
     operations: input.operations,
+    alerts: input.alerts ?? [],
   };
 }
 
@@ -135,5 +139,6 @@ export function localHealthPayload(
       updateSource: resolveUpdateSource(),
     }),
     operations: listRecentOperations(RECENT_OPERATIONS_IN_HEALTH).map(toSummary),
+    alerts: currentResourceAlerts().alerts,
   });
 }

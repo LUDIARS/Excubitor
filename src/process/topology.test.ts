@@ -29,11 +29,15 @@ function cat(services: Service[]): Catalog {
       default_service_cpu_budget_pct: 80,
       wsl: { enabled: true, distros: [], leak_window_min: 120, leak_threshold_mb_per_hr: 200 },
       cpu_alert: { enabled: true, threshold_pct: 85, window_min: 15, sustained_ratio: 0.8, min_samples: 8 },
+      resource_alert: {
+        enabled: true, disk_paths: [], disk_free_warn_pct: 10, disk_free_critical_pct: 5,
+        memory_warn_pct: 90, memory_critical_pct: 97, memory_window_min: 10,
+      },
     },
     retention: { enabled: true, logs_hours: 72, liveness_hours: 168, parquet_days: 90, interval_min: 60, batch_rows: 50_000 },
     log_store: { ring_lines_per_service: 2_000, ring_lines_global: 20_000, compact_hour_utc: 18 },
     monitor: { health_interval_sec: 60, inventory_interval_sec: 300, probe_concurrency: 8, liveness_heartbeat_sec: 300 },
-    federation: { peer_poll_sec: 60, peer_timeout_ms: 5_000, stale_after_sec: 180 },
+    federation: { peer_poll_sec: 60, peer_timeout_ms: 5_000, stale_after_sec: 180, peer_down_after_sec: 300 },
   };
 }
 

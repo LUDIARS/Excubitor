@@ -113,6 +113,18 @@ export const NodeInfoSchema = z.object({
 });
 export type NodeInfo = z.infer<typeof NodeInfoSchema>;
 
+/** 拠点のマシン資源アラート (memory/resource-alerts.ts)。 本社が巡回で受け取って通知する。 */
+export const NodeResourceAlertSchema = z.object({
+  key: z.string().min(1).max(512),
+  kind: z.enum(['disk', 'memory', 'cpu']),
+  level: z.enum(['warn', 'critical']),
+  message: z.string().max(1000),
+  value_pct: z.number(),
+  threshold_pct: z.number(),
+  since: z.number(),
+});
+export type NodeResourceAlert = z.infer<typeof NodeResourceAlertSchema>;
+
 export const NodeHealthPayloadSchema = z.object({
   schema: z.literal(FEDERATION_HEALTH_SCHEMA),
   node: z.string().min(1),
@@ -130,5 +142,7 @@ export const NodeHealthPayloadSchema = z.object({
   node_info: NodeInfoSchema,
   /** この拠点が受けた依頼の直近分 (新しい順)。 */
   operations: z.array(OperationSummarySchema),
+  /** 資源アラート (判定中のもの)。 旧版の拠点は送らないので optional (schema 版は据え置き)。 */
+  alerts: z.array(NodeResourceAlertSchema).max(64).optional(),
 });
 export type NodeHealthPayload = z.infer<typeof NodeHealthPayloadSchema>;

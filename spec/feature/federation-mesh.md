@@ -148,6 +148,26 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
 - 依存 install は `--prefer-offline` で npm のキャッシュを優先する。npm registry に届かず必要なパッケージが
   キャッシュに無ければ、install の失敗として依頼の手順に出る (成功扱いにはしない)。
 
+## 資源アラートと応答なしの通知 (本社)
+
+各拠点は外へ出られない前提なので、拠点から本社へは送らない。本社が既に回しているピア巡回の結果だけで通知する。
+
+1. **拠点での判定** — メモリ監視ループの 1 周ごとに `memory/resource-alerts.ts` が自拠点のストレージ・メモリ・CPU を判定し、
+   メモリに公開する。health 応答の `alerts` (optional、schema 版は 2 のまま) はその公開値を読むだけ。
+   - ストレージ: `disk_paths` (空なら Ars root と Excubitor checkout) の空きが `disk_free_warn_pct` (10) 未満で warn、
+     `disk_free_critical_pct` (5) 未満で critical。
+   - メモリ: 使用率が `memory_window_min` (10 分) の窓で `memory_warn_pct` (90) 以上を継続したら warn、
+     平均が `memory_critical_pct` (97) 以上なら critical。macOS は `vm_stat` の free + inactive + speculative を空きとみなす
+     (`os.freemem()` はキャッシュを空きに数えず、平常時でも 90% 超に見えるため)。
+   - CPU: host の CPU 系列に `memory_monitor.cpu_alert` と同じ継続判定 (瞬間スパイクでは鳴らさない)。
+2. **本社での通知** — `EXCUBITOR_FEDERATION_ALERT_NOTIFY=1` の拠点だけが、巡回 1 周ごとに `federation/alert-dispatch.ts` で
+   downtime 通知と同じ Discord webhook へ流す。自拠点の資源アラートも含む。
+   - 応答なし: ピアの状態が up 以外 (down / unauthorized / unregistered) のまま `peer_down_after_sec` 続いたら 1 回、
+     応答が戻ったら再開を 1 回。猶予内の瞬断は通知しない。
+   - 資源アラート: 新規と warn→critical の格上げを 1 回、消えたら解消を 1 回。応答なしの間は解消扱いにしない。
+   - 送信に失敗した通知は状態を進めず、次の巡回で再送する。状態はメモリだけに持つので、本社の再起動後は
+     続いている資源アラートを 1 回ずつ通知し直す。
+
 ## API
 
 公開面 (他拠点向け、相互登録の署名が必須。拠点間リスナーと本体の両方に載る):
@@ -192,6 +212,9 @@ WebUI: Federation タブに「拠点メッシュ」(拠点状態とつながり�
 | `excubitor.config.yaml` | `federation.peer_poll_sec` | 60 | ピア巡回周期 |
 | 〃 | `federation.peer_timeout_ms` | 5000 | 1 ピアのタイムアウト |
 | 〃 | `federation.stale_after_sec` | 180 | stale 判定 |
+| 〃 | `federation.peer_down_after_sec` | 300 | この秒数応答が続かなければ「拠点が応答しません」を通知 |
+| 〃 | `memory_monitor.resource_alert.*` | 下記 | 自拠点の資源アラートの閾値 |
+| env (拠点ごと) | `EXCUBITOR_FEDERATION_ALERT_NOTIFY` | 未設定 = 通知しない | 本社だけ `1`。ピアの応答なし・資源アラートを Discord へ流す |
 | DB (拠点ごと) | `remote_peers` | — | ピアの base_url / token (暗号化) |
 | DB (拠点ごと) | `federation_coverage_prefs` | — | 担保の上書き |
 | DB (拠点ごと) | `federation_operations` | — | 受けた依頼の履歴と状態 |

@@ -6,6 +6,7 @@
 import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
 import { collectMemoryOnce } from './collector.js';
+import { evaluateLocalResourceAlerts } from './resource-alerts.js';
 
 const logger = createNamedLogger('excubitor.memory.loop');
 
@@ -30,6 +31,11 @@ export function startMemoryLoop(getCatalog: () => Catalog): MemoryLoopHandle {
         await collectMemoryOnce(catalog);
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'memory collect failed');
+      }
+      try {
+        await evaluateLocalResourceAlerts(catalog);
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'resource alert evaluation failed');
       }
     }
     if (!stopped) schedule(catalog);

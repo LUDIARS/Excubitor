@@ -297,8 +297,24 @@ const CpuAlertSchema = z.object({
   min_samples: z.number().positive().default(8),
 });
 
+/**
+ * 拠点のマシン資源アラート (ストレージ / メモリ / CPU)。 判定は各拠点、 通知は federation.alert_notify
+ * を有効にした拠点 (本社) がピア巡回で受け取って行う。 CPU の窓・継続割合は cpu_alert を使う。
+ */
+const ResourceAlertSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** 空き容量を見るパス。 空なら Ars root と Excubitor の checkout。 */
+  disk_paths: z.array(z.string()).default([]),
+  disk_free_warn_pct: z.number().positive().max(100).default(10),
+  disk_free_critical_pct: z.number().positive().max(100).default(5),
+  memory_warn_pct: z.number().positive().max(100).default(90),
+  memory_critical_pct: z.number().positive().max(100).default(97),
+  memory_window_min: z.number().positive().default(10),
+});
+
 /** メモリ監視のグローバル設定 (catalog top-level、 省略時は既定値)。 */
 const MemoryGlobalSchema = z.object({
+  resource_alert: ResourceAlertSchema.default({}),
   enabled: z.boolean().default(true),
   interval_sec: z.number().positive().default(60),
   retention_hours: z.number().positive().default(48),
@@ -369,6 +385,11 @@ const FederationSchema = z.object({
   peer_timeout_ms: z.number().int().positive().default(5_000),
   /** この秒数より古いピアの値は stale として表示する。 */
   stale_after_sec: z.number().int().positive().default(180),
+  /**
+   * ピアがこの秒数続けて応答しなければ「応答なし」を通知する。 通知するかどうかは拠点ごとの
+   * env `EXCUBITOR_FEDERATION_ALERT_NOTIFY` (本社だけ 1)。 config は全拠点で共有されるので置かない。
+   */
+  peer_down_after_sec: z.number().int().positive().default(300),
 });
 
 const CatalogSchema = z.object({
