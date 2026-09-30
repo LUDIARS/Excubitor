@@ -102,6 +102,26 @@ powershell -ExecutionPolicy Bypass -File scripts/uninstall-service.ps1 -RestoreL
 通常の `scripts/uninstall-service.ps1` は per-user task だけを削除し、Windows Service / NSSM の
 登録や状態を黙示的に変更しない。
 
+macOS の `scripts/install-service.sh` は既定でログイン時に起動する per-user LaunchAgent を作る。
+ログインなしで PC 起動時から supervisor を動かす (サービスの自動復旧を再起動直後から効かせる) 場合は
+`--boot` を付けて sudo で実行する。`/Library/LaunchDaemons/com.ludiars.<name>.plist` に `UserName`
+付きの LaunchDaemon を登録し、supervisor は指定アカウント (既定は sudo した本人) で動く。
+
+```bash
+sudo scripts/install-service.sh --boot            # sudo した本人で起動時常駐
+sudo scripts/install-service.sh --boot --user neko
+```
+
+- build と Node の解決は対象アカウントのログインシェル (`sudo -u <user> -i`) で行い、
+  その PATH / HOME / LANG を plist の環境に写す。daemon はログインシェルの環境を持たないため。
+- 同じ label の LaunchAgent は bootout し、plist を `.plist.disabled` に退避する (supervisor の二重起動防止)。
+- `system` domain の kickstart は root が要るため、自己更新の supervisor 再起動は検証済み pid への
+  SIGTERM + `KeepAlive` による再起動で行う。CLI の起動要求は job が load 済みかだけを確かめ、
+  再起動は launchd に任せて readiness を待つ。
+- FileVault が有効な Mac は起動時のロック解除までは何も動かない。
+- 外すとき: `sudo launchctl bootout system/com.ludiars.excubitor && sudo rm /Library/LaunchDaemons/com.ludiars.excubitor.plist`。
+  LaunchAgent に戻すならその後 `.plist.disabled` を戻すか、`--boot` なしで再実行する。
+
 `start-excubitor.bat` は backend と WebUI の依存導入・build 後に
 `npm run ctl -- excubitor start --json` を実行する。
 mutating CLI は IPC が無い場合、導入済みの OS service manager に supervisor の起動を要求して

@@ -32,6 +32,7 @@ describe('activateInstalledSupervisor', () => {
       platform: 'darwin',
       env: {},
       getUid: () => 501,
+      exists: () => false,
       runCommand,
     });
 
@@ -39,6 +40,35 @@ describe('activateInstalledSupervisor', () => {
       'launchctl',
       ['kickstart', '-k', 'gui/501/com.ludiars.excubitor'],
     );
+  });
+
+  it('leaves the boot-time LaunchDaemon to launchd KeepAlive instead of a root-only kickstart', async () => {
+    const runCommand = vi.fn<SupervisorCommandRunner>(async () => undefined);
+
+    await activateInstalledSupervisor({
+      platform: 'darwin',
+      env: {},
+      getUid: () => 501,
+      exists: (path) => path === '/Library/LaunchDaemons/com.ludiars.excubitor.plist',
+      runCommand,
+    });
+
+    expect(runCommand).toHaveBeenCalledWith('launchctl', ['print', 'system/com.ludiars.excubitor']);
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('points to the boot installer when the LaunchDaemon plist exists but is not loaded', async () => {
+    const runCommand = vi.fn<SupervisorCommandRunner>(async () => {
+      throw new Error('Could not find service');
+    });
+
+    await expect(activateInstalledSupervisor({
+      platform: 'darwin',
+      env: {},
+      getUid: () => 501,
+      exists: () => true,
+      runCommand,
+    })).rejects.toThrow(/not loaded.*install-service\.sh --boot/);
   });
 
   it('uses an explicitly configured service name', async () => {

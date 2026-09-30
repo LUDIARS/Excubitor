@@ -1,7 +1,13 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { userInfo } from 'node:os';
+import {
+  parseLaunchctlPid,
+  plistPreservesProcessGroup,
+  plistUserName,
+  resolveLaunchdJob,
+  type LaunchdJob,
+} from './launchd-job.js';
 import type { SupervisorGeneration } from './supervisor-version.js';
 
 /** @implements SPEC-EX-UNIFIED-UPDATE */
@@ -31,14 +37,10 @@ export async function planSupervisorRestart(generation: SupervisorGeneration): P
   if (process.platform === 'darwin') {
     const uid = process.getuid?.();
     if (uid === undefined) throw new Error('launchd user identity unavailable');
-    const label = 'com.ludiars.' + name;
-    const plist = await readFile(join(homedir(), 'Library', 'LaunchAgents', label + '.plist'), 'utf8');
-    if (!/<key>AbandonProcessGroup<\/key>\s*<true\s*\/>/.test(plist)) throw new Error('launchd must preserve managed processes (AbandonProcessGroup)');
-    const job = 'gui/' + uid + '/' + label;
-    const detail = await run('launchctl', ['print', job]);
-    const pid = /^\s*pid = (\d+)\s*$/m.exec(detail)?.[1];
-    if (Number(pid) !== generation.pid) throw new Error('launchd supervisor identity mismatch');
-    return { commands: [{ command: 'launchctl', args: ['kickstart', '-k', job] }] };
+    const job = resolveLaunchdJob(name, { uid });
+    const plist = await readFile(job.plistPath, 'utf8');
+    const detail = await run('launchctl', ['print', job.target]);
+    return planLaunchdRestart(job, plist, detail, generation.pid, userInfo().username);
   }
   if (process.platform === 'win32') {
     // The installed per-user task owns only the supervisor; the backend and services use WMI breakaway.
@@ -50,6 +52,29 @@ export async function planSupervisorRestart(generation: SupervisorGeneration): P
     ] };
   }
   throw new Error('OS supervisor restart is unsupported on ' + process.platform);
+}
+
+/**
+ * A LaunchAgent is restarted by launchd itself. A boot-time LaunchDaemon lives in the
+ * `system` domain, where kickstart needs root; it runs as this account with KeepAlive,
+ * so SIGTERM to the verified supervisor pid makes launchd start a fresh one
+ * (the same signal `kickstart -k` would send).
+ */
+export function planLaunchdRestart(
+  job: LaunchdJob,
+  plist: string,
+  launchctlPrint: string,
+  supervisorPid: number,
+  currentUser: string,
+): SupervisorRestartPlan {
+  if (!plistPreservesProcessGroup(plist)) throw new Error('launchd must preserve managed processes (AbandonProcessGroup)');
+  if (parseLaunchctlPid(launchctlPrint) !== supervisorPid) throw new Error('launchd supervisor identity mismatch');
+  if (job.kind === 'agent') {
+    return { commands: [{ command: 'launchctl', args: ['kickstart', '-k', job.target] }] };
+  }
+  if (!/<key>KeepAlive<\/key>\s*<true\s*\/>/.test(plist)) throw new Error('launchd daemon must declare KeepAlive to be restarted without root');
+  if (plistUserName(plist) !== currentUser) throw new Error('launchd daemon must run as the current user (UserName)');
+  return { commands: [{ command: 'kill', args: ['-TERM', String(supervisorPid)] }] };
 }
 
 export async function restartInstalledSupervisor(plan: SupervisorRestartPlan): Promise<void> {

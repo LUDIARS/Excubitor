@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { resolveLaunchdJob, type LaunchdJob } from './launchd-job.js';
 
 export type SupervisorCommandRunner = (command: string, args: readonly string[]) => Promise<void>;
 
@@ -6,6 +7,9 @@ export interface SupervisorServiceActivationOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   getUid?: () => number;
+  /** File probe used to detect the boot-time LaunchDaemon (tests inject it). */
+  exists?: (path: string) => boolean;
+  homeDir?: string;
   runCommand?: SupervisorCommandRunner;
 }
 
@@ -36,12 +40,12 @@ export async function activateInstalledSupervisor(
   }
   if (platform === 'darwin') {
     const name = serviceName(env, POSIX_SERVICE_NAME);
-    const label = `com.ludiars.${name}`;
     const uid = (options.getUid ?? process.getuid)?.();
     if (uid === undefined) {
       throw new Error('launchd activation requires the current user id');
     }
-    await activateLaunchdSupervisor(label, uid, runCommand);
+    const job = resolveLaunchdJob(name, { uid, exists: options.exists, homeDir: options.homeDir });
+    await activateLaunchdSupervisor(job, runCommand);
     return;
   }
 
@@ -92,12 +96,23 @@ async function activateWindowsSupervisor(
 }
 
 async function activateLaunchdSupervisor(
-  label: string,
-  uid: number,
+  job: LaunchdJob,
   runCommand: SupervisorCommandRunner,
 ): Promise<void> {
+  const { label } = job;
+  if (job.kind === 'daemon') {
+    // kickstart in the system domain needs root. The boot-time daemon has KeepAlive,
+    // so a loaded job is relaunched by launchd; the caller waits for IPC readiness.
+    await runOrThrow(
+      runCommand,
+      'launchctl',
+      ['print', job.target],
+      `launchd daemon '${label}' is not loaded; run 'sudo scripts/install-service.sh --boot' to reinstall it`,
+    );
+    return;
+  }
   try {
-    await runCommand('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`]);
+    await runCommand('launchctl', ['kickstart', '-k', job.target]);
   } catch (kickstartError) {
     try {
       // `start` supports LaunchAgents installed by the legacy `launchctl load`

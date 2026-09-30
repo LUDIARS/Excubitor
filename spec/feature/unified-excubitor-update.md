@@ -10,7 +10,7 @@ Self deploy fetches, installs backend/frontend dependencies, builds both and ask
 
 - Linux: registered systemd user service, MainPID must match the recorded supervisor and KillMode must be process. The synchronous systemctl restart command is launched by the preserved backend, not by the supervisor it stops.
 - Windows: the installed per-user scheduled task is queried, ended and run. Backend and managed services survive via existing WMI breakaway ownership. Legacy Windows Service/NSSM is not supported or used as fallback.
-- macOS: the installed user LaunchAgent must declare AbandonProcessGroup=true and launchctl's PID must match the recorded supervisor. kickstart -k replaces only that supervisor job.
+- macOS: the installed user LaunchAgent must declare AbandonProcessGroup=true and launchctl's PID must match the recorded supervisor. kickstart -k replaces only that supervisor job. A boot-time LaunchDaemon (`install-service.sh --boot`, `/Library/LaunchDaemons`) must additionally declare KeepAlive=true and UserName equal to the current account; because kickstart in the `system` domain needs root, the restart is SIGTERM to the verified supervisor pid and launchd KeepAlive starts the replacement.
 
 No direct duplicate supervisor process is spawned. Service names are validated. OS commands have a 60-second timeout, bounded output and hidden windows. A missing/unsafe installation fails the operation explicitly; the installer and unrelated services are not altered automatically.
 
