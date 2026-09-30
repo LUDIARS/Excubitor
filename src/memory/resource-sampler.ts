@@ -34,7 +34,7 @@ export async function memoryUsedPct(platform: NodeJS.Platform = process.platform
 
 async function darwinAvailableBytes(): Promise<number | null> {
   const output = await new Promise<string | null>((resolve) => {
-    execFile('vm_stat', [], { timeout: 5_000, encoding: 'utf8' }, (error, stdout) => resolve(error ? null : stdout));
+    execFile('vm_stat', [], { timeout: 5_000, encoding: 'utf8', windowsHide: true }, (error, stdout) => resolve(error ? null : stdout));
   });
   return output === null ? null : parseVmStatAvailableBytes(output);
 }

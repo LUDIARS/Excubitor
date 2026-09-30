@@ -122,6 +122,7 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
     const proc = spawn(autoFixConfig.claudeCli, ['-p'], {
       cwd,
       shell: true,
+      windowsHide: true,
       env: {
         ...process.env,
         CLAUDE_CODE_GIT_BASH_PATH: autoFixConfig.claudeBashPath,

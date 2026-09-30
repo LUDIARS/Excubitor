@@ -147,6 +147,7 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
     const proc = spawn(autoFixConfig.claudeCli, ['-p'], {
       cwd,
       shell: true,
+      windowsHide: true,
       env: {
         ...process.env,
         CLAUDE_CODE_GIT_BASH_PATH: autoFixConfig.claudeBashPath,
@@ -184,7 +185,7 @@ async function execCapture(
   cwd: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolveP, rejectP) => {
-    const proc = spawn(cmd, args, { cwd, shell: false });
+    const proc = spawn(cmd, args, { cwd, shell: false, windowsHide: true });
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf8')));

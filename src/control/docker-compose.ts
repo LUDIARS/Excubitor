@@ -99,6 +99,7 @@ function execDocker(
   return new Promise((resolve) => {
     const proc = spawn('docker', args, {
       shell: false,
+      windowsHide: true,
       env: { ...process.env, ...extraEnv },
     });
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
