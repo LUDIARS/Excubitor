@@ -1,18 +1,16 @@
 /**
  * Cloudflare Tunnel REST client (cfd_tunnel の一覧と remote-managed configuration の読み書き)。
  *
- * CF API の envelope ({success, errors, result}) をここで畳み、呼び出し側には
- * result だけを返す。トークンはヘッダにのみ使い、ログ・エラーに含めない (§14)。
+ * envelope の畳み込みとトークンの扱いは cloudflare-http.ts に一本化している (§14)。
  *
  * @implements SPEC-CF-TUNNEL-ROUTES (spec/feature/cf-tunnel-routes.md)
  */
 
 import { createNamedLogger } from '../shared/logger.js';
+import { cfRequest } from './cloudflare-http.js';
 import type { CfCredentials } from './credentials.js';
 
 const logger = createNamedLogger('excubitor.cf-tunnel.api');
-
-const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 export interface CfTunnelSummary {
   id: string;
@@ -33,39 +31,13 @@ export interface CfTunnelConfig {
   [key: string]: unknown;
 }
 
-interface CfEnvelope<T> {
-  success: boolean;
-  errors?: Array<{ code?: number; message?: string }>;
-  result: T;
-}
-
 /** @implements SPEC-CF-TUNNEL-ROUTES */
 export class CloudflareTunnelApi {
   constructor(private readonly creds: CfCredentials) {}
 
   /** @implements SPEC-CF-TUNNEL-ROUTES */
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${CF_API_BASE}/accounts/${this.creds.accountId}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.creds.token}`,
-        'content-type': 'application/json',
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    let envelope: CfEnvelope<T>;
-    try {
-      envelope = (await res.json()) as CfEnvelope<T>;
-    } catch {
-      throw new Error(`Cloudflare API ${method} ${path} → HTTP ${res.status} (非 JSON 応答)`);
-    }
-    if (!res.ok || !envelope.success) {
-      const detail = (envelope.errors ?? [])
-        .map((e) => `${e.code ?? '?'}: ${e.message ?? 'unknown'}`)
-        .join('; ');
-      throw new Error(`Cloudflare API ${method} ${path} → ${res.status} ${detail || '(詳細なし)'}`);
-    }
-    return envelope.result;
+  private request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return cfRequest<T>(this.creds, method, `/accounts/${this.creds.accountId}${path}`, body);
   }
 
   /** @implements SPEC-CF-TUNNEL-ROUTES */

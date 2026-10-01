@@ -3,67 +3,37 @@
  *
  * セッション側 (MCP tool) はここを叩くだけで、CF トークンには触れない。
  *   GET  /api/v1/cf-tunnel/routes          … ingress 一覧 (?tunnel=<id|name>)
- *   POST /api/v1/cf-tunnel/routes          … 追加 {tunnel?, hostname, service, path?}
+ *   POST /api/v1/cf-tunnel/routes          … 追加 {tunnel?, hostname, service, path?, require_access?}
  *   POST /api/v1/cf-tunnel/routes/remove   … 削除 {tunnel?, hostname, path?}
  * 変更は allowlist (EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES → 無ければ config store の
  * cfTunnel.allowedHostnames) の hostname のみ (route-service.ts)。
+ * Access アプリ・DNS は access-router.ts。
  *
  * @implements SPEC-CF-TUNNEL-ROUTES (spec/feature/cf-tunnel-routes.md)
  */
 
 import { Hono } from 'hono';
 import { createNamedLogger } from '../shared/logger.js';
-import { CloudflareTunnelApi, type CfTunnelSummary } from './cloudflare-api.js';
-import { resolveCfCredentials } from './credentials.js';
-import { getCfTunnelSettings } from '../secrets/config-store.js';
-import {
-  addRoute,
-  describeRoutes,
-  readAllowedHostnames,
-  removeRoute,
-  RouteRejectedError,
-} from './route-service.js';
+import { accessIdentity, accessOriginRequest, findAppForHostname } from './access-service.js';
+import { currentAllowlist, failureStatus, resolveTunnel } from './broker-support.js';
+import { CloudflareAccessApi } from './cloudflare-access-api.js';
+import { CloudflareTunnelApi } from './cloudflare-api.js';
+import { resolveCfCredentials, type CfCredentials } from './credentials.js';
+import { addRoute, describeRoutes, removeRoute, RouteRejectedError } from './route-service.js';
 
 const logger = createNamedLogger('excubitor.cf-tunnel.router');
 
-/** 入力拒否 (allowlist 外・重複等) は 400、CF 側の失敗は 502 に振り分ける。 */
-function failureStatus(err: unknown): 400 | 502 {
-  return err instanceof RouteRejectedError ? 400 : 502;
-}
-
-/** @implements SPEC-CF-TUNNEL-ROUTES */
-async function buildApi(): Promise<CloudflareTunnelApi> {
-  return new CloudflareTunnelApi(await resolveCfCredentials());
-}
-
-/** allowlist の解決 (env 優先 → config store)。 @implements SPEC-CF-TUNNEL-ROUTES */
-function currentAllowlist(): string[] {
-  return readAllowedHostnames(process.env, getCfTunnelSettings().allowedHostnames ?? []);
-}
-
 /**
- * tunnel パラメータ (id か name) を解決。未指定はアカウント唯一の tunnel に限り許す。
- *
- * 見つからない場合もアカウント内の tunnel 名は列挙しない: 呼び出し側 (AI セッション) は
- * allowlist 経由の狭い操作しか許されておらず、無関係な tunnel の存在自体が
- * インフラ構成の漏洩になる (§14 トークン境界と同じ理由)。件数だけ返す。
+ * Access 必須 route の originRequest。hostname の Access アプリが先に作られている必要がある
+ * (無ければ入力拒否: 先に POST /api/v1/cf-access/apps)。
  */
-async function resolveTunnel(
-  api: CloudflareTunnelApi,
-  param: string | undefined,
-): Promise<CfTunnelSummary> {
-  const tunnels = await api.listTunnels();
-  if (param) {
-    const found = tunnels.find((t) => t.id === param || t.name === param);
-    if (!found) {
-      throw new Error(`tunnel "${param}" が見つからない (アカウント内 ${tunnels.length} 件と不一致)`);
-    }
-    return found;
+async function requiredAccessOrigin(creds: CfCredentials, hostname: string): Promise<Record<string, unknown>> {
+  const access = new CloudflareAccessApi(creds);
+  const app = findAppForHostname(await access.listApps(), hostname);
+  if (!app) {
+    throw new RouteRejectedError(`hostname "${hostname}" の Access アプリが無い。先に POST /api/v1/cf-access/apps で作る`);
   }
-  if (tunnels.length === 1 && tunnels[0]) return tunnels[0];
-  throw new Error(
-    `tunnel を指定してください (tunnel=<id|name>)。アカウント内の tunnel は ${tunnels.length} 件`,
-  );
+  return accessOriginRequest(accessIdentity(await access.authDomain(), app));
 }
 
 /** @implements SPEC-CF-TUNNEL-ROUTES */
@@ -72,7 +42,7 @@ export function buildCfTunnelRouter(): Hono {
 
   app.get('/api/v1/cf-tunnel/routes', async (c) => {
     try {
-      const api = await buildApi();
+      const api = new CloudflareTunnelApi(await resolveCfCredentials());
       const tunnel = await resolveTunnel(api, c.req.query('tunnel'));
       const config = await api.getConfiguration(tunnel.id);
       const allowed = currentAllowlist();
@@ -93,28 +63,32 @@ export function buildCfTunnelRouter(): Hono {
       hostname?: string;
       service?: string;
       path?: string;
+      require_access?: boolean;
     } | null;
     if (!body?.hostname || !body?.service) {
       return c.json({ error: 'bad_request', message: 'hostname と service は必須' }, 400);
     }
     try {
-      const api = await buildApi();
+      const creds = await resolveCfCredentials();
+      const api = new CloudflareTunnelApi(creds);
       const tunnel = await resolveTunnel(api, body.tunnel);
       const config = await api.getConfiguration(tunnel.id);
       const allowed = currentAllowlist();
+      const originRequest = body.require_access === true ? await requiredAccessOrigin(creds, body.hostname) : undefined;
       const ingress = addRoute(
         config.ingress ?? [],
-        { hostname: body.hostname, service: body.service, path: body.path },
+        { hostname: body.hostname, service: body.service, path: body.path, originRequest },
         allowed,
       );
       const updated = await api.putConfiguration(tunnel.id, { ...config, ingress });
       logger.info(
-        { tunnel: tunnel.name, hostname: body.hostname, path: body.path ?? null },
+        { tunnel: tunnel.name, hostname: body.hostname, path: body.path ?? null, requireAccess: Boolean(originRequest) },
         'cf-tunnel route added',
       );
       return c.json({
         ok: true,
         tunnel: { id: tunnel.id, name: tunnel.name },
+        require_access: Boolean(originRequest),
         routes: describeRoutes(updated.ingress ?? ingress, allowed),
       });
     } catch (err) {
@@ -136,7 +110,7 @@ export function buildCfTunnelRouter(): Hono {
       return c.json({ error: 'bad_request', message: 'hostname は必須' }, 400);
     }
     try {
-      const api = await buildApi();
+      const api = new CloudflareTunnelApi(await resolveCfCredentials());
       const tunnel = await resolveTunnel(api, body.tunnel);
       const config = await api.getConfiguration(tunnel.id);
       const allowed = currentAllowlist();

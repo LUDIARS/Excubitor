@@ -28,6 +28,8 @@ export interface RouteKey {
 
 export interface AddRouteInput extends RouteKey {
   service: string;
+  /** 付けるなら cloudflared の originRequest (Access 必須 route は access-service.ts が組む)。 */
+  originRequest?: Record<string, unknown>;
 }
 
 /**
@@ -107,6 +109,7 @@ export function addRoute(
     hostname: input.hostname.trim(),
     service: input.service.trim(),
     ...(input.path ? { path: input.path } : {}),
+    ...(input.originRequest ? { originRequest: input.originRequest } : {}),
   };
   return [...ingress.slice(0, catchAllIndex), rule, ...ingress.slice(catchAllIndex)];
 }

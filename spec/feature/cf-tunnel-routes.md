@@ -52,8 +52,30 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
    既存の config を潰すため。config store 由来の変更は再起動不要で即時反映される
    (毎リクエスト解決)。
 
+8. **Access アプリ / DNS / Access 必須 route** — 同じトークン境界と allowlist の下で、
+   Internal 公開の残りの手順もブローカーが持つ (Castra の `cf:*` はこの API を呼ぶ)。
+   ```
+   GET  /api/v1/cf-access/policies   → { policies: [{ id, name, decision }] }   (再利用ポリシー)
+   POST /api/v1/cf-access/apps       { hostname, name, policy_id, service }
+   POST /api/v1/cf-tunnel/dns        { hostname, tunnel? }
+   POST /api/v1/cf-tunnel/routes     { ..., require_access: true }
+   ```
+   - apps: 同じ domain のアプリがあれば作らずに使う。無ければ self-hosted で作り、
+     指定した **既存の再利用 Allow ポリシー** だけを付ける (ポリシーは作らない・Allow 以外は 400)。
+     続けて組織の `auth_domain` とアプリの `aud` を検証し、サービスの runtime-config
+     (`cloudflareAccess: { teamDomain, audience }`) に書く。runtime-config の他のキーは保持する。
+     AUD は応答・ログに出さない (runtime-config 経由でサービスにだけ渡る)。
+   - dns: tunnel にその hostname の route があるときだけ、hostname を含む zone に
+     `<tunnel id>.cfargotunnel.com` への proxied CNAME を作る。同じ向き先の proxied CNAME が
+     あれば何もしない。別の向き先・別種・非 proxied のレコードは上書きせず 400。
+   - routes の `require_access: true`: hostname の Access アプリ (先に apps で作る) から
+     `originRequest.access = { required: true, teamName, audTag: [aud] }` を付ける。
+   - トークンに要る権限: Access: Apps and Policies Edit / Access: Organizations Read /
+     Cloudflare Tunnel Edit / Zone Read / DNS Edit。
+
 ## 運用
 
-- 想定トークンスコープは最小 (`Account / Cloudflare Tunnel / Edit`)。
+- 想定トークンスコープは最小 (`Account / Cloudflare Tunnel / Edit`)。要求 8 の操作も使うなら
+  Access と DNS の権限を足す。
 - 最初の allowlist は `qs-magiclink.ai-run-do.com` のみ。広げるときは設定 UI
   (再起動不要) か env (要再起動) で変更する。
