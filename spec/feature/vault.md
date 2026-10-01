@@ -34,6 +34,20 @@
    必須の変数は startup-env の検査が名前付きで止める。本社で紐付けが無い (404) なら Vault を使わないサービス。
 3. どちらでもない → 何もしない。
 
+### requires_secret の解決順 (Vault 優先)
+
+catalog の `requires_secret` (他サービスから名前付きで借りるキー) は、上の手順で得たそのサービスの Vault の値を先に見る
+(`src/process/requires-secret-plan.ts`、`resolveRequiresSecretEnv`)。
+
+1. 要求キーのうち Vault の紐付けで値が得られるものは Vault から満たし、Infisical には取りに行かない。
+2. 全キーが Vault で揃えば machine identity も Infisical 呼び出しも不要 (Infisical が止まっていても起動できる)。
+3. 足りないキーがある場合だけ、その分を従来どおり source service の Infisical project から取る。identity が無い・取得に
+   失敗した場合は従来どおり起動を止める。
+4. Vault で満たしたことはキー名だけをログに残す (値は出さない)。
+
+preflight の `requires_secret` チェックも同じ規則で、Vault で揃うサービスは identity が無くても失敗にせず、
+`needsIdentity` にも数えない。
+
 ## API
 
 管理面 (loopback の本体のみ):

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getServiceByCode: vi.fn(),
   resolveServiceInfisical: vi.fn(),
   getServiceRuntimeConfig: vi.fn<(code: string) => ServiceRuntimeConfig | null>(() => null),
+  resolveVaultEnv: vi.fn<(code: string) => Promise<Record<string, string>>>(async () => ({})),
 }));
 
 vi.mock('../secrets/infisical.js', () => ({
@@ -40,9 +41,9 @@ vi.mock('./service-registry.js', () => ({
   getServiceByCode: mocks.getServiceByCode,
 }));
 
-// Vault は実ファイル (config.enc の隣) と鍵保管を読むので、ここでは空として切り離す。
+// Vault は実ファイル (config.enc の隣) と鍵保管を読むので、ここでは切り離す (既定は空)。
 vi.mock('../vault/vault-inject.js', () => ({
-  resolveVaultEnv: async () => ({}),
+  resolveVaultEnv: mocks.resolveVaultEnv,
 }));
 
 const { resolveInjectEnv, resolveRequiresSecretEnv } = await import('./inject.js');
@@ -76,6 +77,7 @@ describe('resolveRequiresSecretEnv', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readIdentity.mockReturnValue({ siteUrl: 'https://x', clientId: 'c', clientSecret: 's' });
+    mocks.resolveVaultEnv.mockResolvedValue({});
   });
 
   it('returns only the requested keys from the source service secrets', async () => {
@@ -141,9 +143,93 @@ describe('resolveRequiresSecretEnv', () => {
   });
 });
 
+describe('resolveRequiresSecretEnv with Vault values', () => {
+  const glab = (): Service =>
+    service({
+      code: 'glab',
+      requires_secret: [
+        { service: 'cernere', keys: ['EXCUBITOR_CERNERE_CLIENT_ID', 'EXCUBITOR_CERNERE_CLIENT_SECRET'] },
+      ],
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readIdentity.mockReturnValue({ siteUrl: 'https://x', clientId: 'c', clientSecret: 's' });
+    mocks.getServiceByCode.mockReturnValue(cernereSource);
+    mocks.resolveServiceInfisical.mockReturnValue(cernereSource.infisical);
+  });
+
+  it('does not touch Infisical when the Vault binding provides every requested key', async () => {
+    mocks.resolveVaultEnv.mockResolvedValue({
+      EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'vault-secret',
+      UNRELATED_VAULT_KEY: 'not-requested',
+    });
+    // Infisical login is failing (502) in production; it must not matter here.
+    mocks.readIdentity.mockReturnValue(null);
+    mocks.fetchProjectSecrets.mockRejectedValue(new Error('Infisical login failed: 502'));
+
+    const env = await resolveRequiresSecretEnv(glab());
+
+    expect(env).toEqual({
+      EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'vault-secret',
+    });
+    expect(mocks.resolveVaultEnv).toHaveBeenCalledWith('glab');
+    expect(mocks.readIdentity).not.toHaveBeenCalled();
+    expect(mocks.fetchProjectSecrets).not.toHaveBeenCalled();
+  });
+
+  it('uses Vault values passed by the caller without resolving the Vault again', async () => {
+    const env = await resolveRequiresSecretEnv(glab(), {
+      EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'vault-secret',
+    });
+
+    expect(env.EXCUBITOR_CERNERE_CLIENT_ID).toBe('vault-id');
+    expect(mocks.resolveVaultEnv).not.toHaveBeenCalled();
+    expect(mocks.fetchProjectSecrets).not.toHaveBeenCalled();
+  });
+
+  it('fetches only the keys missing from the Vault from Infisical', async () => {
+    mocks.resolveVaultEnv.mockResolvedValue({ EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id' });
+    mocks.fetchProjectSecrets.mockResolvedValue([
+      { secretKey: 'EXCUBITOR_CERNERE_CLIENT_ID', secretValue: 'infisical-id' },
+      { secretKey: 'EXCUBITOR_CERNERE_CLIENT_SECRET', secretValue: 'infisical-secret' },
+    ]);
+
+    const env = await resolveRequiresSecretEnv(glab());
+
+    expect(env).toEqual({
+      EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id',
+      EXCUBITOR_CERNERE_CLIENT_SECRET: 'infisical-secret',
+    });
+    expect(mocks.fetchProjectSecrets).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchProjectSecrets).toHaveBeenCalledWith(expect.anything(), 'cernere-project', 'dev');
+  });
+
+  it('still throws when a key is not in the Vault and there is no machine identity', async () => {
+    mocks.resolveVaultEnv.mockResolvedValue({ EXCUBITOR_CERNERE_CLIENT_ID: 'vault-id' });
+    mocks.readIdentity.mockReturnValue(null);
+
+    await expect(resolveRequiresSecretEnv(glab())).rejects.toThrow(
+      /no machine identity.*EXCUBITOR_CERNERE_CLIENT_SECRET/,
+    );
+    expect(mocks.fetchProjectSecrets).not.toHaveBeenCalled();
+  });
+
+  it('still throws when an Infisical fetch for a missing key fails', async () => {
+    mocks.resolveVaultEnv.mockResolvedValue({});
+    mocks.fetchProjectSecrets.mockRejectedValue(new Error('Infisical login failed: 502'));
+
+    await expect(resolveRequiresSecretEnv(glab())).rejects.toThrow(/Infisical login failed: 502/);
+  });
+});
+
 describe('resolveInjectEnv runtime configuration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveVaultEnv.mockResolvedValue({});
     mocks.readIdentity.mockReturnValue({ siteUrl: 'https://x', clientId: 'c', clientSecret: 's' });
     mocks.fetchProjectSecrets.mockResolvedValue([]);
     mocks.resolveServiceInfisical.mockReturnValue(undefined);

@@ -18,6 +18,8 @@ import { resolveInjectEnv } from '../process/inject.js';
 import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
 import { getServiceByCode } from '../process/service-registry.js';
 import { needsWorkingDirectory } from '../catalog/runtime-kind.js';
+import { resolveVaultEnv } from '../vault/vault-inject.js';
+import { planRequiresSecret } from '../process/requires-secret-plan.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -59,7 +61,7 @@ export interface ServicePreflight {
 export interface PreflightReport {
   ok: boolean; // 全サービス ready
   identityPresent: boolean;
-  needsIdentity: boolean; // inject 対象が 1 つでもある
+  needsIdentity: boolean; // inject 対象、 または Vault で揃わない requires_secret が 1 つでもある
   services: ServicePreflight[];
 }
 
@@ -96,14 +98,35 @@ async function checkInfisical(svc: Service): Promise<{ check: PreflightCheck; in
 }
 
 /**
- * `requires_secret` (他サービスの Infisical project から NAMED secret を借りる設定) の preflight。
+ * `requires_secret` (他サービスの secret から NAMED key を借りる設定) の preflight。
  * Aedilis のように自分自身は infisical.inject が無くても requires_secret だけ持ちうるため、
  * checkInfisical (自身の secret) とは別チェックとして分離し、 fail 理由を混同させない。
+ *
+ * 解決規則は resolveRequiresSecretEnv と同じ **Vault 優先**: そのサービスの Vault 紐付けで揃うキーは
+ * Infisical を見ない。全キーが Vault で揃えば machine identity が無くても問題にしない。
+ * Vault 自体の解決失敗 (紐付けた値が未登録など) は env チェックが名前付きで報告するので、
+ * ここでは Vault を空として扱い、Infisical 側で取れるかだけを見る。
  */
-async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightCheck; injected: number }> {
+async function checkRequiresSecret(
+  svc: Service,
+): Promise<{ check: PreflightCheck; injected: number; needsIdentity: boolean }> {
   const requests = svc.requires_secret ?? [];
   if (requests.length === 0) {
-    return { check: { kind: 'requires_secret', status: 'ok', detail: 'cross-service secret 不要' }, injected: 0 };
+    return {
+      check: { kind: 'requires_secret', status: 'ok', detail: 'cross-service secret 不要' },
+      injected: 0,
+      needsIdentity: false,
+    };
+  }
+  const vaultEnv = await resolveVaultEnv(svc.code).catch(() => ({}));
+  const plan = planRequiresSecret(requests, vaultEnv);
+  const fromVault = Object.keys(plan.fromVault).length;
+  if (plan.remaining.length === 0) {
+    return {
+      check: { kind: 'requires_secret', status: 'ok', detail: `Vault で ${fromVault} キーを解決` },
+      injected: fromVault,
+      needsIdentity: false,
+    };
   }
   const id = readIdentity();
   if (!id) {
@@ -111,13 +134,16 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
       check: {
         kind: 'requires_secret',
         status: 'fail',
-        detail: 'Excubitor の machine identity (INFISICAL_*) が無い',
+        detail:
+          'Excubitor の machine identity (INFISICAL_*) が無い (Vault に無いキー: ' +
+          `${plan.remaining.flatMap((r) => r.keys).join(', ')})`,
       },
       injected: 0,
+      needsIdentity: true,
     };
   }
-  let injected = 0;
-  for (const req of requests) {
+  let injected = fromVault;
+  for (const req of plan.remaining) {
     const source = getServiceByCode(req.service);
     if (!source) {
       return {
@@ -127,6 +153,7 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
           detail: `source service "${req.service}" が catalog に無い`,
         },
         injected: 0,
+        needsIdentity: true,
       };
     }
     const cfg = resolveServiceInfisical(req.service, source.infisical);
@@ -138,6 +165,7 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
           detail: `source service "${req.service}" に infisical 設定が無い`,
         },
         injected: 0,
+        needsIdentity: true,
       };
     }
     try {
@@ -152,6 +180,7 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
             detail: `"${req.service}" (${cfg.project_id}/${cfg.environment}) に無いキー: ${missing.join(', ')}`,
           },
           injected: Object.keys(env).length,
+          needsIdentity: true,
         };
       }
       injected += Object.keys(env).length;
@@ -163,12 +192,18 @@ async function checkRequiresSecret(svc: Service): Promise<{ check: PreflightChec
           detail: `"${req.service}" fetch 失敗: ${(err as Error).message}`,
         },
         injected: 0,
+        needsIdentity: true,
       };
     }
   }
   return {
-    check: { kind: 'requires_secret', status: 'ok', detail: `${requests.length} 件の cross-service secret を解決` },
+    check: {
+      kind: 'requires_secret',
+      status: 'ok',
+      detail: `${requests.length} 件の cross-service secret を解決 (Vault ${fromVault} キー)`,
+    },
     injected,
+    needsIdentity: true,
   };
 }
 
@@ -230,9 +265,8 @@ function checkPorts(svc: Service, listeners: PortListener[]): PreflightCheck[] {
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
   const targets = services.filter((s) => want.has(s.code));
-  const needsIdentity = targets.some(
-    (s) => resolveServiceInfisical(s.code, s.infisical)?.inject || (s.requires_secret?.length ?? 0) > 0,
-  );
+  // requires_secret は Vault で揃うなら identity 不要。チェック結果から後で足す。
+  let needsIdentity = targets.some((s) => resolveServiceInfisical(s.code, s.infisical)?.inject === true);
   const identityPresent = readIdentity() !== null;
 
   // port 占有は OS 呼び出し 1 回で全 listener を取得して使い回す。
@@ -244,8 +278,13 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
     if (svc.disabled) checks.push({ kind: 'disabled', status: 'fail', detail: 'disabled in catalog' });
     const { check: infCheck, injected } = await checkInfisical(svc);
     checks.push(infCheck);
-    const { check: reqSecretCheck, injected: reqSecretInjected } = await checkRequiresSecret(svc);
+    const {
+      check: reqSecretCheck,
+      injected: reqSecretInjected,
+      needsIdentity: reqSecretNeedsIdentity,
+    } = await checkRequiresSecret(svc);
     checks.push(reqSecretCheck);
+    if (reqSecretNeedsIdentity) needsIdentity = true;
     checks.push(await checkRequiredEnv(svc));
     checks.push(...checkPorts(svc, listeners));
     result.push({

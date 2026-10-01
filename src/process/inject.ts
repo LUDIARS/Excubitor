@@ -19,6 +19,7 @@ import { getTopologyEnv } from './topology.js';
 import { getServiceByCode } from './service-registry.js';
 import { injectServiceRuntimeVersion } from './service-version.js';
 import { resolveVaultEnv } from '../vault/vault-inject.js';
+import { planRequiresSecret } from './requires-secret-plan.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -66,26 +67,43 @@ function runtimeConfigEnvFor(svc: Pick<Service, 'code'>): Record<string, string>
 }
 
 /**
- * `svc.requires_secret` (他サービスの Infisical project から NAMED secret を借りる設定) を解決する。
- * - source service は catalog 上に存在しなければならない (service-registry 未登録 → throw)。
- * - source は自身の infisical 設定を持たなければならない (無ければ throw、 借りる先が無い)。
- * - `keys` で列挙したキーのみを toEnvMap の include で絞る (source の secret 全量を渡さない)。
+ * `svc.requires_secret` (他サービスの secret から NAMED key を借りる設定) を解決する。
+ * - **Vault 優先**: 要求キーのうち、そのサービスの Vault 紐付けで値が得られるものは Vault から満たし
+ *   Infisical に取りに行かない。全キーが Vault で揃えば machine identity も Infisical 呼び出しも不要。
+ * - 足りないキーだけ従来どおり source service の Infisical project から取る:
+ *   - source service は catalog 上に存在しなければならない (service-registry 未登録 → throw)。
+ *   - source は自身の infisical 設定を持たなければならない (無ければ throw、 借りる先が無い)。
+ *   - 足りないキーのみを toEnvMap の include で絞る (source の secret 全量を渡さない)。
  * - 失敗は全て throw (fail-fast、 preflight で事前検知させる)。
+ *
+ * `vaultEnv` は呼び出し側で解決済みならそれを渡す (二重取得を避ける)。省略時はここで解決する。
  */
-export async function resolveRequiresSecretEnv(svc: Service): Promise<Record<string, string>> {
+export async function resolveRequiresSecretEnv(
+  svc: Service,
+  vaultEnv?: Record<string, string>,
+): Promise<Record<string, string>> {
   const requests = svc.requires_secret ?? [];
   if (requests.length === 0) return {};
+
+  const plan = planRequiresSecret(requests, vaultEnv ?? (await resolveVaultEnv(svc.code)));
+  const vaultKeys = Object.keys(plan.fromVault);
+  if (vaultKeys.length > 0) {
+    // キー名だけ残す (値は出さない)。
+    logger.info({ consumer: svc.code, keys: vaultKeys }, 'requires_secret satisfied from Vault');
+  }
+  if (plan.remaining.length === 0) return plan.fromVault;
 
   const id = readIdentity();
   if (!id) {
     throw new Error(
       `service ${svc.code} has requires_secret but Excubitor has no machine identity ` +
-        `(set INFISICAL_SITE_URL / INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET)`,
+        `(set INFISICAL_SITE_URL / INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET); ` +
+        `not in Vault: ${plan.remaining.flatMap((r) => r.keys).join(', ')}`,
     );
   }
 
-  let merged: Record<string, string> = {};
-  for (const req of requests) {
+  let merged: Record<string, string> = { ...plan.fromVault };
+  for (const req of plan.remaining) {
     const source = getServiceByCode(req.service);
     if (!source) {
       throw new Error(
@@ -114,7 +132,7 @@ export async function resolveRequiresSecretEnv(svc: Service): Promise<Record<str
  * - 常に topology env (URL/port、 Excubitor が catalog から特定可能な情報) を含む
  * - infisical inject 設定があれば secret を fetch して topology に上書きマージ
  * - requires_secret があれば他サービスの named secret を fetch し最優先でマージ
- * - identity 不足 (infisical inject / requires_secret 要求時) → throw (preflight で事前検知させる)
+ * - identity 不足 (infisical inject / requires_secret のキーが Vault で揃わない時) → throw (preflight で事前検知させる)
  * - fetch 失敗 → throw
  *
  * @implements SPEC-SERVICE-RUNTIME-VERSION
@@ -134,8 +152,8 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
   //           < encrypted runtime config < secret < requires_secret < Vault。
   if (!cfg || !cfg.inject) {
-    const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
     const vaultEnv = await resolveVaultEnv(svc.code);
+    const requiresSecretEnv = await resolveRequiresSecretEnv(svc, vaultEnv);
     return (await injectServiceRuntimeVersion(
       svc,
       {
@@ -169,8 +187,8 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
     { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
     'resolved inject env (topology + infisical)',
   );
-  const requiresSecretEnv = await resolveRequiresSecretEnv(svc);
   const vaultEnv = await resolveVaultEnv(svc.code);
+  const requiresSecretEnv = await resolveRequiresSecretEnv(svc, vaultEnv);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
   //           < encrypted runtime config < secret < requires_secret < Vault (Infisical の置き換え)。
   return (await injectServiceRuntimeVersion(
