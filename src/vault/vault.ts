@@ -79,15 +79,28 @@ export class Vault {
     this.update((doc) => { doc.entries[name] = { sealed, updated_at: this.now() }; });
   }
 
-  /** 複数件をまとめて登録する (Infisical からの取り込み用)。 */
-  async setEntries(values: Record<string, string>): Promise<string[]> {
+  /**
+   * 複数件をまとめて取り込む (Infisical から)。Vault は変数名の名前空間が 1 つなので、
+   * 既にある同名が別の値なら上書きせず conflicts で返す (別 project の同名で他サービスの値を壊さないため)。
+   */
+  async importEntries(values: Record<string, string>): Promise<{ imported: string[]; unchanged: string[]; conflicts: string[] }> {
     const key = await this.key();
     const names = Object.keys(values).sort();
     for (const name of names) assertName(name);
-    this.update((doc) => {
-      for (const name of names) doc.entries[name] = { sealed: sealValue(key, name, values[name]!), updated_at: this.now() };
+    const doc = this.read();
+    const imported: string[] = [];
+    const unchanged: string[] = [];
+    const conflicts: string[] = [];
+    for (const name of names) {
+      const existing = doc.entries[name];
+      if (!existing) imported.push(name);
+      else if (openValue(key, name, existing.sealed) === values[name]) unchanged.push(name);
+      else conflicts.push(name);
+    }
+    this.update((current) => {
+      for (const name of imported) current.entries[name] = { sealed: sealValue(key, name, values[name]!), updated_at: this.now() };
     });
-    return names;
+    return { imported, unchanged, conflicts };
   }
 
   deleteEntry(name: string): boolean {

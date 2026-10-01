@@ -45,9 +45,13 @@
 | DELETE | `/api/v1/vault/entries/:name` | 削除 (紐付けは残り未登録として表示) |
 | PUT | `/api/v1/vault/bindings/:code` | `{ names }` 使用する環境変数 (空で外す) |
 | PUT | `/api/v1/vault/source` | `{ peer_id }` 拠点の取得元 (null で本社) |
-| POST | `/api/v1/vault/import/infisical/:code` | Infisical の値を Vault に移して紐付けに足す |
+| POST | `/api/v1/vault/import/infisical/:code` | Infisical の値を Vault に移して紐付けに足す。名前空間は 1 つなので、既にある同名が別の値なら上書きも紐付けもせず `conflicts` で返す (同じ値は `unchanged` として紐付ける) |
 
 公開面 (拠点間、相互登録の署名が必須): `POST /api/v1/federation/vault/env` `{ service }` → `{ env, missing }`。
 渡した記録 (拠点・サービス・変数名) をログに残す。値は残さない。
 
-WebUI: Config の先頭「Vault (環境変数)」。
+WebUI: 「環境変数」タブ。
+
+2026-10-01: 本社で Infisical の値を取り込み済み (cernere 47 / ostiarius 5 / volputas 6 / discutere 2、いずれも同じ project・環境で同名は同値)。
+ostiarius / volputas には requires_secret で借りていた `EXCUBITOR_CERNERE_CLIENT_ID` / `_SECRET` も紐付けた。
+ludellus-web は Infisical 設定がコメントアウト、volputas-haster は disabled のため対象外。

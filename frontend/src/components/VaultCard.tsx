@@ -150,7 +150,10 @@ export function VaultCard() {
           title="そのサービスの Infisical マッピングで取れる値を Vault に保存し、紐付けに足す"
           onClick={() => void run(async () => {
             const result = await importVaultFromInfisical(importCode.trim());
-            return `${result.imported.length} 件を取り込みました: ${result.imported.join(', ')}`;
+            const conflicts = result.conflicts.length > 0
+              ? ` / 値の異なる同名があり取り込まなかった: ${result.conflicts.join(', ')}`
+              : '';
+            return `新規 ${result.imported.length} 件・同じ値 ${result.unchanged.length} 件を紐付けました${conflicts}`;
           })}
         >取り込む</button>
       </div>

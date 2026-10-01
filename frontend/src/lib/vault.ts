@@ -29,4 +29,4 @@ export const saveVaultBindings = (code: string, names: string[]) =>
 export const saveVaultSource = (peerId: string | null) =>
   send<{ ok: true }>('PUT', '/api/v1/vault/source', { peer_id: peerId });
 export const importVaultFromInfisical = (code: string) =>
-  send<{ ok: true; imported: string[] }>('POST', `/api/v1/vault/import/infisical/${encodeURIComponent(code)}`);
+  send<{ ok: true; imported: string[]; unchanged: string[]; conflicts: string[] }>('POST', `/api/v1/vault/import/infisical/${encodeURIComponent(code)}`);

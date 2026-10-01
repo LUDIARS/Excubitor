@@ -8,19 +8,21 @@ import Logs from './pages/Logs';
 import Catalog from './pages/Catalog';
 import Errors from './pages/Errors';
 import Config from './pages/Config';
+import Env from './pages/Env';
 import Federation from './pages/Federation';
 import { fetchSystem } from './lib/api';
 import type { SystemInfo } from './lib/api';
 import { config } from '../config';
 
-type Tab = 'overview' | 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'config';
+type Tab = 'overview' | 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'env' | 'config';
 
-const TAB_IDS: Tab[] = ['overview', 'dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'config'];
+const TAB_IDS: Tab[] = ['overview', 'dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'env', 'config'];
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'サービス' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'logs', label: 'Logs' },
+  { id: 'env', label: '環境変数' },
   { id: 'config', label: 'Config' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'dashboard', label: 'Dashboard' },
@@ -117,7 +119,8 @@ export default function App() {
         {tab === 'federation' && <Federation />}
         {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}
-        {tab === 'config' && <Config />}
+        {tab === 'env' && <Env />}
+      {tab === 'config' && <Config />}
       </main>
     </div>
   );

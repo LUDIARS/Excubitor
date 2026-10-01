@@ -79,10 +79,11 @@ export function buildVaultRouter(deps: VaultRouterDeps): Hono {
     if (!resolved.ok) return c.json({ error: resolved.code, message: resolved.message }, resolved.code === 'no_mapping' ? 404 : 502);
     return handle(c, async () => {
       const vault = deps.vault();
-      const names = await vault.setEntries(resolved.secrets);
-      vault.setBindings(code, [...vault.bindingsFor(code), ...names]);
-      logger.info({ code, count: names.length }, 'imported Infisical values into vault');
-      return { ok: true, imported: names };
+      const result = await vault.importEntries(resolved.secrets);
+      // 同じ値で既にあるものも紐付ける。値の異なる同名 (conflicts) は紐付けず、人が名前を分けて登録する。
+      vault.setBindings(code, [...vault.bindingsFor(code), ...result.imported, ...result.unchanged]);
+      logger.info({ code, imported: result.imported.length, unchanged: result.unchanged.length, conflicts: result.conflicts }, 'imported Infisical values into vault');
+      return { ok: true, ...result };
     });
   });
 

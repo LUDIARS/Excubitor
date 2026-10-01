@@ -166,8 +166,19 @@ describe('vault admin API', () => {
     vault.setBindings('svc', ['EXISTING']);
     const resolveInfisical = vi.fn(async () => ({ ok: true as const, secrets: { API_KEY: 'k', DB_URL: 'u' }, projectId: 'p', environment: 'dev' }));
     const response = await app(resolveInfisical as never).request('/api/v1/vault/import/infisical/svc', { method: 'POST' });
-    expect(await response.json()).toEqual({ ok: true, imported: ['API_KEY', 'DB_URL'] });
+    expect(await response.json()).toEqual({ ok: true, imported: ['API_KEY', 'DB_URL'], unchanged: [], conflicts: [] });
     expect((await vault.envFor('svc'))?.env).toEqual({ API_KEY: 'k', DB_URL: 'u', EXISTING: 'keep' });
+  });
+
+  it('does not overwrite a same-named value from another project and leaves it unbound', async () => {
+    await vault.setEntry('DATABASE_URL', 'cernere-db');
+    await vault.setEntry('SHARED', 'same');
+    vault.setBindings('cernere', ['DATABASE_URL']);
+    const resolveInfisical = vi.fn(async () => ({ ok: true as const, secrets: { DATABASE_URL: 'other-db', SHARED: 'same', NEW_KEY: 'n' }, projectId: 'p2', environment: 'dev' }));
+    const response = await app(resolveInfisical as never).request('/api/v1/vault/import/infisical/other', { method: 'POST' });
+    expect(await response.json()).toEqual({ ok: true, imported: ['NEW_KEY'], unchanged: ['SHARED'], conflicts: ['DATABASE_URL'] });
+    expect((await vault.envFor('cernere'))?.env).toEqual({ DATABASE_URL: 'cernere-db' });
+    expect(vault.bindingsFor('other')).toEqual(['NEW_KEY', 'SHARED']);
   });
 });
 
