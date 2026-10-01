@@ -1,9 +1,9 @@
 /**
  * Vault の操作 (本社: 値と「使用する環境変数」の管理、拠点: 本社から受け取った値の控え)。
  *
- * 平文を返すのは envFor / cachedEnv だけで、呼び出し元はサービス起動時の env 注入
- * (vault-inject.ts) と本社の拠点向け配布 (vault-federation.ts) に限る。管理 API には名前と
- * 更新日時・紐付けしか返さない。
+ * 平文を返すのは envFor / cachedEnv / valuesOf だけで、呼び出し元はサービス起動時の env 注入
+ * (vault-inject.ts)、本社の拠点向け配布 (vault-federation.ts)、Excubitor 自身が使う資格情報
+ * (cf-tunnel/credentials.ts) に限る。管理 API には名前と更新日時・紐付けしか返さない。
  */
 
 import { createKeyStore, loadOrCreateDek, type KeyStore } from './keystore.js';
@@ -148,6 +148,16 @@ export class Vault {
       else missing.push(name);
     }
     return { env, missing };
+  }
+
+  /** Excubitor 自身が使う値 (サービスの紐付けを介さない)。未登録の名前は結果に含めない。 */
+  async valuesOf(names: readonly string[]): Promise<Record<string, string>> {
+    for (const name of names) assertName(name);
+    const doc = this.read();
+    const present = names.filter((name) => name in doc.entries);
+    if (present.length === 0) return {};
+    const key = await this.key();
+    return Object.fromEntries(present.map((name) => [name, openValue(key, name, doc.entries[name]!.sealed)]));
   }
 
   /** 拠点: 本社から受け取った値を控える。 */

@@ -60,8 +60,6 @@ const DomainRootSchema = z.object({
 });
 
 const CfTunnelSchema = z.object({
-  infisical_project_id: z.string().optional(),
-  infisical_environment: z.string().optional(),
   allowed_hostnames: z.array(z.string()).optional(),
 });
 
@@ -203,8 +201,8 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     }
   });
 
-  // cf-tunnel ブローカー設定 (Infisical project/env + hostname allowlist)。
-  // CF トークン値そのものは受け取らない (Infisical に置く)。
+  // cf-tunnel ブローカー設定 (hostname allowlist)。
+  // CF トークン値そのものは受け取らない (Excubitor の Vault に置く)。
   /** @implements SPEC-CF-TUNNEL-ROUTES */
   app.get('/api/v1/config/cf-tunnel', (c) => c.json({ cf_tunnel: getCfTunnelStatus() }));
 
@@ -215,8 +213,6 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     try {
       const status = saveCfTunnelSettings({
-        infisicalProjectId: parsed.data.infisical_project_id,
-        infisicalEnvironment: parsed.data.infisical_environment,
         allowedHostnames: parsed.data.allowed_hostnames,
       });
       return c.json({ ok: true, cf_tunnel: status });

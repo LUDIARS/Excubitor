@@ -256,23 +256,18 @@ export function getBackendReadinessTimeoutOverride(): unknown {
 // ─────────────── CF Tunnel (cf-tunnel ブローカー設定) ───────────────
 
 /**
- * cf-tunnel ブローカーの config 由来設定。 CF_API_TOKEN そのものは Infisical に置き、
- * ここには「どの project/env から取るか」と hostname allowlist だけを持つ。
- * env (EXCUBITOR_CF_*) が設定されていれば常に env が優先される (domainRoot と同じ規則)。
+ * cf-tunnel ブローカーの config 由来設定。 CF_API_TOKEN / CF_ACCOUNT_ID そのものは
+ * Excubitor の Vault に置き (cf-tunnel/credentials.ts)、 ここには hostname allowlist だけを持つ。
+ * env (EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES) が設定されていれば常に env が優先される
+ * (domainRoot と同じ規則)。
  */
 export interface CfTunnelSettings {
-  infisicalProjectId?: string;
-  infisicalEnvironment?: string;
   allowedHostnames?: string[];
 }
 
 export type CfTunnelSource = 'env' | 'config' | 'unset';
 
 export interface CfTunnelStatus {
-  infisical_project_id: string | null;
-  infisical_project_source: CfTunnelSource;
-  infisical_environment: string | null;
-  infisical_environment_source: CfTunnelSource;
   allowed_hostnames: string[];
   allowed_hostnames_source: CfTunnelSource;
   /**
@@ -281,8 +276,6 @@ export interface CfTunnelStatus {
    * 下書きに入れると、 env の値をそのまま保存して既存の config を上書きしてしまう。
    */
   stored: {
-    infisical_project_id: string | null;
-    infisical_environment: string | null;
     allowed_hostnames: string[];
   };
   /** EXCUBITOR_CF_API_TOKEN + EXCUBITOR_CF_ACCOUNT_ID の直指定があるか (UI 表示用)。 */
@@ -291,8 +284,6 @@ export interface CfTunnelStatus {
 }
 
 export interface CfTunnelInput {
-  infisicalProjectId?: string;
-  infisicalEnvironment?: string;
   allowedHostnames?: string[];
 }
 
@@ -323,15 +314,8 @@ export function getCfTunnelSettings(): CfTunnelSettings {
 export function saveCfTunnelSettings(input: CfTunnelInput): CfTunnelStatus {
   const cfg = readConfig();
   const current = cfg.settings?.cfTunnel ?? {};
+  // 旧版が保存した Infisical project/env は読み捨て、 書き戻さない。
   const next: CfTunnelSettings = {
-    infisicalProjectId:
-      input.infisicalProjectId !== undefined
-        ? input.infisicalProjectId.trim() || undefined
-        : current.infisicalProjectId,
-    infisicalEnvironment:
-      input.infisicalEnvironment !== undefined
-        ? input.infisicalEnvironment.trim() || undefined
-        : current.infisicalEnvironment,
     allowedHostnames:
       input.allowedHostnames !== undefined
         ? (() => {
@@ -344,8 +328,6 @@ export function saveCfTunnelSettings(input: CfTunnelInput): CfTunnelStatus {
   writeConfig(cfg);
   logger.info(
     {
-      hasProject: Boolean(next.infisicalProjectId),
-      environment: next.infisicalEnvironment ?? null,
       allowlistCount: next.allowedHostnames?.length ?? 0,
     },
     'saved cf-tunnel settings',
@@ -356,8 +338,6 @@ export function saveCfTunnelSettings(input: CfTunnelInput): CfTunnelStatus {
 /** @implements SPEC-CF-TUNNEL-ROUTES */
 export function getCfTunnelStatus(): CfTunnelStatus {
   const stored = getCfTunnelSettings();
-  const envProject = process.env.EXCUBITOR_CF_INFISICAL_PROJECT_ID?.trim() || null;
-  const envEnvironment = process.env.EXCUBITOR_CF_INFISICAL_ENV?.trim() || null;
   const envAllowlist = (process.env.EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES ?? '')
     .split(',')
     .map((h) => h.trim().toLowerCase())
@@ -365,10 +345,6 @@ export function getCfTunnelStatus(): CfTunnelStatus {
   const sourceOf = (env: unknown, config: unknown): CfTunnelSource =>
     env ? 'env' : config ? 'config' : 'unset';
   return {
-    infisical_project_id: envProject ?? stored.infisicalProjectId ?? null,
-    infisical_project_source: sourceOf(envProject, stored.infisicalProjectId),
-    infisical_environment: envEnvironment ?? stored.infisicalEnvironment ?? null,
-    infisical_environment_source: sourceOf(envEnvironment, stored.infisicalEnvironment),
     // config cache と同じ配列を渡さない (呼び出し側の mutate が cache を壊す)。
     allowed_hostnames: envAllowlist.length > 0 ? envAllowlist : [...(stored.allowedHostnames ?? [])],
     allowed_hostnames_source: sourceOf(
@@ -376,8 +352,6 @@ export function getCfTunnelStatus(): CfTunnelStatus {
       stored.allowedHostnames && stored.allowedHostnames.length > 0,
     ),
     stored: {
-      infisical_project_id: stored.infisicalProjectId ?? null,
-      infisical_environment: stored.infisicalEnvironment ?? null,
       allowed_hostnames: [...(stored.allowedHostnames ?? [])],
     },
     direct_env_credentials: Boolean(

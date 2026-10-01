@@ -14,11 +14,10 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
 
 1. **トークン境界** — CF API トークンは Excubitor プロセス内でのみ保持する。API 応答・
    ログ・エラーに載せない。取得経路は env 直指定 (`EXCUBITOR_CF_API_TOKEN` +
-   `EXCUBITOR_CF_ACCOUNT_ID`) か Infisical (project は `EXCUBITOR_CF_INFISICAL_PROJECT_ID`
-   → 無ければ config store の `cfTunnel.infisicalProjectId`。その project から
-   `CF_API_TOKEN` / `CF_ACCOUNT_ID` を machine identity で取得。environment は
-   `EXCUBITOR_CF_INFISICAL_ENV` → config store `cfTunnel.infisicalEnvironment` → 既定
-   `prod`)。いずれも無ければ即エラー (無言フォールバック禁止)。
+   `EXCUBITOR_CF_ACCOUNT_ID`) か Excubitor の Vault (WebUI「環境変数」に登録した
+   `CF_API_TOKEN` / `CF_ACCOUNT_ID`。Excubitor 自身が読むのでサービスへの紐付けは不要)。
+   env は項目ごとに Vault より優先する。Infisical は使わない。揃わなければ欠けている
+   名前を示して即エラー (無言フォールバック禁止)。
 2. **hostname allowlist (fail-closed)** — 変更 (add / remove) は allowlist
    (`EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES` のカンマ区切りが最優先、無ければ config
    store の `cfTunnel.allowedHostnames`) に載る hostname のみ。両方とも未設定・空は
@@ -42,11 +41,12 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
    tunnel 名を列挙しない (無関係な tunnel の存在自体を漏らさないため、件数のみ)。
 6. **MCP tool** — `excubitor_cf_tunnel_routes` (action: list/add/remove) は上記 HTTP API の
    薄いクライアントに徹し、ロジック・資格情報を持たない。
-7. **config store 設定 (設定 UI)** — Infisical project / environment / allowlist は
+7. **config store 設定 (設定 UI)** — allowlist は
    Excubitor 設定ストア (`config.enc`、暗号化) にも保存でき、設定 UI (Config → CF Tunnel)
    と `GET/PUT /api/v1/config/cf-tunnel` で編集する。env が設定されていれば常に env が
    優先される (domainRoot と同じ規則)。CF トークン値そのものはこの API で受け取らない
-   (Infisical にのみ置く)。status は各フィールドの解決元 (`env`/`config`/`unset`) と、
+   (Vault にのみ置く)。旧版が保存した Infisical project / environment は読み捨て、
+   保存・返却しない。status は allowlist の解決元 (`env`/`config`/`unset`) と、
    解決値とは別に config store の素の保存値 (`stored`) を示す。編集 UI は下書きに
    `stored` を使う — 解決値を下書きにすると env が設定されている間に env の値を保存して
    既存の config を潰すため。config store 由来の変更は再起動不要で即時反映される

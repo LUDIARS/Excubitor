@@ -32,6 +32,12 @@ describe('Vault', () => {
     expect(await vault.envFor('actio')).toBeNull();
   });
 
+  it('returns registered values by name for Excubitor itself, skipping unregistered names', async () => {
+    await vault.setEntry('CF_API_TOKEN', 'cf-token');
+    expect(await vault.valuesOf(['CF_API_TOKEN', 'CF_ACCOUNT_ID'])).toEqual({ CF_API_TOKEN: 'cf-token' });
+    expect(await vault.valuesOf([])).toEqual({});
+  });
+
   it('reports names, bindings and presence without values', async () => {
     await vault.setEntry('TOKEN', 'secret-value');
     vault.setBindings('actio', ['TOKEN', 'MISSING']);

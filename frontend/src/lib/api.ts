@@ -313,16 +313,10 @@ export interface DomainRootStatus {
 
 /** @implements SPEC-CF-TUNNEL-ROUTES */
 export interface CfTunnelStatus {
-  infisical_project_id: string | null;
-  infisical_project_source: 'env' | 'config' | 'unset';
-  infisical_environment: string | null;
-  infisical_environment_source: 'env' | 'config' | 'unset';
   allowed_hostnames: string[];
   allowed_hostnames_source: 'env' | 'config' | 'unset';
   /** config store の素の保存値 (env で隠れていても実際に保存されている値)。 */
   stored: {
-    infisical_project_id: string | null;
-    infisical_environment: string | null;
     allowed_hostnames: string[];
   };
   direct_env_credentials: boolean;
@@ -672,8 +666,6 @@ export function saveServiceEnvConfig(code: string, input: ServiceEnvConfigInput)
 }
 
 export function saveCfTunnel(input: {
-  infisical_project_id?: string;
-  infisical_environment?: string;
   allowed_hostnames?: string[];
 }) {
   return putJSON<{ ok: boolean; cf_tunnel: CfTunnelStatus }>('/api/v1/config/cf-tunnel', input);

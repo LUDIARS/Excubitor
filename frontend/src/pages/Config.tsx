@@ -56,8 +56,6 @@ export default function Config() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [domainRootDraft, setDomainRootDraft] = useState('');
-  const [cfProjectDraft, setCfProjectDraft] = useState('');
-  const [cfEnvDraft, setCfEnvDraft] = useState('');
   const [cfHostnamesDraft, setCfHostnamesDraft] = useState('');
   const [cfTunnelResult, setCfTunnelResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [discord, setDiscord] = useState<DiscordNotificationStatus | null>(null);
@@ -89,8 +87,6 @@ export default function Config() {
     setDomainRootDraft(c.domain_root.value);
     // 解決値 (env 優先) ではなく config store の素の値を下書きにする。 解決値を入れると
     // env が設定されている時に env の値をそのまま保存し、 既存の config を潰してしまう。
-    setCfProjectDraft(c.cf_tunnel.stored.infisical_project_id ?? '');
-    setCfEnvDraft(c.cf_tunnel.stored.infisical_environment ?? '');
     setCfHostnamesDraft(c.cf_tunnel.stored.allowed_hostnames.join(', '));
     setRows(toRows(c.services));
     setDiscord(notification.discord);
@@ -156,8 +152,6 @@ export default function Config() {
     setCfTunnelResult(null);
     try {
       await saveCfTunnel({
-        infisical_project_id: cfProjectDraft.trim(),
-        infisical_environment: cfEnvDraft.trim(),
         allowed_hostnames: cfHostnamesDraft
           .split(',')
           .map((h) => h.trim())
@@ -285,44 +279,22 @@ export default function Config() {
       <section className="config-card">
         <h2>CF Tunnel broker</h2>
         <p className="muted">
-          Cloudflare Tunnel route broker settings. The CF API token itself lives in Infisical
-          (keys <code>CF_API_TOKEN</code> / <code>CF_ACCOUNT_ID</code>) — configure which project and
-          environment to read it from, and which public hostnames the broker may modify (fail-closed
+          Cloudflare Tunnel route broker settings. The CF API token itself lives in the Excubitor
+          Vault (環境変数 tab, keys <code>CF_API_TOKEN</code> / <code>CF_ACCOUNT_ID</code>; no service
+          binding needed). Configure here which public hostnames the broker may modify (fail-closed
           when empty).
         </p>
         <p className="muted small">
           Saved at <code>{cfTunnel.storePath}</code>. These fields edit the stored config; when the
           matching env var is set it takes precedence and the stored value stays unused.
-          {cfTunnel.infisical_project_source === 'env'
-            ? <> <code>EXCUBITOR_CF_INFISICAL_PROJECT_ID</code> is set, so env takes precedence.</>
-            : null}
-          {cfTunnel.infisical_environment_source === 'env'
-            ? <> <code>EXCUBITOR_CF_INFISICAL_ENV</code> is set, so env takes precedence.</>
-            : null}
           {cfTunnel.allowed_hostnames_source === 'env'
             ? <> <code>EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES</code> is set, so env takes precedence.</>
             : null}
           {cfTunnel.direct_env_credentials
-            ? <> Direct env credentials (<code>EXCUBITOR_CF_API_TOKEN</code>) are set and win over Infisical.</>
+            ? <> Direct env credentials (<code>EXCUBITOR_CF_API_TOKEN</code>) are set and win over the Vault.</>
             : null}
         </p>
         <div className="config-form">
-          <label>
-            Infisical project ID (in effect: {cfTunnel.infisical_project_source})
-            <input
-              value={cfProjectDraft}
-              onChange={(e) => setCfProjectDraft(e.target.value)}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            />
-          </label>
-          <label>
-            Infisical environment (in effect: {cfTunnel.infisical_environment_source}, default: prod)
-            <input
-              value={cfEnvDraft}
-              onChange={(e) => setCfEnvDraft(e.target.value)}
-              placeholder="prod"
-            />
-          </label>
           <label>
             Allowed hostnames (in effect: {cfTunnel.allowed_hostnames_source}, comma separated)
             <input
