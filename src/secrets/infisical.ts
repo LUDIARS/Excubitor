@@ -106,6 +106,32 @@ export async function fetchProjectSecrets(
   return secrets;
 }
 
+export interface InfisicalProject {
+  id: string;
+  name: string;
+  environments: Array<{ slug: string; name: string }>;
+}
+
+/**
+ * identity が参照できる secret-manager project の一覧 (GET /api/v1/projects)。
+ * Vault への一括移行 (vault/infisical-bulk-import.ts) が使う。失敗は throw する。
+ */
+export async function listProjects(id: ExcubitorIdentity): Promise<InfisicalProject[]> {
+  const token = await login(id);
+  const res = await fetch(`${id.siteUrl}/api/v1/projects?type=secret-manager`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Infisical project list failed: ${res.status}`);
+  const { projects } = (await res.json()) as { projects?: Array<Partial<InfisicalProject>> };
+  return (projects ?? [])
+    .filter((p): p is Partial<InfisicalProject> & { id: string } => typeof p.id === 'string' && p.id.length > 0)
+    .map((p) => ({
+      id: p.id,
+      name: typeof p.name === 'string' ? p.name : p.id,
+      environments: (p.environments ?? []).filter((e) => typeof e?.slug === 'string').map((e) => ({ slug: e.slug, name: e.name ?? e.slug })),
+    }));
+}
+
 export interface SecretFilter {
   prefix?: string;
   include?: string[];

@@ -83,7 +83,10 @@ export class Vault {
    * 複数件をまとめて取り込む (Infisical から)。Vault は変数名の名前空間が 1 つなので、
    * 既にある同名が別の値なら上書きせず conflicts で返す (別 project の同名で他サービスの値を壊さないため)。
    */
-  async importEntries(values: Record<string, string>): Promise<{ imported: string[]; unchanged: string[]; conflicts: string[] }> {
+  async importEntries(
+    values: Record<string, string>,
+    options: { dryRun?: boolean } = {},
+  ): Promise<{ imported: string[]; unchanged: string[]; conflicts: string[] }> {
     const key = await this.key();
     const names = Object.keys(values).sort();
     for (const name of names) assertName(name);
@@ -97,6 +100,8 @@ export class Vault {
       else if (openValue(key, name, existing.sealed) === values[name]) unchanged.push(name);
       else conflicts.push(name);
     }
+    // dryRun は分類だけ返して書かない (一括移行の事前確認用)。
+    if (options.dryRun || imported.length === 0) return { imported, unchanged, conflicts };
     this.update((current) => {
       for (const name of imported) current.entries[name] = { sealed: sealValue(key, name, values[name]!), updated_at: this.now() };
     });

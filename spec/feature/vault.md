@@ -46,11 +46,33 @@
 | PUT | `/api/v1/vault/bindings/:code` | `{ names }` 使用する環境変数 (空で外す) |
 | PUT | `/api/v1/vault/source` | `{ peer_id }` 拠点の取得元 (null で本社) |
 | POST | `/api/v1/vault/import/infisical/:code` | Infisical の値を Vault に移して紐付けに足す。名前空間は 1 つなので、既にある同名が別の値なら上書きも紐付けもせず `conflicts` で返す (同じ値は `unchanged` として紐付ける) |
+| POST | `/api/v1/vault/import/infisical` | `{ dry_run?, environment? }` Infisical の全 project を一括で移す (下記)。名前と件数だけ返し、値は返さない |
 
 公開面 (拠点間、相互登録の署名が必須): `POST /api/v1/federation/vault/env` `{ service }` → `{ env, missing }`。
 渡した記録 (拠点・サービス・変数名) をログに残す。値は残さない。
 
 WebUI: 「環境変数」タブ。
+
+### Infisical からの一括移行
+
+Infisical は使わなくなるため、Excubitor の machine identity で参照できる全 project の値を Vault へ移す。
+
+1. Infisical マッピングを持つサービス (Excubitor 設定優先 / catalog fallback) は、そのマッピング
+   (project / environment / prefix / include / exclude) で取り込み、サービスの「使用する環境変数」に紐付ける。
+2. どのサービスにも紐付かない project (`GET /api/v1/projects?type=secret-manager`) は値だけ取り込み、紐付けない
+   (例: CF Tunnel ブローカーが読む `CF_API_TOKEN` / `CF_ACCOUNT_ID`)。environment は `environment` (既定 `dev`)。
+   project に無く environment が 1 つだけならそれを使い、それ以外は skip して理由を返す。
+3. 既にある同名が別の値なら上書きせず `conflicts`。変数名に使えない名前と空の値は `invalid` として取り込まない。
+   1 件の失敗は `error` に入れて残りを続ける。`dry_run` は分類だけ返して Vault を変更しない。
+
+実行 (本社の Excubitor で、人が実行する):
+
+```bash
+node scripts/vault-import-infisical.mjs --url http://127.0.0.1:17332/ --dry-run   # 何が入るかだけ見る
+node scripts/vault-import-infisical.mjs --url http://127.0.0.1:17332/             # 登録する
+```
+
+スクリプトは loopback の Excubitor だけを呼び、資格情報を持たず値も表示しない。POST は再送しない。
 
 2026-10-01: 本社で Infisical の値を取り込み済み (cernere 47 / ostiarius 5 / volputas 6 / discutere 2、いずれも同じ project・環境で同名は同値)。
 ostiarius / volputas には requires_secret で借りていた `EXCUBITOR_CERNERE_CLIENT_ID` / `_SECRET` も紐付けた。
