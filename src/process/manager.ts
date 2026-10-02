@@ -22,6 +22,7 @@ import { resolveDevProcessCommand } from './dev-process-md.js';
 import { resolveExecutable } from './executable-resolver.js';
 import { execCapture } from '../shared/exec.js';
 import { ensureProcessLogPaths, startProcessLog, stopProcessLog } from '../log/process-file.js';
+import { appendLifecycleEvent } from '../log/lifecycle-log.js';
 import { runServiceBuild } from './build.js';
 import { assertStartupEnv } from './startup-env.js';
 import { maybeDispatchCrashFixToConcordia } from '../auto_fix/concordia-dispatch.js';
@@ -403,6 +404,14 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
   }
 
   const { stdoutFd, stderrFd } = startProcessLog(svc.code);
+  appendLifecycleEvent(svc.code, {
+    kind: 'start',
+    command: [cmd, ...args].join(' '),
+    cwd: resolvedCwd,
+    version: version.value,
+    restartCount: opts.initialRestartCount ?? 0,
+    strategy: 'child',
+  });
   // child 起動は POSIX 専用。managed service は自前のプロセスグループに置き (detached)、
   // local-control supervisor が OS service manager から再起動されても生き残らせる。
   let child: ChildProcess;
@@ -473,6 +482,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
 
   // adopted 側に同 code が残っていれば、 自前 spawn が真実なので除去。
   adopted.delete(svc.code);
+  appendLifecycleEvent(svc.code, { kind: 'spawned', pid: child.pid ?? null, strategy: 'child' });
   const restartCount = opts.initialRestartCount ?? 0;
   let resolveTermination = (): void => undefined;
   const termination = new Promise<void>((resolve) => {
@@ -805,6 +815,14 @@ async function spawnBreakawayService(
   // 開いて子へ渡すため、supervisor は fd を所有しない。
   stopProcessLog(svc.code);
   const { stdoutPath, stderrPath } = ensureProcessLogPaths(svc.code);
+  appendLifecycleEvent(svc.code, {
+    kind: 'start',
+    command: [command.command, ...command.args].join(' '),
+    cwd: resolvedCwd,
+    version: version.value,
+    restartCount: opts.initialRestartCount ?? 0,
+    strategy: command.shell ? 'job-breakaway (shell)' : 'job-breakaway',
+  });
   const spawnedAt = new Date();
   let pid: number;
   try {
@@ -879,6 +897,7 @@ async function spawnBreakawayService(
   }
   adopted.set(svc.code, { code: svc.code, pid, startedAt: identity.startedAt });
   await updateInstanceStatus(svc.code, 'running', pid, undefined, identity.startedAt);
+  appendLifecycleEvent(svc.code, { kind: 'spawned', pid, strategy: 'job-breakaway' });
   logger.info(
     { code: svc.code, pid, strategy: 'job-breakaway', version: childEnv[SERVICE_VERSION_ENV] },
     'spawned outside the supervisor job (windowless)',
@@ -932,6 +951,7 @@ async function recordSpawnFailure(
     ? survivingPid
     : null;
   logger.error({ code, err: message, retainedPid: retained }, 'spawn failed');
+  appendLifecycleEvent(code, { kind: 'start-failed', message, retainedPid: retained });
   try {
     await updateInstanceStatus(code, 'crashed', retained);
   } catch (stateErr) {

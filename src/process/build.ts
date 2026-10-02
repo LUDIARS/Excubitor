@@ -2,6 +2,7 @@ import { dirname } from 'node:path';
 import type { Service } from '../catalog/loader.js';
 import { execCapture, type ExecResult } from '../shared/exec.js';
 import { createNamedLogger } from '../shared/logger.js';
+import { appendLifecycleEvent } from '../log/lifecycle-log.js';
 
 const logger = createNamedLogger('excubitor.process.build');
 
@@ -17,8 +18,18 @@ export async function runServiceBuild(svc: Service, reason: string): Promise<Ser
 
   const cwd = buildCwd(svc);
   logger.info({ code: svc.code, command: svc.build_command, cwd, reason }, 'running service build');
+  appendLifecycleEvent(svc.code, { kind: 'build-start', reason, command: svc.build_command, cwd });
   const result = await execCapture(svc.build_command, [], cwd, 1_800_000, true);
   logger.info({ code: svc.code, ok: result.ok, exit_code: result.code, reason }, 'service build complete');
+  if (!result.ok) {
+    appendLifecycleEvent(svc.code, {
+      kind: 'build-failed',
+      reason,
+      command: svc.build_command,
+      exitCode: result.code,
+      output: result.stderr || result.stdout,
+    });
+  }
   return { ...result, command: svc.build_command, skipped: false };
 }
 

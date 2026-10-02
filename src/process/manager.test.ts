@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   loggerWarn: vi.fn(),
   prepareSpawnEnv: vi.fn(async (_svc: unknown, env: Record<string, string>) => env),
   spawnsOutsideJob: vi.fn(),
+  appendLifecycleEvent: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
@@ -44,6 +45,7 @@ vi.mock('../log/process-file.js', () => ({
     stderrPath: 'data/process-logs/test.err.log',
   })),
 }));
+vi.mock('../log/lifecycle-log.js', () => ({ appendLifecycleEvent: mocks.appendLifecycleEvent }));
 vi.mock('./build.js', () => ({ runServiceBuild: mocks.runServiceBuild }));
 vi.mock('./startup-env.js', () => ({ assertStartupEnv: vi.fn() }));
 vi.mock('../auto_fix/concordia-dispatch.js', () => ({ maybeDispatchCrashFixToConcordia: vi.fn() }));
@@ -509,9 +511,19 @@ describe('job-breakaway spawn (win32)', () => {
     // Windows only ever spawns through this path; the child-path dispatch does not run here.
     const startedAt = new Date();
     mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: true, identity: { pid: 4324, startedAt, verified: true } });
+    mocks.appendLifecycleEvent.mockClear();
     await spawnService(service('breakaway-notify'), { breakaway: breakawayOptions(995, 4324) });
     expect(dispatchServiceDeployment).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'breakaway-notify', startedAt, restartCount: 0 }),
+    );
+    // 起動のたびにサービス自身のログへ区切り (start) と結果 (spawned + pid) を書く。
+    expect(mocks.appendLifecycleEvent.mock.calls.map(([code, event]) => [code, event.kind])).toEqual([
+      ['breakaway-notify', 'start'],
+      ['breakaway-notify', 'spawned'],
+    ]);
+    expect(mocks.appendLifecycleEvent).toHaveBeenLastCalledWith(
+      'breakaway-notify',
+      { kind: 'spawned', pid: 4324, strategy: 'job-breakaway' },
     );
 
     vi.mocked(dispatchServiceDeployment).mockClear();
@@ -537,10 +549,19 @@ describe('job-breakaway spawn (win32)', () => {
   it('says the process exited when the pid is already gone', async () => {
     // 回収すべき pid が無い側。 調べるのは stderr であって孤児ではない。
     mocks.waitForProcessIdentityOutcome.mockResolvedValue({ ok: false, reason: 'exited' });
+    mocks.appendLifecycleEvent.mockClear();
 
     await expect(
       spawnService(service('breakaway-dead'), { breakaway: breakawayOptions(997, 4322) }),
     ).rejects.toThrow(/exited immediately after breakaway spawn \(pid=4322\)/);
+    // 起動失敗はサービスのログにも残り、エラー検知の対象になる。
+    expect(mocks.appendLifecycleEvent).toHaveBeenLastCalledWith(
+      'breakaway-dead',
+      expect.objectContaining({
+        kind: 'start-failed',
+        message: expect.stringMatching(/exited immediately after breakaway spawn/),
+      }),
+    );
     expect(mocks.loggerWarn).toHaveBeenCalledWith(
       { code: 'breakaway-dead', pid: 4322, reason: 'exited' },
       expect.stringContaining('no orphan pid to reclaim'),

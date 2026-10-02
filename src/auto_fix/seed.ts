@@ -27,6 +27,8 @@ const DEFAULTS: DefaultRule[] = [
   { name: 'TS compile error', pattern: 'error TS\\d{4,}', pattern_type: 'regex', severity: 'error' },
   { name: 'Uncaught exception', pattern: 'Uncaught\\s+(?:Type)?Error', pattern_type: 'regex', severity: 'fatal' },
   { name: 'ECONNREFUSED', pattern: 'ECONNREFUSED', pattern_type: 'keyword', severity: 'warn' },
+  // lifecycle-log.ts が起動失敗 (ビルド失敗・spawn 失敗) を各サービスの err ログへ書く印。
+  { name: 'Excubitor start failure', pattern: '[excubitor-start-failure]', pattern_type: 'keyword', severity: 'error' },
 ];
 
 export async function seedDefaultRules(): Promise<void> {
