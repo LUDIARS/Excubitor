@@ -58,6 +58,16 @@ export class CloudflareTunnelApi {
     return result.config ?? {};
   }
 
+  /**
+   * tunnel を消す。接続中の cloudflared を切る cascade は使わない (接続中なら CF が拒否する)。
+   * 削除してよいかの判断は removal-service.ts が行う。
+   * @implements SPEC-CF-TUNNEL-ROUTES
+   */
+  async deleteTunnel(tunnelId: string): Promise<void> {
+    logger.info({ tunnelId }, 'deleting tunnel');
+    await this.request<unknown>('DELETE', `/cfd_tunnel/${encodeURIComponent(tunnelId)}`);
+  }
+
   /** @implements SPEC-CF-TUNNEL-ROUTES */
   async putConfiguration(tunnelId: string, config: CfTunnelConfig): Promise<CfTunnelConfig> {
     logger.info(

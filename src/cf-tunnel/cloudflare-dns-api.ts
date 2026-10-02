@@ -55,4 +55,14 @@ export class CloudflareDnsApi {
     );
     return { id: r.id, type: r.type, name: r.name, content: r.content, proxied: r.proxied === true };
   }
+
+  /** レコードを 1 件消す。対象の選定は removal-service.ts が行う。 @implements SPEC-CF-TUNNEL-ROUTES */
+  async deleteRecord(zoneId: string, recordId: string): Promise<void> {
+    logger.info({ zoneId, recordId }, 'deleting DNS record for tunnel route');
+    await cfRequest<unknown>(
+      this.creds,
+      'DELETE',
+      `/zones/${encodeURIComponent(zoneId)}/dns_records/${encodeURIComponent(recordId)}`,
+    );
+  }
 }

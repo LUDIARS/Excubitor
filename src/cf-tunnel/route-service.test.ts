@@ -196,15 +196,28 @@ describe('describeRoutes', () => {
   it('catch-all は hostname null / mutable false、allowlist 掲載のみ mutable', () => {
     const described = describeRoutes(baseIngress(), ALLOWED);
     expect(described).toEqual([
-      { hostname: 'qs.ai-run-do.com', path: null, service: 'http://127.0.0.1:17400', mutable: false },
+      { hostname: 'qs.ai-run-do.com', path: null, service: 'http://127.0.0.1:17400', mutable: false, access_required: false },
       {
         hostname: 'qs-magiclink.ai-run-do.com',
         path: '^/v1/invoices/share/[A-Za-z0-9_-]+$',
         service: 'http://127.0.0.1:17400',
         mutable: true,
+        access_required: false,
       },
-      { hostname: null, path: null, service: 'http_status:404', mutable: false },
+      { hostname: null, path: null, service: 'http_status:404', mutable: false, access_required: false },
     ]);
+  });
+
+  it('Access 必須の route は access_required: true (AUD 等の値は出さない)', () => {
+    const described = describeRoutes(
+      [
+        { hostname: 'qs-magiclink.ai-run-do.com', service: 'http://127.0.0.1:17400', originRequest: { access: { required: true, teamName: 't', audTag: ['secret-aud'] } } },
+        { service: 'http_status:404' },
+      ],
+      ALLOWED,
+    );
+    expect(described[0]).toMatchObject({ access_required: true });
+    expect(JSON.stringify(described)).not.toContain('secret-aud');
   });
 });
 

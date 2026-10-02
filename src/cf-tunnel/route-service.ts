@@ -132,6 +132,11 @@ export function removeRoute(
   return [...ingress.slice(0, index), ...ingress.slice(index + 1)];
 }
 
+function isAccessRequired(rule: CfIngressRule): boolean {
+  const origin = rule.originRequest as { access?: { required?: unknown } } | undefined;
+  return origin?.access?.required === true;
+}
+
 /**
  * 一覧表示用。mutable = allowlist に載っているか。catch-all は hostname: null で示す。
  * @implements SPEC-CF-TUNNEL-ROUTES
@@ -139,12 +144,14 @@ export function removeRoute(
 export function describeRoutes(
   ingress: CfIngressRule[],
   allowed: string[],
-): Array<{ hostname: string | null; path: string | null; service: string; mutable: boolean }> {
+): Array<{ hostname: string | null; path: string | null; service: string; mutable: boolean; access_required: boolean }> {
   const catchAllIndex = catchAllIndexOf(ingress);
   return ingress.map((r, i) => ({
     hostname: r.hostname ?? null,
     path: r.path ?? null,
     service: r.service,
     mutable: Boolean(r.hostname) && i !== catchAllIndex && isHostnameAllowed(r.hostname!, allowed),
+    // 画面で「Access アプリも消す」を出し分けるため。AUD 等の値は出さない。
+    access_required: isAccessRequired(r),
   }));
 }

@@ -78,6 +78,24 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
      `originRequest.access = { required: true, teamName, audTag: [aud] }` を付ける。
    - トークンに要る権限: Access: Apps and Policies Edit / Access: Organizations Read /
      Cloudflare Tunnel Edit / Zone Read / DNS Edit。
+9. **削除 (DNS / Tunnel)** — 作るときと同じトークン境界の下で消す。消すのはブローカーが作る形の
+   ものだけ。Access アプリの削除は要求 8 の `apps/remove`。
+   ```
+   POST /api/v1/cf-tunnel/dns/remove      { hostname, tunnel? }
+   POST /api/v1/cf-tunnel/tunnels/remove  { tunnel, confirm }
+   ```
+   - dns/remove: allowlist の hostname のみ。hostname のレコードのうち `<tunnel id>.cfargotunnel.com`
+     を向いた CNAME だけを消す。この tunnel を向いていないレコードしか無ければ消さずに 400。
+     レコードが無ければ `removed: false` で成功 (冪等)。
+   - Access 必須の route が残ったまま Access アプリを消すと JWT を検証できず閉じるので、route を先に消す。
+   - tunnels/remove: `tunnel` は必須 (唯一の tunnel の暗黙指定は使わない)。`confirm` が tunnel 名と
+     一致し、hostname 付きのルートが 0 件 (catch-all のみ)、status が healthy / degraded でない
+     (cloudflared 未接続) ときだけ消す。allowlist 外のルートはブローカーで消せないため、それが残る
+     tunnel も消せない。接続を切る cascade は使わない。MCP には出さず、WebUI からだけ操作する。
+   - WebUI (Config → CF Tunnel routes): ルート一覧 (`access_required` を表示) と、allowlist 内の
+     route の削除 (route → DNS → Access アプリの順、DNS / Access は選択)、Tunnel の削除。
+   - MCP の remove は `remove_dns` / `remove_access` / `access_service` で同じ順に消せる。
+   - トークンに要る権限は要求 8 と同じ (各 Edit 権限で削除もできる)。
 
 ## 運用
 

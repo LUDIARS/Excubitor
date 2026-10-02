@@ -1211,3 +1211,54 @@ export function fetchSelfNode(): Promise<SelfNode> {
   return getJSON<SelfNode>('/api/v1/federation/self');
 }
 
+// ─────────────── CF ブローカー (Tunnel ルート一覧と削除) ───────────────
+
+/** @implements SPEC-CF-TUNNEL-ROUTES */
+export interface CfTunnelRoute {
+  hostname: string | null;
+  path: string | null;
+  service: string;
+  /** allowlist に載っていて変更できるか。 */
+  mutable: boolean;
+  /** cloudflared が Access の JWT を要求する route か。 */
+  access_required: boolean;
+}
+
+export interface CfTunnelRoutes {
+  tunnel: { id: string; name: string };
+  allowed_hostnames: string[];
+  routes: CfTunnelRoute[];
+}
+
+/** tunnel は id か name。空ならアカウント唯一の tunnel。 */
+export function fetchCfTunnelRoutes(tunnel: string): Promise<CfTunnelRoutes> {
+  const q = tunnel.trim() ? `?tunnel=${encodeURIComponent(tunnel.trim())}` : '';
+  return getJSON<CfTunnelRoutes>(`/api/v1/cf-tunnel/routes${q}`);
+}
+
+export function removeCfTunnelRoute(input: { tunnel: string; hostname: string; path?: string | null }) {
+  return postJSON<{ ok: boolean }>('/api/v1/cf-tunnel/routes/remove', {
+    tunnel: input.tunnel || undefined,
+    hostname: input.hostname,
+    path: input.path ?? undefined,
+  });
+}
+
+export function removeCfTunnelDns(input: { tunnel: string; hostname: string }) {
+  return postJSON<{ ok: boolean; removed: boolean; zone: string }>('/api/v1/cf-tunnel/dns/remove', {
+    tunnel: input.tunnel || undefined,
+    hostname: input.hostname,
+  });
+}
+
+export function removeCfAccessApp(input: { hostname: string; service?: string }) {
+  // domain が一致するアプリが無ければ 400 (access-router.ts)。
+  return postJSON<{ ok: boolean; removed: { id: string; name: string; domain: string } }>('/api/v1/cf-access/apps/remove', {
+    hostname: input.hostname,
+    service: input.service?.trim() || undefined,
+  });
+}
+
+export function removeCfTunnel(input: { tunnel: string; confirm: string }) {
+  return postJSON<{ ok: boolean; removed: boolean; tunnel: { id: string; name: string } }>('/api/v1/cf-tunnel/tunnels/remove', input);
+}

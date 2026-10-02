@@ -19,6 +19,7 @@ import {
   type PackageAuditDiscordStatus,
 } from '../lib/api';
 import GeniusRuntimeConfigCard from '../components/GeniusRuntimeConfigCard';
+import CfTunnelRoutesCard from '../components/CfTunnelRoutesCard';
 
 interface SvcRow extends ServiceInfisical {
   code: string;
@@ -319,6 +320,8 @@ export default function Config() {
           )}
         </div>
       </section>
+
+      <CfTunnelRoutesCard busy={busy} setBusy={setBusy} />
 
       <section className="config-card">
         <h2>Discord downtime notifications</h2>

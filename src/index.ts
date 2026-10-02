@@ -95,6 +95,7 @@ import { selfRepoOf } from './federation/operations/self-operation.js';
 import { captureSelfVersion } from './federation/self-version.js';
 import { buildCfTunnelRouter } from './cf-tunnel/router.js';
 import { buildCfAccessRouter } from './cf-tunnel/access-router.js';
+import { buildCfRemovalRouter } from './cf-tunnel/removal-router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
 import { arsRoot } from './shared/roots.js';
@@ -857,6 +858,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildCfTunnelRouter());
   // 同ブローカーの Access アプリ / DNS (/api/v1/cf-access/*, /api/v1/cf-tunnel/dns)
   app.route('/', buildCfAccessRouter());
+  app.route('/', buildCfRemovalRouter());
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
   app.get(

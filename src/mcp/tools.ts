@@ -318,15 +318,18 @@ export function buildMcpServer(baseUrl: string): McpServer {
 
   server.tool(
     'excubitor_cf_tunnel_routes',
-    'Cloudflare Tunnel の public hostname ルートを list / add / remove する (CF トークンは Excubitor が保持)。変更は allowlist 掲載 hostname のみ。',
+    'Cloudflare Tunnel の public hostname ルートを list / add / remove する (CF トークンは Excubitor が保持)。変更は allowlist 掲載 hostname のみ。remove は remove_dns / remove_access で tunnel 向き CNAME と Access アプリも消せる (Tunnel 自体の削除は WebUI のみ)。',
     {
       action: z.enum(['list', 'add', 'remove']).describe('操作'),
       tunnel: z.string().optional().describe('tunnel の id か name (アカウントに 1 本だけなら省略可)'),
       hostname: z.string().optional().describe('add / remove 対象の hostname (add/remove で必須)'),
       service: z.string().optional().describe('add の転送先 (例 http://127.0.0.1:17400)'),
       path: z.string().optional().describe('パス条件 (CF ingress の path 正規表現)'),
+      remove_dns: z.boolean().optional().describe('remove 時、hostname の tunnel 向き CNAME も消す'),
+      remove_access: z.boolean().optional().describe('remove 時、hostname の Access アプリも消す'),
+      access_service: z.string().optional().describe('remove_access 時、runtime-config から cloudflareAccess を外すサービスコード'),
     },
-    async ({ action, tunnel, hostname, service, path }) => {
+    async ({ action, tunnel, hostname, service, path, remove_dns, remove_access, access_service }) => {
       try {
         if (action === 'list') {
           const q = tunnel ? `?tunnel=${encodeURIComponent(tunnel)}` : '';
@@ -341,7 +344,11 @@ export function buildMcpServer(baseUrl: string): McpServer {
           }
           return jsonContent(await apiPost('/api/v1/cf-tunnel/routes', { tunnel, hostname, service, path }));
         }
-        return jsonContent(await apiPost('/api/v1/cf-tunnel/routes/remove', { tunnel, hostname, path }));
+        // route → DNS → Access の順。途中で失敗したらそこでエラーを返し、残りは実行しない。
+        const result: Record<string, unknown> = { route: await apiPost('/api/v1/cf-tunnel/routes/remove', { tunnel, hostname, path }) };
+        if (remove_dns) result.dns = await apiPost('/api/v1/cf-tunnel/dns/remove', { tunnel, hostname });
+        if (remove_access) result.access = await apiPost('/api/v1/cf-access/apps/remove', { hostname, service: access_service });
+        return jsonContent(result);
       } catch (err) {
         return errorContent(err);
       }
