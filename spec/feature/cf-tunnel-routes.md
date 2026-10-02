@@ -57,6 +57,7 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
    ```
    GET  /api/v1/cf-access/policies   → { policies: [{ id, name, decision }] }   (再利用ポリシー)
    POST /api/v1/cf-access/apps       { hostname, name, policy_id, service }
+   POST /api/v1/cf-access/apps/remove { hostname, service? }
    POST /api/v1/cf-tunnel/dns        { hostname, tunnel? }
    POST /api/v1/cf-tunnel/routes     { ..., require_access: true }
    ```
@@ -65,6 +66,11 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
      続けて組織の `auth_domain` とアプリの `aud` を検証し、サービスの runtime-config
      (`cloudflareAccess: { teamDomain, audience }`) に書く。runtime-config の他のキーは保持する。
      AUD は応答・ログに出さない (runtime-config 経由でサービスにだけ渡る)。
+   - apps/remove: Access を外して公開に戻すときに使う。domain が hostname と完全一致する
+     Access アプリだけを削除する (無ければ 400)。ポリシー・DNS・tunnel route は消さない。
+     `service` が来たら、そのサービスの runtime-config から `cloudflareAccess` だけを外す
+     (他のキーは保持し、空になれば runtime-config ごと消す)。応答は
+     `{ ok, removed: { id, name, domain }, runtime_config }` で、AUD は出さない。
    - dns: tunnel にその hostname の route があるときだけ、hostname を含む zone に
      `<tunnel id>.cfargotunnel.com` への proxied CNAME を作る。同じ向き先の proxied CNAME が
      あれば何もしない。別の向き先・別種・非 proxied のレコードは上書きせず 400。

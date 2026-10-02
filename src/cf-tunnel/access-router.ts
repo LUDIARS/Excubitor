@@ -4,6 +4,9 @@
  *   POST /api/v1/cf-access/apps       … {hostname, name, policy_id, service}
  *        同じ domain のアプリがあれば再利用、無ければ self-hosted で作る。続けて team / AUD を
  *        サービスの runtime-config (cloudflareAccess) に書く。AUD は応答・ログに出さない。
+ *   POST /api/v1/cf-access/apps/remove … {hostname, service?}
+ *        domain が完全一致する Access アプリだけを削除する。service があれば runtime-config から
+ *        cloudflareAccess を外す (他のキーは保持)。ポリシー・DNS は消さない。
  *   POST /api/v1/cf-tunnel/dns        … {hostname, tunnel?}
  *        tunnel に route がある hostname だけ、<tunnel>.cfargotunnel.com への proxied CNAME を作る。
  * 変更はすべて allowlist の hostname のみ。
@@ -21,6 +24,7 @@ import {
   planTunnelCname,
   requireAllowPolicy,
   withCloudflareAccess,
+  withoutCloudflareAccess,
   zoneCandidates,
 } from './access-service.js';
 import { currentAllowlist, failureStatus, resolveTunnel } from './broker-support.js';
@@ -91,6 +95,31 @@ export function buildCfAccessRouter(): Hono {
     } catch (err) {
       logger.warn({ err: (err as Error).message }, 'cf-access app ensure failed');
       return c.json({ error: 'cf_access_app_failed', message: (err as Error).message }, failureStatus(err));
+    }
+  });
+
+  app.post('/api/v1/cf-access/apps/remove', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { hostname?: string; service?: string } | null;
+    if (!body?.hostname) return c.json({ error: 'bad_request', message: 'hostname は必須' }, 400);
+    const hostname = body.hostname.trim().toLowerCase();
+    try {
+      assertAllowed(hostname);
+      const access = new CloudflareAccessApi(await resolveCfCredentials());
+      const target = findAppForHostname(await access.listApps(), hostname);
+      if (!target) throw new RouteRejectedError(`"${hostname}" と domain が一致する Access アプリが無い`);
+      await access.deleteApp(target.id);
+      const runtime = body.service
+        ? saveServiceRuntimeConfig(body.service, withoutCloudflareAccess(getServiceRuntimeConfig(body.service)))
+        : null;
+      logger.info({ hostname, service: body.service ?? null, appId: target.id }, 'cf-access app removed');
+      return c.json({
+        ok: true,
+        removed: { id: target.id, name: target.name, domain: target.domain },
+        runtime_config: runtime,
+      });
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'cf-access app remove failed');
+      return c.json({ error: 'cf_access_app_remove_failed', message: (err as Error).message }, failureStatus(err));
     }
   });
 

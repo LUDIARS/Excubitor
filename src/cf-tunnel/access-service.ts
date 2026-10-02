@@ -69,6 +69,16 @@ export function withCloudflareAccess(
   };
 }
 
+/**
+ * サービスの runtime-config から cloudflareAccess だけを外す。他のキーは保持し、
+ * 何も残らなければ null (runtime-config ごと削除) を返す。
+ * @implements SPEC-CF-TUNNEL-ROUTES
+ */
+export function withoutCloudflareAccess(current: Record<string, unknown> | null): Record<string, unknown> | null {
+  const { cloudflareAccess: _removed, ...rest } = current ?? {};
+  return Object.keys(rest).length > 0 ? rest : null;
+}
+
 /** cloudflared が JWT を検証してから origin へ渡す route 設定。 @implements SPEC-CF-TUNNEL-ROUTES */
 export function accessOriginRequest(identity: AccessIdentity): Record<string, unknown> {
   return { access: { required: true, teamName: identity.teamName, audTag: [identity.audience] } };

@@ -80,6 +80,12 @@ export class CloudflareAccessApi {
     return { id: a.id, name: a.name ?? input.name, domain: a.domain ?? input.domain, aud: a.aud ?? '', type: a.type ?? 'self_hosted' };
   }
 
+  /** Access アプリを 1 件削除する (ポリシーは残る)。 @implements SPEC-CF-TUNNEL-ROUTES */
+  async deleteApp(appId: string): Promise<void> {
+    logger.info({ appId }, 'deleting access application');
+    await this.request<unknown>('DELETE', `/access/apps/${encodeURIComponent(appId)}`);
+  }
+
   /** Zero Trust 組織の認証ドメイン (`<team>.cloudflareaccess.com`)。 @implements SPEC-CF-TUNNEL-ROUTES */
   async authDomain(): Promise<string> {
     const org = await this.request<{ auth_domain?: string }>('GET', '/access/organizations');

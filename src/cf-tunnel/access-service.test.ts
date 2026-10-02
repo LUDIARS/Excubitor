@@ -8,6 +8,7 @@ import {
   planTunnelCname,
   requireAllowPolicy,
   withCloudflareAccess,
+  withoutCloudflareAccess,
   zoneCandidates,
 } from './access-service.js';
 import { addRoute, RouteRejectedError } from './route-service.js';
@@ -61,6 +62,17 @@ describe('accessIdentity / runtime-config / originRequest', () => {
       cloudflareAccess: { teamDomain: 'team.cloudflareaccess.com', audience: AUD },
     });
     expect(withCloudflareAccess(null, identity)).toEqual({ cloudflareAccess: { teamDomain: 'team.cloudflareaccess.com', audience: AUD } });
+  });
+});
+
+describe('withoutCloudflareAccess', () => {
+  it('cloudflareAccess だけを外し、他のキーは残す', () => {
+    expect(withoutCloudflareAccess({ other: 1, cloudflareAccess: { teamDomain: 't', audience: AUD } })).toEqual({ other: 1 });
+  });
+  it('何も残らなければ null (runtime-config ごと削除)', () => {
+    expect(withoutCloudflareAccess({ cloudflareAccess: { teamDomain: 't', audience: AUD } })).toBeNull();
+    expect(withoutCloudflareAccess({})).toBeNull();
+    expect(withoutCloudflareAccess(null)).toBeNull();
   });
 });
 
