@@ -8,6 +8,7 @@
 
 import { createKeyStore, loadOrCreateDek, type KeyStore } from './keystore.js';
 import { openValue, sealValue } from './vault-crypto.js';
+import { ProjectVaults } from './project-vaults.js';
 import { ENV_NAME_PATTERN, readVault, vaultDir, vaultFilePath, writeVault, type VaultDoc } from './vault-store.js';
 
 export interface VaultStatus {
@@ -16,6 +17,7 @@ export interface VaultStatus {
   entries: Array<{ name: string; updated_at: number; used_by: string[] }>;
   bindings: Record<string, Array<{ name: string; present: boolean }>>;
   cached_services: Array<{ code: string; fetched_at: number }>;
+  projects: Array<{ id: string; name: string; entries: VaultStatus['entries']; bindings: VaultStatus['bindings'] }>;
 }
 
 export interface ServiceVaultEnv {
@@ -25,7 +27,7 @@ export interface ServiceVaultEnv {
 }
 
 export class VaultError extends Error {
-  constructor(readonly code: 'invalid_name' | 'invalid_value' | 'invalid_service', message: string) {
+  constructor(readonly code: 'invalid_name' | 'invalid_value' | 'invalid_service' | 'invalid_project', message: string) {
     super(message);
     this.name = 'VaultError';
   }
@@ -35,6 +37,8 @@ export interface VaultOptions {
   dir?: string;
   keyStore?: KeyStore;
   now?: () => number;
+  /** Internal: project documents share the root DEK but authenticate their own scope. */
+  projectId?: string;
 }
 
 const SERVICE_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -45,11 +49,39 @@ export class Vault {
   private readonly keyStore: KeyStore;
   private readonly now: () => number;
   private dek: Promise<Buffer> | null = null;
+  private readonly projects: ProjectVaults | null;
+  private readonly projectId: string | undefined;
+  private readonly projectStores = new Map<string, Vault>();
 
   constructor(options: VaultOptions = {}) {
     this.dir = options.dir ?? vaultDir();
     this.keyStore = options.keyStore ?? createKeyStore(this.dir);
     this.now = options.now ?? Date.now;
+    this.projectId = options.projectId;
+    this.projects = options.projectId ? null : new ProjectVaults(this.dir);
+  }
+
+  /** Opening is read-only; register explicitly before writing a new project. */
+  forProject(id: string): Vault {
+    if (!this.projects) throw new Error('nested project Vaults are not supported');
+    const existing = this.projectStores.get(id);
+    if (existing) return existing;
+    const store = new Vault({ dir: this.projects.directory(id), keyStore: this.keyStore, now: this.now, projectId: id });
+    this.projectStores.set(id, store);
+    return store;
+  }
+
+  registerProject(id: string, name = id): void {
+    if (!this.projects) throw new Error('nested project Vaults are not supported');
+    this.projects.register({ id, name });
+  }
+
+  setProjectBindings(id: string, code: string, names: readonly string[]): void {
+    if (!this.projects?.list().some((p) => p.id === id)) throw new VaultError('invalid_project', 'unknown project Vault');
+    if (names.length && this.projects.list().some((p) => p.id !== id && this.forProject(p.id).bindingsFor(code).length)) {
+      throw new VaultError('invalid_project', 'service is already bound to another project Vault');
+    }
+    this.forProject(id).setBindings(code, names);
   }
 
   status(): VaultStatus {
@@ -68,14 +100,18 @@ export class Vault {
       cached_services: Object.entries(doc.cache)
         .map(([code, cache]) => ({ code, fetched_at: cache.fetched_at }))
         .sort((a, b) => a.code.localeCompare(b.code)),
+      projects: (this.projects?.list() ?? []).map((project) => {
+        const status = this.forProject(project.id).status();
+        return { ...project, entries: status.entries, bindings: status.bindings };
+      }),
     };
   }
 
   async setEntry(name: string, value: string): Promise<void> {
     assertName(name);
-    if (typeof value !== 'string' || value.length === 0) throw new VaultError('invalid_value', 'value must be a non-empty string');
+    if (typeof value !== 'string') throw new VaultError('invalid_value', 'value must be a string');
     if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) throw new VaultError('invalid_value', 'value is too large');
-    const sealed = sealValue(await this.key(), name, value);
+    const sealed = sealValue(await this.key(), this.aad(name), value);
     this.update((doc) => { doc.entries[name] = { sealed, updated_at: this.now() }; });
   }
 
@@ -87,23 +123,27 @@ export class Vault {
     values: Record<string, string>,
     options: { dryRun?: boolean } = {},
   ): Promise<{ imported: string[]; unchanged: string[]; conflicts: string[] }> {
-    const key = await this.key();
     const names = Object.keys(values).sort();
     for (const name of names) assertName(name);
     const doc = this.read();
+    // A dry run against a new project must not even create the root DEK.
+    if (options.dryRun && names.every((name) => !doc.entries[name])) {
+      return { imported: names, unchanged: [], conflicts: [] };
+    }
+    const key = await this.key();
     const imported: string[] = [];
     const unchanged: string[] = [];
     const conflicts: string[] = [];
     for (const name of names) {
       const existing = doc.entries[name];
       if (!existing) imported.push(name);
-      else if (openValue(key, name, existing.sealed) === values[name]) unchanged.push(name);
+      else if (openValue(key, this.aad(name), existing.sealed) === values[name]) unchanged.push(name);
       else conflicts.push(name);
     }
     // dryRun は分類だけ返して書かない (一括移行の事前確認用)。
     if (options.dryRun || imported.length === 0) return { imported, unchanged, conflicts };
     this.update((current) => {
-      for (const name of imported) current.entries[name] = { sealed: sealValue(key, name, values[name]!), updated_at: this.now() };
+      for (const name of imported) current.entries[name] = { sealed: sealValue(key, this.aad(name), values[name]!), updated_at: this.now() };
     });
     return { imported, unchanged, conflicts };
   }
@@ -141,6 +181,19 @@ export class Vault {
 
   /** 本社: サービスに紐付けた変数の値。紐付けが無ければ null。 */
   async envFor(code: string): Promise<ServiceVaultEnv | null> {
+    const shared = await this.ownEnvFor(code);
+    const projects = (this.projects?.list() ?? []).filter((p) => this.forProject(p.id).bindingsFor(code).length > 0);
+    if (projects.length > 1) throw new Error(`service ${code} is bound to multiple project Vaults`);
+    const project = projects[0] ? await this.forProject(projects[0].id).ownEnvFor(code) : null;
+    if (!project) return shared;
+    // A missing project value must not silently fall back to a shared credential.
+    const env = { ...shared?.env, ...project.env };
+    for (const name of project.missing) delete env[name];
+    const missing = [...new Set([...(shared?.missing ?? []).filter((name) => !(name in project.env)), ...project.missing])];
+    return { env, missing };
+  }
+
+  private async ownEnvFor(code: string): Promise<ServiceVaultEnv | null> {
     const doc = this.read();
     const names = doc.bindings[code];
     if (!names || names.length === 0) return null;
@@ -149,7 +202,7 @@ export class Vault {
     const missing: string[] = [];
     for (const name of names) {
       const entry = doc.entries[name];
-      if (entry) env[name] = openValue(key, name, entry.sealed);
+      if (entry) env[name] = openValue(key, this.aad(name), entry.sealed);
       else missing.push(name);
     }
     return { env, missing };
@@ -162,7 +215,7 @@ export class Vault {
     const present = names.filter((name) => name in doc.entries);
     if (present.length === 0) return {};
     const key = await this.key();
-    return Object.fromEntries(present.map((name) => [name, openValue(key, name, doc.entries[name]!.sealed)]));
+    return Object.fromEntries(present.map((name) => [name, openValue(key, this.aad(name), doc.entries[name]!.sealed)]));
   }
 
   /** 拠点: 本社から受け取った値を控える。 */
@@ -188,6 +241,10 @@ export class Vault {
       throw error;
     });
     return this.dek;
+  }
+
+  private aad(name: string): string {
+    return this.projectId ? JSON.stringify(['project', this.projectId, name]) : name;
   }
 
   private read(): VaultDoc {

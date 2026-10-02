@@ -6,6 +6,7 @@ export interface VaultStatus {
   entries: Array<{ name: string; updated_at: number; used_by: string[] }>;
   bindings: Record<string, Array<{ name: string; present: boolean }>>;
   cached_services: Array<{ code: string; fetched_at: number }>;
+  projects: Array<{ id: string; name: string; entries: VaultStatus['entries']; bindings: VaultStatus['bindings'] }>;
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -20,12 +21,15 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const fetchVaultStatus = () => send<VaultStatus>('GET', '/api/v1/vault');
-export const saveVaultEntry = (name: string, value: string) =>
-  send<{ ok: true }>('PUT', `/api/v1/vault/entries/${encodeURIComponent(name)}`, { value });
-export const deleteVaultEntry = (name: string) =>
-  send<{ ok: true }>('DELETE', `/api/v1/vault/entries/${encodeURIComponent(name)}`);
-export const saveVaultBindings = (code: string, names: string[]) =>
-  send<{ ok: true }>('PUT', `/api/v1/vault/bindings/${encodeURIComponent(code)}`, { names });
+const scopeQuery = (project?: string) => project ? `?project=${encodeURIComponent(project)}` : '';
+export const saveVaultProject = (id: string, name: string) =>
+  send<{ ok: true }>('PUT', `/api/v1/vault/projects/${encodeURIComponent(id)}`, { name });
+export const saveVaultEntry = (name: string, value: string, project?: string) =>
+  send<{ ok: true }>('PUT', `/api/v1/vault/entries/${encodeURIComponent(name)}${scopeQuery(project)}`, { value });
+export const deleteVaultEntry = (name: string, project?: string) =>
+  send<{ ok: true }>('DELETE', `/api/v1/vault/entries/${encodeURIComponent(name)}${scopeQuery(project)}`);
+export const saveVaultBindings = (code: string, names: string[], project?: string) =>
+  send<{ ok: true }>('PUT', `/api/v1/vault/bindings/${encodeURIComponent(code)}${scopeQuery(project)}`, { names });
 export const saveVaultSource = (peerId: string | null) =>
   send<{ ok: true }>('PUT', '/api/v1/vault/source', { peer_id: peerId });
 export const importVaultFromInfisical = (code: string) =>

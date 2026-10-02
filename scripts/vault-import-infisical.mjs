@@ -23,6 +23,11 @@ try {
     throw new Error('Use the local Excubitor loopback HTTP origin (e.g. http://127.0.0.1:17332/)');
   }
   const body = { dry_run: values['dry-run'], ...(values.environment ? { environment: values.environment } : {}) };
+  const statusResponse = await fetch(new URL('/api/v1/vault', base), { signal: AbortSignal.timeout(10_000) });
+  const status = await statusResponse.json();
+  if (!statusResponse.ok || !Array.isArray(status.projects)) {
+    throw new Error('Excubitor does not support project Vaults yet. Update backend and supervisor before importing.');
+  }
   const response = await fetch(new URL('/api/v1/vault/import/infisical', base), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -43,13 +48,13 @@ try {
 }
 
 function formatSummary(result) {
-  const lines = [result.dry_run ? '[dry-run] Vault は変更していません' : 'Vault に登録しました', ''];
+  const lines = [result.dry_run ? '[dry-run] Vault は変更していません' : 'プロジェクト別Vaultに登録しました', ''];
   const row = (label, r) => {
     const state = r.error ? `失敗: ${r.error}` : r.skipped ? `skip: ${r.skipped}`
       : `新規 ${r.imported.length} / 同値 ${r.unchanged.length} / 衝突 ${r.conflicts.length} / 名前不可 ${r.invalid.length}`;
     lines.push(`  ${label}  ${state}`);
     if (r.conflicts.length) lines.push(`      衝突 (既にある別の値、取り込んでいない): ${r.conflicts.join(', ')}`);
-    if (r.invalid.length) lines.push(`      名前不可・空の値 (取り込んでいない): ${r.invalid.join(', ')}`);
+    if (r.invalid.length) lines.push(`      名前不可 (取り込んでいない): ${r.invalid.join(', ')}`);
   };
   lines.push(`サービス (${result.services.length}) — 取り込み + 紐付け`);
   for (const r of result.services) row(`${r.code} [${r.environment}]`, r);

@@ -20,14 +20,15 @@ import type { ServiceInfisical } from '../secrets/config-store.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { getPeer } from '../federation/store.js';
 import { VaultError, type Vault } from './vault.js';
-import { importAllFromInfisical, type BulkImportOptions, type BulkImportResult } from './infisical-bulk-import.js';
+import { importAllFromInfisical, importServiceValues, type BulkImportOptions, type BulkImportResult } from './infisical-bulk-import.js';
 
 const logger = createNamedLogger('excubitor.vault.router');
 
-const ValueSchema = z.object({ value: z.string().min(1) });
+const ValueSchema = z.object({ value: z.string() });
 const BindingsSchema = z.object({ names: z.array(z.string()).max(256) });
 const SourceSchema = z.object({ peer_id: z.string().min(1).nullable() });
 const BulkImportSchema = z.object({ dry_run: z.boolean().optional(), environment: z.string().min(1).max(64).optional() });
+const ProjectSchema = z.object({ name: z.string().trim().min(1).max(128) });
 
 export interface VaultRouterDeps {
   vault: () => Vault;
@@ -54,27 +55,44 @@ export function buildVaultRouter(deps: VaultRouterDeps): Hono {
 
   app.get('/api/v1/vault', (c) => c.json(deps.vault().status()));
 
+  const scoped = (project: string | undefined): Vault => {
+    const vault = deps.vault();
+    if (project === undefined) return vault;
+    if (!vault.status().projects.some((p) => p.id === project)) throw new VaultError('invalid_project', 'unknown project Vault');
+    return vault.forProject(project);
+  };
+
+  app.put('/api/v1/vault/projects/:id', async (c) => {
+    const parsed = ProjectSchema.safeParse(await c.req.json().catch(() => null));
+    const id = c.req.param('id');
+    if (!parsed.success || id.length > 128 || !id.trim()) return c.json({ error: 'invalid_body' }, 400);
+    deps.vault().registerProject(id, parsed.data.name);
+    return c.json({ ok: true });
+  });
+
   app.put('/api/v1/vault/entries/:name', async (c) => {
     const parsed = ValueSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
     return handle(c, async () => {
-      await deps.vault().setEntry(c.req.param('name'), parsed.data.value);
+      await scoped(c.req.query('project')).setEntry(c.req.param('name'), parsed.data.value);
       logger.info({ name: c.req.param('name') }, 'vault entry saved');
       return { ok: true };
     });
   });
 
-  app.delete('/api/v1/vault/entries/:name', (c) => {
-    const existed = deps.vault().deleteEntry(c.req.param('name'));
+  app.delete('/api/v1/vault/entries/:name', (c) => handle(c, async () => {
+    const existed = scoped(c.req.query('project')).deleteEntry(c.req.param('name'));
     if (existed) logger.info({ name: c.req.param('name') }, 'vault entry deleted');
     return existed ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404);
-  });
+  }));
 
   app.put('/api/v1/vault/bindings/:code', async (c) => {
     const parsed = BindingsSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
     return handle(c, async () => {
-      deps.vault().setBindings(c.req.param('code'), parsed.data.names);
+      const project = c.req.query('project');
+      if (project !== undefined) deps.vault().setProjectBindings(project, c.req.param('code'), parsed.data.names);
+      else deps.vault().setBindings(c.req.param('code'), parsed.data.names);
       return { ok: true };
     });
   });
@@ -106,9 +124,8 @@ export function buildVaultRouter(deps: VaultRouterDeps): Hono {
     if (!resolved.ok) return c.json({ error: resolved.code, message: resolved.message }, resolved.code === 'no_mapping' ? 404 : 502);
     return handle(c, async () => {
       const vault = deps.vault();
-      const result = await vault.importEntries(resolved.secrets);
-      // 同じ値で既にあるものも紐付ける。値の異なる同名 (conflicts) は紐付けず、人が名前を分けて登録する。
-      vault.setBindings(code, [...vault.bindingsFor(code), ...result.imported, ...result.unchanged]);
+      if (!vault.status().projects.some((p) => p.id === resolved.projectId)) vault.registerProject(resolved.projectId);
+      const result = await importServiceValues(vault, code, resolved.secrets, { projectId: resolved.projectId });
       logger.info({ code, imported: result.imported.length, unchanged: result.unchanged.length, conflicts: result.conflicts }, 'imported Infisical values into vault');
       return { ok: true, ...result };
     });
@@ -122,7 +139,8 @@ async function handle(
   run: () => Promise<unknown>,
 ): Promise<Response> {
   try {
-    return c.json(await run());
+    const result = await run();
+    return result instanceof Response ? result : c.json(result);
   } catch (error) {
     if (error instanceof VaultError) return c.json({ error: error.code, message: error.message }, 400);
     throw error;

@@ -7,6 +7,7 @@ import {
   saveVaultBindings,
   saveVaultEntry,
   saveVaultSource,
+  saveVaultProject,
   type VaultStatus,
 } from '../lib/vault';
 
@@ -24,6 +25,9 @@ export function VaultCard() {
   const [importCode, setImportCode] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [project, setProject] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [projectName, setProjectName] = useState('');
 
   const load = async () => {
     const [nextStatus, nextPeers] = await Promise.all([fetchVaultStatus(), fetchPeers().catch(() => [])]);
@@ -49,6 +53,7 @@ export function VaultCard() {
   if (!status) return <section className="config-card"><h2>Vault</h2><p>読み込み中…</p></section>;
 
   const splitNames = (text: string) => text.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean);
+  const selected = project ? status.projects.find((p) => p.id === project) : status;
 
   return (
     <section className="config-card">
@@ -78,11 +83,31 @@ export function VaultCard() {
         </p>
       )}
 
-      <h3>値</h3>
+      <h3>Vault を選択</h3>
+      <select value={project} disabled={busy} aria-label="Vault" onChange={(event) => {
+        setProject(event.target.value);
+        setName(''); setValue(''); setBindCode(''); setBindNames(''); setMessage(null);
+      }}>
+        <option value="">共有Vault</option>
+        {status.projects.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+      </select>
+      <p className="muted">共有とプロジェクトの値は別々に保存します。サービスに紐付けた値だけを渡し、同名の場合はプロジェクト側を優先します。</p>
+      <div className="config-row">
+        <input placeholder="新しいプロジェクトID" value={projectId} onChange={(event) => setProjectId(event.target.value)} />
+        <input placeholder="プロジェクト名" value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+        <button disabled={busy || !projectId.trim() || !projectName.trim()} onClick={() => void run(async () => {
+          const id = projectId.trim();
+          await saveVaultProject(id, projectName.trim());
+          setProject(id); setProjectId(''); setProjectName(''); setValue(''); setBindNames('');
+          return 'プロジェクトVaultを保存しました';
+        })}>プロジェクトを保存</button>
+      </div>
+
+      <h3>値 — {project ? selected && 'name' in selected ? selected.name : project : '共有Vault'}</h3>
       <table className="config-table">
         <thead><tr><th>名前</th><th>使うサービス</th><th>更新</th><th /></tr></thead>
         <tbody>
-          {status.entries.map((entry) => (
+          {(selected?.entries ?? []).map((entry) => (
             <tr key={entry.name}>
               <td><code>{entry.name}</code></td>
               <td>{entry.used_by.join(', ') || '—'}</td>
@@ -91,7 +116,7 @@ export function VaultCard() {
                 <button
                   disabled={busy}
                   title="この値を削除する (紐付けは残り、未登録として表示される)"
-                  onClick={() => void run(async () => { await deleteVaultEntry(entry.name); return `${entry.name} を削除しました`; })}
+                  onClick={() => void run(async () => { await deleteVaultEntry(entry.name, project || undefined); return `${entry.name} を削除しました`; })}
                 >削除</button>
               </td>
             </tr>
@@ -103,10 +128,10 @@ export function VaultCard() {
         <input type="password" placeholder="値" value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" title="保存後は表示されない" />
         <button
           className="primary"
-          disabled={busy || !name.trim() || !value}
+          disabled={busy || !name.trim()}
           title="値を登録する。同名があれば差し替える"
           onClick={() => void run(async () => {
-            await saveVaultEntry(name.trim(), value);
+            await saveVaultEntry(name.trim(), value, project || undefined);
             setValue('');
             return `${name.trim()} を保存しました`;
           })}
@@ -117,7 +142,7 @@ export function VaultCard() {
       <table className="config-table">
         <thead><tr><th>サービス</th><th>環境変数</th></tr></thead>
         <tbody>
-          {Object.entries(status.bindings).map(([code, names]) => (
+          {Object.entries(selected?.bindings ?? {}).map(([code, names]) => (
             <tr key={code}>
               <td><code>{code}</code></td>
               <td>{names.map((entry) => (
@@ -136,13 +161,14 @@ export function VaultCard() {
           disabled={busy || !bindCode.trim()}
           title="このサービスが起動時に受け取る環境変数を置き換える"
           onClick={() => void run(async () => {
-            await saveVaultBindings(bindCode.trim(), splitNames(bindNames));
+            await saveVaultBindings(bindCode.trim(), splitNames(bindNames), project || undefined);
             return `${bindCode.trim()} の紐付けを保存しました`;
           })}
         >紐付けを保存</button>
       </div>
 
       <h3>Infisical から移す</h3>
+      <p className="muted">サービスのInfisical設定に対応するプロジェクトVaultへ保存します。</p>
       <div className="config-row">
         <input placeholder="サービスコード" value={importCode} onChange={(event) => setImportCode(event.target.value)} />
         <button

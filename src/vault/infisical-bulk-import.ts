@@ -6,7 +6,8 @@
  * 2. どのサービスにも紐付いていない project は、値だけを取り込む (紐付けない)。environment は
  *    指定値 (既定 dev)。project に無く environment が 1 つだけならそれを使い、それ以外は skip。
  *
- * Vault の名前空間は 1 つなので、既にある同名が別の値なら上書きせず conflicts で返す。
+ * Infisical project ID ごとの Vault に保存する。共有や他 project の同名とは衝突しない。
+ * 同じ project 内に既にある同名が別の値なら上書きせず conflicts で返す。
  * 結果には名前と件数だけを載せ、値は返さない。dryRun は分類だけ返して Vault を変更しない。
  */
 
@@ -68,17 +69,22 @@ const emptyCounts = (): ImportCounts => ({ imported: [], unchanged: [], conflict
 
 /**
  * 1 サービス分を取り込み、同じ値で既にあるものも含めて紐付ける。値の異なる同名 (conflicts) は
- * 紐付けず、人が名前を分けて登録する。単発の取り込み API と一括移行で共有する。
+ * 紐付けず報告する。単発の取り込み API と一括移行で共有する。
  */
 export async function importServiceValues(
   vault: Vault,
   code: string,
   values: Record<string, string>,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; projectId?: string } = {},
 ): Promise<ImportCounts> {
   const { valid, invalid } = splitNames(values);
-  const result = await vault.importEntries(valid, options);
-  if (!options.dryRun) vault.setBindings(code, [...vault.bindingsFor(code), ...result.imported, ...result.unchanged]);
+  const target = options.projectId ? vault.forProject(options.projectId) : vault;
+  const result = await target.importEntries(valid, options);
+  if (!options.dryRun) {
+    const names = [...target.bindingsFor(code), ...result.imported, ...result.unchanged];
+    if (options.projectId) vault.setProjectBindings(options.projectId, code, names);
+    else vault.setBindings(code, names);
+  }
   return { ...result, invalid };
 }
 
@@ -87,6 +93,8 @@ export async function importAllFromInfisical(deps: BulkImportDeps, options: Bulk
   const unmappedEnvironment = options.environment?.trim() || DEFAULT_UNMAPPED_ENVIRONMENT;
   const services: ServiceImportResult[] = [];
   const mappedProjects = new Set<string>();
+  // Resolve the inventory before any writes; retain stable Infisical project IDs.
+  const inventory = await deps.listProjects(deps.identity);
 
   for (const { code, mapping } of [...deps.services].sort((a, b) => a.code.localeCompare(b.code))) {
     mappedProjects.add(mapping.project_id);
@@ -94,14 +102,15 @@ export async function importAllFromInfisical(deps: BulkImportDeps, options: Bulk
     try {
       const secrets = await deps.fetchSecrets(deps.identity, mapping.project_id, mapping.environment);
       const values = toEnvMap(secrets, { prefix: mapping.prefix, include: mapping.include, exclude: mapping.exclude });
-      services.push({ ...base, ...(await importServiceValues(deps.vault, code, values, { dryRun })) });
+      if (!dryRun) deps.vault.registerProject(mapping.project_id, inventory.find((p) => p.id === mapping.project_id)?.name ?? mapping.project_id);
+      services.push({ ...base, ...(await importServiceValues(deps.vault, code, values, { dryRun, projectId: mapping.project_id })) });
     } catch (error) {
       services.push({ ...base, ...emptyCounts(), error: (error as Error).message });
     }
   }
 
   const projects: ProjectImportResult[] = [];
-  for (const project of await deps.listProjects(deps.identity)) {
+  for (const project of inventory) {
     if (mappedProjects.has(project.id)) continue;
     const base = { project_id: project.id, name: project.name };
     const environment = pickEnvironment(project, unmappedEnvironment);
@@ -113,7 +122,8 @@ export async function importAllFromInfisical(deps: BulkImportDeps, options: Bulk
     try {
       const secrets = await deps.fetchSecrets(deps.identity, project.id, environment);
       const { valid, invalid } = splitNames(toEnvMap(secrets));
-      const result = await deps.vault.importEntries(valid, { dryRun });
+      if (!dryRun) deps.vault.registerProject(project.id, project.name);
+      const result = await deps.vault.forProject(project.id).importEntries(valid, { dryRun });
       projects.push({ ...base, environment, ...result, invalid });
     } catch (error) {
       projects.push({ ...base, environment, ...emptyCounts(), error: (error as Error).message });
@@ -142,8 +152,8 @@ function splitNames(values: Record<string, string>): { valid: Record<string, str
   const valid: Record<string, string> = {};
   const invalid: string[] = [];
   for (const [name, value] of Object.entries(values)) {
-    // 空の値は Vault に登録できない (setEntry と同じ規則) ため、名前の不備と同じく取り込まない。
-    if (ENV_NAME_PATTERN.test(name) && value.length > 0) valid[name] = value;
+    // Empty is a valid environment value and differs from an absent entry.
+    if (ENV_NAME_PATTERN.test(name)) valid[name] = value;
     else invalid.push(name);
   }
   return { valid, invalid: invalid.sort() };

@@ -76,8 +76,9 @@ describe('importAllFromInfisical', () => {
       { project_id: 'p-cf', name: 'Cloudflare', environment: 'dev', imported: ['CF_ACCOUNT_ID', 'CF_API_TOKEN'], unchanged: [], conflicts: [], invalid: [] },
     ]);
     expect((await vault.envFor('cernere'))?.env).toEqual({ API_KEY: 'k', DATABASE_URL: 'pg://c' });
-    expect(await vault.valuesOf(['CF_API_TOKEN', 'CF_ACCOUNT_ID'])).toEqual({ CF_API_TOKEN: 'cf-token', CF_ACCOUNT_ID: 'acct' });
-    expect(vault.status().bindings).toEqual({ cernere: [{ name: 'API_KEY', present: true }, { name: 'DATABASE_URL', present: true }] });
+    expect(await vault.forProject('p-cf').valuesOf(['CF_API_TOKEN', 'CF_ACCOUNT_ID'])).toEqual({ CF_API_TOKEN: 'cf-token', CF_ACCOUNT_ID: 'acct' });
+    expect(vault.forProject('p-cernere').status().bindings).toEqual({ cernere: [{ name: 'API_KEY', present: true }, { name: 'DATABASE_URL', present: true }] });
+    expect(vault.status().entries).toEqual([]);
   });
 
   it('applies the service prefix / include filter', async () => {
@@ -88,7 +89,7 @@ describe('importAllFromInfisical', () => {
     );
     const result = await importAllFromInfisical(d);
     expect(result.services[0]).toMatchObject({ environment: 'prod', imported: ['SVC_TOKEN'] });
-    expect(vault.bindingsFor('svc')).toEqual(['SVC_TOKEN']);
+    expect(vault.forProject('p1').bindingsFor('svc')).toEqual(['SVC_TOKEN']);
   });
 
   it('dry run classifies without changing the Vault', async () => {
@@ -100,13 +101,16 @@ describe('importAllFromInfisical', () => {
     );
     const result = await importAllFromInfisical(d, { dryRun: true });
     expect(result.dry_run).toBe(true);
-    expect(result.services[0]).toMatchObject({ imported: ['FRESH'], conflicts: ['SHARED'] });
+    expect(result.services[0]).toMatchObject({ imported: ['FRESH', 'SHARED'], conflicts: [] });
     expect(vault.status().entries.map((e) => e.name)).toEqual(['SHARED']);
     expect(vault.bindingsFor('svc')).toEqual([]);
+    expect(vault.status().projects).toEqual([]);
   });
 
   it('never overwrites a different existing value and leaves conflicts unbound', async () => {
     await vault.setEntry('DATABASE_URL', 'keep');
+    vault.registerProject('p1');
+    await vault.forProject('p1').setEntry('DATABASE_URL', 'keep-project');
     const d = deps(
       { 'p1:dev': { DATABASE_URL: 'other', NEW_KEY: 'n' } },
       [],
@@ -115,7 +119,8 @@ describe('importAllFromInfisical', () => {
     const result = await importAllFromInfisical(d);
     expect(result.services[0]).toMatchObject({ imported: ['NEW_KEY'], conflicts: ['DATABASE_URL'] });
     expect(await vault.valuesOf(['DATABASE_URL'])).toEqual({ DATABASE_URL: 'keep' });
-    expect(vault.bindingsFor('svc')).toEqual(['NEW_KEY']);
+    expect(vault.forProject('p1').bindingsFor('svc')).toEqual(['NEW_KEY']);
+    expect(await vault.forProject('p1').valuesOf(['DATABASE_URL'])).toEqual({ DATABASE_URL: 'keep-project' });
   });
 
   it('chooses the environment for unmapped projects and skips ambiguous ones', async () => {
@@ -140,7 +145,7 @@ describe('importAllFromInfisical', () => {
     expect(chosen.projects[0]).toMatchObject({ environment: 'staging', imported: ['C'] });
   });
 
-  it('reports invalid names / empty values and per-target failures without stopping the rest', async () => {
+  it('preserves empty values and reports invalid names / per-target failures', async () => {
     const d = deps(
       { 'p1:dev': { 'BAD-NAME': 'x', EMPTY: '', GOOD: 'g' } },
       [{ id: 'p1', name: 'P1', environments: env('dev') }, { id: 'broken', name: 'Broken', environments: env('dev') }],
@@ -148,13 +153,27 @@ describe('importAllFromInfisical', () => {
     );
     const result = await importAllFromInfisical(d);
     expect(result.services[0]).toMatchObject({ code: 'missing', error: 'Infisical secrets fetch failed: 404', imported: [] });
-    expect(result.projects[0]).toMatchObject({ name: 'P1', imported: ['GOOD'], invalid: ['BAD-NAME', 'EMPTY'] });
+    expect(result.projects[0]).toMatchObject({ name: 'P1', imported: ['EMPTY', 'GOOD'], invalid: ['BAD-NAME'] });
     expect(result.projects[1]).toMatchObject({ name: 'Broken', error: 'Infisical secrets fetch failed: 404' });
   });
 
   it('never puts values in the result', async () => {
     const d = deps({ 'p1:dev': { TOKEN: 'super-secret-value' } }, [{ id: 'p1', name: 'P1', environments: env('dev') }], []);
     expect(JSON.stringify(await importAllFromInfisical(d))).not.toContain('super-secret-value');
+  });
+
+  it('imports same-named values in separate projects and is idempotent', async () => {
+    await vault.setEntry('DATABASE_URL', 'shared');
+    const d = deps({ 'a:dev': { DATABASE_URL: 'a-db' }, 'b:dev': { DATABASE_URL: 'b-db' } }, [
+      { id: 'a', name: 'A', environments: env('dev') }, { id: 'b', name: 'B', environments: env('dev') },
+    ], []);
+    const first = await importAllFromInfisical(d);
+    expect(first.projects.every((p) => p.conflicts.length === 0 && p.imported.length === 1)).toBe(true);
+    expect(await vault.forProject('a').valuesOf(['DATABASE_URL'])).toEqual({ DATABASE_URL: 'a-db' });
+    expect(await vault.forProject('b').valuesOf(['DATABASE_URL'])).toEqual({ DATABASE_URL: 'b-db' });
+    expect(await vault.valuesOf(['DATABASE_URL'])).toEqual({ DATABASE_URL: 'shared' });
+    const second = await importAllFromInfisical(d);
+    expect(second.projects.every((p) => p.unchanged.length === 1 && p.imported.length === 0)).toBe(true);
   });
 });
 

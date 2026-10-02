@@ -16,7 +16,33 @@
 
 ## データ
 
-`vault.json` (config.enc と同じディレクトリ、`EXCUBITOR_VAULT_DIR` で上書き)。
+### 共有VaultとプロジェクトVault (2026-10-03 neco 指示)
+
+Vault は共有とプロジェクト別を併設する。共有を全サービスに自動配布せず、それぞれの
+Vault で使用する変数名をサービスへ明示的に紐付ける。サービスは最大1つのプロジェクトVaultを
+参照し、共有とプロジェクトの両方に紐付いた同名はプロジェクトを優先する。
+プロジェクトに紐付いた値が未登録なら、共有へ暗黙に戻さず起動を止める。
+空文字は登録済みの環境変数として保存でき、未登録とは区別する。
+
+既存の `vault.json` は共有Vaultとしてそのまま保持する。既存値・紐付けの削除や別名化はしない。
+プロジェクト一覧は `vault-projects.json` (`version: 1`, `projects: [{id, name}]`)。
+各プロジェクトの暗号化データは `vault-projects/<SHA-256(project ID)>/vault.json`。
+共有と同じOS保護DEKを使い、暗号化AADは `JSON.stringify(['project', projectId, name])` として
+プロジェクト間の暗号文付け替えを拒否する。共有のAADは従来の変数名で互換性を保つ。
+拠点配布と控えにはサービス単位で解決した環境変数だけを渡す。
+
+| データ | 分類 | 権威ソース | 保存先 | 保護 |
+|---|---|---|---|---|
+| プロジェクト一覧・紐付け | master | Exの管理者 | 上記ローカルJSON | 管理APIはloopback限定、値を含まない |
+| プロジェクトの環境変数 | master | Exの管理者 (移行元はInfisical) | プロジェクト別vault.json | AES-256-GCM、DPAPI/0600保護DEK、ログと管理APIに平文を出さない |
+
+Infisicalからは安定したproject IDをキーとして各プロジェクトへ保存し、表示名も取り込む。
+共有Vaultへの自動取り込みは行わない。マッピングがあるサービスのみプロジェクトに紐付ける。
+移行前にbackendとsupervisorをともに更新する。旧supervisorはプロジェクトVaultを解決しないため、
+backendだけの更新では起動時に新しい値が反映されない。CLIは旧backendへの取り込みを拒否する。
+共有にある旧データは残すため、プロジェクト値を共有へ自動逆移行するrollbackは行わない。
+
+共有の `vault.json` (config.enc と同じディレクトリ、`EXCUBITOR_VAULT_DIR` で上書き)。
 
 | キー | 内容 |
 |---|---|
@@ -54,18 +80,22 @@ preflight の `requires_secret` チェックも同じ規則で、Vault で揃う
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| GET | `/api/v1/vault` | 名前・更新日時・使うサービス・紐付け (未登録の有無)・取得元・控え。値は返さない |
+| GET | `/api/v1/vault` | 共有の名前・紐付け、`projects` 内のプロジェクト名・名前・紐付け、および取得元・控え。値は返さない |
+| PUT | `/api/v1/vault/projects/:id` | `{ name }` プロジェクトVaultを登録・表示名変更 |
 | PUT | `/api/v1/vault/entries/:name` | `{ value }` 登録 / 差し替え |
 | DELETE | `/api/v1/vault/entries/:name` | 削除 (紐付けは残り未登録として表示) |
 | PUT | `/api/v1/vault/bindings/:code` | `{ names }` 使用する環境変数 (空で外す) |
 | PUT | `/api/v1/vault/source` | `{ peer_id }` 拠点の取得元 (null で本社) |
-| POST | `/api/v1/vault/import/infisical/:code` | Infisical の値を Vault に移して紐付けに足す。名前空間は 1 つなので、既にある同名が別の値なら上書きも紐付けもせず `conflicts` で返す (同じ値は `unchanged` として紐付ける) |
+| POST | `/api/v1/vault/import/infisical/:code` | Infisicalのproject IDに対応するVaultへ移して紐付けに足す。同一プロジェクト内の同名異値は `conflicts` とし上書きしない |
 | POST | `/api/v1/vault/import/infisical` | `{ dry_run?, environment? }` Infisical の全 project を一括で移す (下記)。名前と件数だけ返し、値は返さない |
 
 公開面 (拠点間、相互登録の署名が必須): `POST /api/v1/federation/vault/env` `{ service }` → `{ env, missing }`。
 渡した記録 (拠点・サービス・変数名) をログに残す。値は残さない。
 
 WebUI: 「環境変数」タブ。
+
+entries の PUT / DELETE と bindings の PUT は `?project=<id>` で登録済みプロジェクトを指定する。
+未指定は共有。未知のIDは拒否する。WebUIは共有・プロジェクトの選択、登録、値の保存、紐付けに対応する。
 
 ### Infisical からの一括移行
 
@@ -76,7 +106,7 @@ Infisical は使わなくなるため、Excubitor の machine identity で参照
 2. どのサービスにも紐付かない project (`GET /api/v1/projects?type=secret-manager`) は値だけ取り込み、紐付けない
    (例: CF Tunnel ブローカーが読む `CF_API_TOKEN` / `CF_ACCOUNT_ID`)。environment は `environment` (既定 `dev`)。
    project に無く environment が 1 つだけならそれを使い、それ以外は skip して理由を返す。
-3. 既にある同名が別の値なら上書きせず `conflicts`。変数名に使えない名前と空の値は `invalid` として取り込まない。
+3. 同一プロジェクト内の既存同名が別の値なら上書きせず `conflicts`。変数名に使えない名前は `invalid` として取り込まない。空文字は保持する。
    1 件の失敗は `error` に入れて残りを続ける。`dry_run` は分類だけ返して Vault を変更しない。
 
 実行 (本社の Excubitor で、人が実行する):
