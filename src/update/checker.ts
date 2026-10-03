@@ -42,6 +42,18 @@ function empty(code: string, repoDir: string | null, note: string): UpdateStatus
 }
 
 /** 1 サービスのアップデート状態を取る。 fetch=true で origin を取りに行く (遅い)。 */
+/**
+ * 更新前の「未コミット変更」判定に使う `git status` の引数。
+ *
+ * submodule の中身の変化 (作業ツリーの変更・未追跡) は数えない。 submodule を `file:` 依存に
+ * するリポでは、 npm install が bin の実行権限を付けるだけで submodule が変更扱いになり
+ * (例: lib/lapilli の one-shot cli.js が 100644 → 100755)、 次の update / deploy が毎回
+ * dirty_check で止まっていた (2026-10-03 AWS 拠点)。 submodule は pull 後に記録済みの版へ
+ * 揃え直す (`syncSubmodules`) ので、 中身の変化で止める理由が無い。 gitlink (submodule が
+ * 指す版) の変更は従来どおり未コミットとして数える。
+ */
+export const DIRTY_STATUS_ARGS = ['status', '--porcelain', '--ignore-submodules=dirty'] as const;
+
 export async function checkUpdate(svc: Service, fetch = false): Promise<UpdateStatus> {
   const repoDir = repoDirOf(svc);
   if (!repoDir) return empty(svc.code, null, 'no_repo');
@@ -60,7 +72,7 @@ export async function checkUpdate(svc: Service, fetch = false): Promise<UpdateSt
     if (!fetched) note = 'fetch_failed';
   }
 
-  const dirtyRaw = await safeExec('git', ['status', '--porcelain'], repoDir);
+  const dirtyRaw = await safeExec('git', [...DIRTY_STATUS_ARGS], repoDir);
   const dirty = dirtyRaw !== null ? dirtyRaw.length > 0 : false;
 
   // origin/<branch> が無い (未 push branch 等) 場合は behind=0 扱い。
