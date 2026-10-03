@@ -21,19 +21,19 @@ const BodySchema = z.object({
   keys: z.array(z.string()).optional(),
 });
 
-type HttpStatus = 400 | 401 | 404 | 502 | 503;
+type HttpStatus = 400 | 401 | 403 | 404 | 502;
 
 const ERROR_STATUS: Record<string, HttpStatus> = {
   no_mapping: 404,
-  no_identity: 503,
+  keys_not_bound: 403,
   fetch_failed: 502,
 };
 
 /**
- * @param getCatalogInfisical service code → catalog 由来の Infisical 設定 (config-store 上書きが無い場合の fallback)
+ * Legacy callback is retained for source compatibility but never consulted.
  */
 export function buildSecretAgentRouter(
-  getCatalogInfisical: (code: string) => ServiceInfisical | undefined,
+  _getCatalogInfisical: (code: string) => ServiceInfisical | undefined,
 ): Hono {
   const app = new Hono();
 
@@ -47,7 +47,7 @@ export function buildSecretAgentRouter(
       return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     }
     const { service, keys } = parsed.data;
-    const res = await resolveServiceSecrets(service, getCatalogInfisical(service), keys);
+    const res = await resolveServiceSecrets(service, undefined, keys);
     if (!res.ok) {
       logger.warn({ service, code: res.code }, 'resolve failed');
       return c.json({ error: res.code, message: res.message }, ERROR_STATUS[res.code] ?? 502);
@@ -57,6 +57,7 @@ export function buildSecretAgentRouter(
       secrets: res.secrets,
       project_id: res.projectId,
       environment: res.environment,
+      source: 'vault',
     });
   });
 

@@ -1,45 +1,26 @@
-# secret-agent — 常駐 secret resolve エンドポイント
+# secret-agent — Vault-only secret resolve
 
-Excubitor を「常駐 secret-agent」として使い、各サービスが起動時に **自分の secret を
-in-process で受け取る** 経路。env もファイルも使わない (secrets-runtime 形態C の Excubitor 実装)。
+POST /api/v1/secrets/resolve は既存の loopback + agent token 認証を維持する。
+要求は { service, keys? }。プロジェクト選択、任意 Vault 読み出し、値を返す管理 API は追加しない。
 
-## 背景
+- resolveVaultEnv(service) を再利用し、そのサービスに明示 binding された値のみ返す。
+- keys 未指定／空配列は binding 全件、指定ありは部分集合。binding 外のキーを一つでも
+  指定すると全体を 403 keys_not_bound で拒否し、部分成功にはしない。
+- binding の解決結果が空なら 404 no_mapping。Vault 解決失敗は 502 fetch_failed。
+  エラーは一般化し、保存先・通信相手のレスポンス本文・秘密値を公開しない。
+- 正常応答: { secrets: { ... }, project_id: null, environment: null, source: "vault" }。
+  Vault は environment を区別せず、共有とプロジェクトの合成結果を返すため、旧 Infisical
+  マッピングを取得元として偽装しない。prefix/include/exclude は実行時に適用し直さず、
+  移行時に保存・binding されたキー名を使う。Infisical identity/network/TTL cache は使わない。
 
-- Excubitor は machine identity (暗号化保管) + 各サービスの Infisical マッピング
-  (`config-store` 上書き / catalog `infisical` fallback) + 解決ロジック (`infisical.ts`) を既に持つ。
-- 従来は spawn 時 env 注入 (`process/inject.ts`) だったが、 **env を使わない** 受け渡しとして
-  常駐 resolve エンドポイントを追加した。
+## クライアント移行差分
 
-## エンドポイント
+- Actio src/config/excubitor/secret-agent-client.ts は project_id/environment を旧設定と厳密照合する。
+  現状は source_mismatch となるため、Vault source と service/keys の契約へ移行が必要。
+  src/config/secret-source.ts の Infisical project/environment 前提も後続で変更する。
+- Tirocinium packages/secrets/src/client.ts は secrets の文字列 map のみ検証するため正常応答は互換。
+  403 は現状 fetch_failed に分類される。必要なら keys_not_bound のエラー分類を追加する。
+- 全サービスが共有 agent token を使う既存認証は維持し、service ごとの独立認証は追加しない。
+  本 API はトークン所有者の指定 service に対する既存 binding を上限とする。
 
-```
-POST /api/v1/secrets/resolve          (loopback 127.0.0.1 only)
-  Authorization: Bearer <agent-token>
-  body: { "service": "<service-code>", "keys"?: ["NOTION_TOKEN", ...] }
-  → 200 { "secrets": { "NOTION_TOKEN": "...", ... }, "project_id": "...", "environment": "..." }
-  → 401 unauthorized / 400 invalid_body / 404 no_mapping / 503 no_identity / 502 fetch_failed
-```
-
-- `service` のマッピング (project_id/environment/include/exclude/prefix) を解決し、Excubitor の
-  machine identity で Infisical から secret を引いて返す。
-- `keys` を渡すと prefix 適用後のキー名で絞り込む。
-- **値を返す唯一の経路**。`/api/v1/config/infisical` は status のみで値は返さない。
-
-## 認証 (agent token)
-
-- loopback bind + ローカルトークンの二段。
-- token の出所 (優先順): `EXCUBITOR_AGENT_TOKEN` (env) → トークンファイル (無ければ生成、0600)。
-  - 既定パス: `EXCUBITOR_AGENT_TOKEN_PATH` → `%APPDATA%/Excubitor/secret-agent.token` (リポジトリ外)。
-- クライアント (各サービス) は同じ env / ファイルから token を読む (同一マシン前提)。
-- 定数時間比較 (`timingSafeEqual`)。
-
-## クライアント側
-
-各サービスは起動時に `POST /secrets/resolve` を叩いて map を受け取り、**process memory にのみ**
-保持する (env / 平文ファイルに書かない)。Tirocinium は `@tirocinium/secrets` クライアントで実装。
-
-## 将来
-
-- Cernere #111 の standalone `secret-agent` 正本へ移行する場合も、 本エンドポイント契約
-  (`POST /secrets/resolve` + bearer token) を維持すればクライアントは無改修で差し替え可能。
-- TTL キャッシュは `infisical.ts` 側 (token 5min / secret 60s) を流用。
+本社取得・暗号化控えは [Vault](vault.md) の既存経路を共用。一般管理面には値を返さない。

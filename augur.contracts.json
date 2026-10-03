@@ -1,6 +1,9 @@
 {
   "version": 1,
   "contracts": [
+    {"id":"C-11","criterion":"C-11 resolveRequiresSecretEnv(svc): 消費サービスのVaultで必須キーを満たし、不足時は明示失敗する","symbol":"resolveRequiresSecretEnv","file":"src/process/inject.ts","module":"src/process/vault-required.contract.ts"},
+    {"id":"C-12","criterion":"C-12 resolveServiceSecrets(code): Vault binding内だけを返し、未知bindingと許可外キーは失敗する","symbol":"resolveServiceSecrets","file":"src/secrets/resolve.ts","module":"src/secrets/vault-resolve.contract.ts"},
+    {"id":"C-13","criterion":"C-13 runPreflight(services): Infisical identityを要求せずVaultと必須envの失敗をreadyへ反映する","symbol":"runPreflight","file":"src/launch/preflight.ts","module":"src/launch/vault-preflight.contract.ts"},
     {"id": "C-1", "criterion": "C-1 resolveServiceRuntimeVersion(service): package 版を優先しても解決済み gitHash を結果に含める", "symbol": "runtimeVersionCarriesGitHash", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
     {"id": "C-2", "criterion": "C-2 dispatchServiceDeployment(input): 初回と同一 hash を送信せず、hash 変化時だけ前後 hash を POST する", "symbol": "changedHashDispatchesOnly", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},
     {"id": "C-3", "criterion": "C-3 dispatchServiceDeployment(input): 送信失敗時も最新 hash を永続化し起動フローを失敗させない", "symbol": "dispatchFailureIsContained", "file": "src/deploy/service-deployed-contracts.ts", "module": "service-deployed-event"},

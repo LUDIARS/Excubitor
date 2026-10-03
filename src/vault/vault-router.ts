@@ -14,13 +14,13 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { resolveServiceSecrets } from '../secrets/resolve.js';
 import { fetchProjectSecrets, listProjects, readIdentity } from '../secrets/infisical.js';
 import type { ServiceInfisical } from '../secrets/config-store.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { getPeer } from '../federation/store.js';
 import { VaultError, type Vault } from './vault.js';
 import { importAllFromInfisical, importServiceValues, type BulkImportOptions, type BulkImportResult } from './infisical-bulk-import.js';
+import { resolveInfisicalForImport } from './infisical-import-resolve.js';
 
 const logger = createNamedLogger('excubitor.vault.router');
 
@@ -35,7 +35,7 @@ export interface VaultRouterDeps {
   getCatalogInfisical: (code: string) => ServiceInfisical | undefined;
   /** 取得元に指定できるピアか (既定: 登録済み)。 */
   peerExists?: (id: string) => boolean;
-  resolveInfisical?: typeof resolveServiceSecrets;
+  resolveInfisical?: typeof resolveInfisicalForImport;
   /** Infisical マッピングを持つサービス (config store 優先 / catalog fallback で解決済み)。 */
   listInfisicalServices?: () => Array<{ code: string; mapping: ServiceInfisical }>;
   /** 一括移行の実行 (既定: Excubitor の machine identity で Infisical を引く)。identity が無ければ null。 */
@@ -45,7 +45,7 @@ export interface VaultRouterDeps {
 export function buildVaultRouter(deps: VaultRouterDeps): Hono {
   const app = new Hono();
   const peerExists = deps.peerExists ?? ((id: string) => getPeer(id) !== null);
-  const resolveInfisical = deps.resolveInfisical ?? resolveServiceSecrets;
+  const resolveInfisical = deps.resolveInfisical ?? resolveInfisicalForImport;
   const bulkImport = deps.bulkImport ?? (async (options: BulkImportOptions) => {
     const identity = readIdentity();
     if (!identity) return null;

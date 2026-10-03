@@ -99,9 +99,8 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
 
 ## 注意
 
-- Infisical-relay は移植していない。secret 注入は catalog の `infisical` フィールド経由
-  (各サービスが起動時に自前 fetch する設計のまま)。 `infisical.project_id` は実 ID が必要で
-  捏造不可 — 現状 Cernere のみ実 ID。 他 SaaS は Infisical 側の project_id 入手後に充填する。
+- 通常起動・secret-agent は Vault-only。Infisical は移行 import のみに残し、通常取得の fallback にしない。
+  共有／プロジェクト binding と source peer の詳細は spec/feature/vault.md を参照。
 - 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。
   上限 (`EXCUBITOR_PROCESS_LOG_MAX_MB`、既定 32MB) 超過分は open (=サービス起動/再起動) 時に

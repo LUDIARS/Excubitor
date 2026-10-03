@@ -1,18 +1,11 @@
-/**
- * サービスコード → resolved secret map。
- *
- * secret-agent (常駐 resolve) と、 既存の spawn inject 双方が使える解決ロジック。
- * Excubitor 自身の machine identity で Infisical を引き、 service の Infisical マッピング
- * (config-store 優先 / catalog fallback) を適用して env map を返す。
- */
+/** Resolve service-bound Vault values for the authenticated secret-agent only. */
+import type { ServiceInfisical } from './config-store.js';
+import { resolveVaultEnv } from '../vault/vault-inject.js';
 
-import { readIdentity, fetchProjectSecrets, toEnvMap } from './infisical.js';
-import { resolveServiceInfisical, type ServiceInfisical } from './config-store.js';
-
-export type ResolveError = 'no_mapping' | 'no_identity' | 'fetch_failed';
+export type ResolveError = 'no_mapping' | 'keys_not_bound' | 'fetch_failed';
 
 export type ResolveResult =
-  | { ok: true; secrets: Record<string, string>; projectId: string; environment: string }
+  | { ok: true; secrets: Record<string, string>; projectId: null; environment: null }
   | { ok: false; code: ResolveError; message: string };
 
 /** 指定キーのみに絞る (keys 未指定なら全件)。 純粋関数。 */
@@ -29,39 +22,28 @@ export function filterKeys(
   return out;
 }
 
-/**
- * サービスの secret を解決する。
- * @param code        サービスコード
- * @param catalogInfisical catalog 由来の infisical 設定 (config-store に上書きが無い場合の fallback)
- * @param keys        返すキーを絞る (任意。 prefix 適用後のキー名)
- */
+/** Legacy mapping parameter is ignored; it cannot authorize keys or select a project. */
 export async function resolveServiceSecrets(
   code: string,
-  catalogInfisical?: ServiceInfisical,
+  _catalogInfisical?: ServiceInfisical,
   keys?: string[],
 ): Promise<ResolveResult> {
-  const cfg = resolveServiceInfisical(code, catalogInfisical);
-  if (!cfg) {
-    return { ok: false, code: 'no_mapping', message: `service ${code} has no Infisical mapping` };
-  }
-  const id = readIdentity();
-  if (!id) {
-    return {
-      ok: false,
-      code: 'no_identity',
-      message: 'Excubitor has no machine identity (INFISICAL_SITE_URL / CLIENT_ID / CLIENT_SECRET)',
-    };
-  }
   try {
-    const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
-    const env = toEnvMap(secrets, { prefix: cfg.prefix, include: cfg.include, exclude: cfg.exclude });
+    const env = await resolveVaultEnv(code);
+    if (Object.keys(env).length === 0) {
+      return { ok: false, code: 'no_mapping', message: 'service has no resolved Vault binding' };
+    }
+    if (keys?.some((key) => !Object.hasOwn(env, key))) {
+      return { ok: false, code: 'keys_not_bound', message: 'requested keys are not bound to this service' };
+    }
     return {
       ok: true,
       secrets: filterKeys(env, keys),
-      projectId: cfg.project_id,
-      environment: cfg.environment,
+      projectId: null,
+      environment: null,
     };
-  } catch (err) {
-    return { ok: false, code: 'fetch_failed', message: (err as Error).message };
+  } catch {
+    // Do not expose storage/transport errors (paths, remote bodies) to consumers.
+    return { ok: false, code: 'fetch_failed', message: 'service Vault resolution failed' };
   }
 }

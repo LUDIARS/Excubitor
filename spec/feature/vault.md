@@ -53,26 +53,32 @@ backendだけの更新では起動時に新しい値が反映されない。CLI�
 
 ## 注入
 
-`resolveInjectEnv` の最上位 (Infisical・requires_secret より優先)。
+通常起動・継続 secret 解決は Vault-only。Infisical identity/network、env-cli、.env 生成を使わない。
+優先順位は共有ルート < global < topology < catalog env < 暗号化 runtime config < Vault。
+Vault 内は明示的な共有 binding < プロジェクト binding。同名のプロジェクト値不足は共有へ戻さない。
 
-1. 自分の Vault にそのサービスの紐付けがある (本社) → 自分の値。紐付けた値が未登録なら起動を止める。
-2. 取得元が設定されている (拠点) → 本社から受け取り、控えを更新。本社に届かなければ控え。控えも無ければ空で進め、
-   必須の変数は startup-env の検査が名前付きで止める。本社で紐付けが無い (404) なら Vault を使わないサービス。
-3. どちらでもない → 何もしない。
+1. ローカル binding がある場合は既存 Vault.envFor(code) で解決する。未登録値は起動を止める。
+2. ローカル binding がなければ既存 source_peer_id → getPeer → fetchVaultEnv → 本社の
+   vault-federation へ進む。署名・covered service 制限は従来どおり。本社の解決結果だけを
+   cacheEnv で暗号化保存する。到達不能時は取得済み控えを使う。本社 404 は未紐付けとして扱う。
+3. 取得元も binding もないサービスは secret なしとして扱える。ただし旧 infisical.inject=true が
+   残るサービスで Vault 解決が空なら、未移行設定として明示失敗する。Infisical 取得には戻らない。
+4. 必須 env は required_env / infisical.required_env / requires_secret を検証する。
+   古い required_env は移行互換の宣言としてのみ読み、identity を要求しない。
 
-### requires_secret の解決順 (Vault 優先)
+### requires_secret の解決 (Vault-only)
 
-catalog の `requires_secret` (他サービスから名前付きで借りるキー) は、上の手順で得たそのサービスの Vault の値を先に見る
-(`src/process/requires-secret-plan.ts`、`resolveRequiresSecretEnv`)。
+消費サービス自身に紐付いた共有／プロジェクト Vault の値だけを使う。
+source service は由来の説明であり、別サービスやプロジェクトを読む権限にはしない。
+不足・空文字・空白だけの必須キーは名前付きで失敗し、Infisical fallback は行わない。
+Vault 自体は空文字を保存・配布できるが、必須宣言されたキーは非空を要する。
 
-1. 要求キーのうち Vault の紐付けで値が得られるものは Vault から満たし、Infisical には取りに行かない。
-2. 全キーが Vault で揃えば machine identity も Infisical 呼び出しも不要 (Infisical が止まっていても起動できる)。
-3. 足りないキーがある場合だけ、その分を従来どおり source service の Infisical project から取る。identity が無い・取得に
-   失敗した場合は従来どおり起動を止める。
-4. Vault で満たしたことはキー名だけをログに残す (値は出さない)。
+preflight はサービスごとに注入 env を一度解決し、Vault エラーと必須 env 不足を ready に反映する。
+チェック種別は vault。互換フィールド identityPresent / needsIdentity はともに false。
+injectedKeys は topology 等を含む解決済み注入 env 全体の件数。
 
-preflight の `requires_secret` チェックも同じ規則で、Vault で揃うサービスは identity が無くても失敗にせず、
-`needsIdentity` にも数えない。
+secret-agent も同じ resolveVaultEnv を使う。値返却は既存のトークン認証済み専用 API に限定する。
+詳細は [secret-agent](secret-agent.md)。拠点の控えの失効・同期方針は今回変更しない。
 
 ## API
 

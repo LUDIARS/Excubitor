@@ -2,7 +2,7 @@
  * 起動前チェック (preflight)。 起動セットの各サービスについて、 起動に必要な前提が
  * 揃っているかを spawn 前に検査する:
  *   - cwd / compose_file の実在
- *   - Infisical inject 対象なら Excubitor の machine identity 有無 + secret 解決可否
+ *   - Vault binding の解決可否と必須 env の不足
  *
  * 「事前に起動チェックする」 (2026-06-04 ユーザ指示) の実体。 NG があっても throw せず
  * レポートで返し、 UI / orchestrator が判断する。
@@ -10,201 +10,55 @@
 
 import { existsSync } from 'node:fs';
 import type { Service } from '../catalog/loader.js';
-import { readIdentity, fetchProjectSecrets, toEnvMap } from '../secrets/infisical.js';
-import { resolveServiceInfisical } from '../secrets/config-store.js';
 import { listListeners, type PortListener } from '../scanner/ports.js';
 import { managedPortsForService } from '../catalog/ports.js';
 import { resolveInjectEnv } from '../process/inject.js';
-import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
-import { getServiceByCode } from '../process/service-registry.js';
+import { validateStartupEnv } from '../process/startup-env.js';
 import { needsWorkingDirectory } from '../catalog/runtime-kind.js';
-import { resolveVaultEnv } from '../vault/vault-inject.js';
-import { planRequiresSecret } from '../process/requires-secret-plan.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical' | 'requires_secret' | 'env' | 'start_script' | 'port' | 'disabled';
+  kind: 'cwd' | 'compose_file' | 'vault' | 'requires_secret' | 'env' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
-}
-
-async function checkRequiredEnv(svc: Service): Promise<PreflightCheck> {
-  const required = requiredEnvKeysForService(svc);
-  if (required.length === 0) {
-    return { kind: 'env', status: 'ok', detail: 'no required env configured' };
-  }
-  try {
-    const env = await resolveInjectEnv(svc);
-    const validation = validateStartupEnv(svc, env);
-    if (validation.ready) {
-      return { kind: 'env', status: 'ok', detail: `${validation.required.length} required env present` };
-    }
-    return {
-      kind: 'env',
-      status: 'fail',
-      detail: `missing required env: ${validation.missing.join(', ')}`,
-    };
-  } catch (err) {
-    return { kind: 'env', status: 'fail', detail: (err as Error).message };
-  }
 }
 
 export interface ServicePreflight {
   code: string;
   name: string;
   ready: boolean; // fail が 1 つも無い
-  injectedKeys: number; // Infisical relay で渡せる env 数
+  injectedKeys: number; // 解決した注入 env 全体のキー数
   checks: PreflightCheck[];
 }
 
 export interface PreflightReport {
   ok: boolean; // 全サービス ready
   identityPresent: boolean;
-  needsIdentity: boolean; // inject 対象、 または Vault で揃わない requires_secret が 1 つでもある
+  needsIdentity: boolean; // Compatibility field; always false for Vault-only runtime.
   services: ServicePreflight[];
 }
 
-async function checkInfisical(svc: Service): Promise<{ check: PreflightCheck; injected: number }> {
-  const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  if (!cfg || !cfg.inject) {
-    return { check: { kind: 'infisical', status: 'ok', detail: 'inject 不要' }, injected: 0 };
-  }
-  const id = readIdentity();
-  if (!id) {
-    return {
-      check: { kind: 'infisical', status: 'fail', detail: 'Excubitor の machine identity (INFISICAL_*) が無い' },
-      injected: 0,
-    };
-  }
+/** Resolve once so peer fetch and required-env checks use the same snapshot. */
+async function checkVaultEnv(svc: Service): Promise<{ checks: PreflightCheck[]; injected: number }> {
   try {
-    const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
-    const env = toEnvMap(secrets, { prefix: cfg.prefix, include: cfg.include, exclude: cfg.exclude });
-    const n = Object.keys(env).length;
+    const env = await resolveInjectEnv(svc);
+    const validation = validateStartupEnv(svc, env);
     return {
-      check: {
-        kind: 'infisical',
-        status: n > 0 ? 'ok' : 'warn',
-        detail: `${cfg.project_id}/${cfg.environment} から ${n} 件解決`,
-      },
-      injected: n,
-    };
-  } catch (err) {
-    return {
-      check: { kind: 'infisical', status: 'fail', detail: `fetch 失敗: ${(err as Error).message}` },
-      injected: 0,
-    };
-  }
-}
-
-/**
- * `requires_secret` (他サービスの secret から NAMED key を借りる設定) の preflight。
- * Aedilis のように自分自身は infisical.inject が無くても requires_secret だけ持ちうるため、
- * checkInfisical (自身の secret) とは別チェックとして分離し、 fail 理由を混同させない。
- *
- * 解決規則は resolveRequiresSecretEnv と同じ **Vault 優先**: そのサービスの Vault 紐付けで揃うキーは
- * Infisical を見ない。全キーが Vault で揃えば machine identity が無くても問題にしない。
- * Vault 自体の解決失敗 (紐付けた値が未登録など) は env チェックが名前付きで報告するので、
- * ここでは Vault を空として扱い、Infisical 側で取れるかだけを見る。
- */
-async function checkRequiresSecret(
-  svc: Service,
-): Promise<{ check: PreflightCheck; injected: number; needsIdentity: boolean }> {
-  const requests = svc.requires_secret ?? [];
-  if (requests.length === 0) {
-    return {
-      check: { kind: 'requires_secret', status: 'ok', detail: 'cross-service secret 不要' },
-      injected: 0,
-      needsIdentity: false,
-    };
-  }
-  const vaultEnv = await resolveVaultEnv(svc.code).catch(() => ({}));
-  const plan = planRequiresSecret(requests, vaultEnv);
-  const fromVault = Object.keys(plan.fromVault).length;
-  if (plan.remaining.length === 0) {
-    return {
-      check: { kind: 'requires_secret', status: 'ok', detail: `Vault で ${fromVault} キーを解決` },
-      injected: fromVault,
-      needsIdentity: false,
-    };
-  }
-  const id = readIdentity();
-  if (!id) {
-    return {
-      check: {
-        kind: 'requires_secret',
-        status: 'fail',
-        detail:
-          'Excubitor の machine identity (INFISICAL_*) が無い (Vault に無いキー: ' +
-          `${plan.remaining.flatMap((r) => r.keys).join(', ')})`,
-      },
-      injected: 0,
-      needsIdentity: true,
-    };
-  }
-  let injected = fromVault;
-  for (const req of plan.remaining) {
-    const source = getServiceByCode(req.service);
-    if (!source) {
-      return {
-        check: {
-          kind: 'requires_secret',
-          status: 'fail',
-          detail: `source service "${req.service}" が catalog に無い`,
+      checks: [
+        { kind: 'vault', status: 'ok', detail: 'Vault-only environment resolved' },
+        {
+          kind: 'env', status: validation.ready ? 'ok' : 'fail',
+          detail: validation.ready
+            ? validation.required.length + ' required env present'
+            : 'missing required env: ' + validation.missing.join(', '),
         },
-        injected: 0,
-        needsIdentity: true,
-      };
-    }
-    const cfg = resolveServiceInfisical(req.service, source.infisical);
-    if (!cfg) {
-      return {
-        check: {
-          kind: 'requires_secret',
-          status: 'fail',
-          detail: `source service "${req.service}" に infisical 設定が無い`,
-        },
-        injected: 0,
-        needsIdentity: true,
-      };
-    }
-    try {
-      const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
-      const env = toEnvMap(secrets, { include: req.keys });
-      const missing = req.keys.filter((k) => !(k in env));
-      if (missing.length > 0) {
-        return {
-          check: {
-            kind: 'requires_secret',
-            status: 'fail',
-            detail: `"${req.service}" (${cfg.project_id}/${cfg.environment}) に無いキー: ${missing.join(', ')}`,
-          },
-          injected: Object.keys(env).length,
-          needsIdentity: true,
-        };
-      }
-      injected += Object.keys(env).length;
-    } catch (err) {
-      return {
-        check: {
-          kind: 'requires_secret',
-          status: 'fail',
-          detail: `"${req.service}" fetch 失敗: ${(err as Error).message}`,
-        },
-        injected: 0,
-        needsIdentity: true,
-      };
-    }
+      ],
+      injected: Object.keys(env).length,
+    };
+  } catch (error) {
+    return { checks: [{ kind: 'vault', status: 'fail', detail: (error as Error).message }], injected: 0 };
   }
-  return {
-    check: {
-      kind: 'requires_secret',
-      status: 'ok',
-      detail: `${requests.length} 件の cross-service secret を解決 (Vault ${fromVault} キー)`,
-    },
-    injected,
-    needsIdentity: true,
-  };
 }
 
 function checkPaths(svc: Service): PreflightCheck[] {
@@ -265,9 +119,9 @@ function checkPorts(svc: Service, listeners: PortListener[]): PreflightCheck[] {
 export async function runPreflight(services: Service[], codes: string[]): Promise<PreflightReport> {
   const want = new Set(codes);
   const targets = services.filter((s) => want.has(s.code));
-  // requires_secret は Vault で揃うなら identity 不要。チェック結果から後で足す。
-  let needsIdentity = targets.some((s) => resolveServiceInfisical(s.code, s.infisical)?.inject === true);
-  const identityPresent = readIdentity() !== null;
+  // Compatibility fields: Infisical identity is no longer consulted.
+  const needsIdentity = false;
+  const identityPresent = false;
 
   // port 占有は OS 呼び出し 1 回で全 listener を取得して使い回す。
   const listeners = await listListeners();
@@ -276,22 +130,14 @@ export async function runPreflight(services: Service[], codes: string[]): Promis
   for (const svc of targets) {
     const checks = checkPaths(svc);
     if (svc.disabled) checks.push({ kind: 'disabled', status: 'fail', detail: 'disabled in catalog' });
-    const { check: infCheck, injected } = await checkInfisical(svc);
-    checks.push(infCheck);
-    const {
-      check: reqSecretCheck,
-      injected: reqSecretInjected,
-      needsIdentity: reqSecretNeedsIdentity,
-    } = await checkRequiresSecret(svc);
-    checks.push(reqSecretCheck);
-    if (reqSecretNeedsIdentity) needsIdentity = true;
-    checks.push(await checkRequiredEnv(svc));
+    const resolved = await checkVaultEnv(svc);
+    checks.push(...resolved.checks);
     checks.push(...checkPorts(svc, listeners));
     result.push({
       code: svc.code,
       name: svc.name,
       ready: !checks.some((c) => c.status === 'fail'),
-      injectedKeys: injected + reqSecretInjected,
+      injectedKeys: resolved.injected,
       checks,
     });
   }

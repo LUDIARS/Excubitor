@@ -351,12 +351,17 @@ spawn/kill へ fallback してはならない。
 
 infra(0) → Cernere(1) → Corpus(2) → corpus submodule 依存サービス(3) → leaf(5)。tier 単位で control を呼び、tier 間に 1.5s 待ち。Cernere / Corpus を起動セットに含めれば leaf より先に上がるので「Corpus / Cernere と繋げる」が成立 (Corpus は discovery で leaf の port + manifest を拾う)。
 
-### 12.3 Infisical relay (各サービス自前 fetch → Excubitor 集約)
+### 12.3 Vault-only runtime (2026-10-03)
 
-- 旧方針 (2026-05-17「各サービス自前 fetch」) を**撤回**。Excubitor が secret relay を担う (Corpus `env-bootstrap.ts` の想定経路 A)。
-- `src/secrets/infisical.ts`: Excubitor 自身の machine identity (`INFISICAL_SITE_URL/CLIENT_ID/CLIENT_SECRET`) で universal-auth login → `/api/v3/secrets/raw`。token 5min / secret 60s キャッシュ。
-- catalog の `infisical: { project_id, environment, inject, prefix, include, exclude }` を ServiceSchema に接続 (従来は未接続で捨てられていた)。`inject:true` のサービスは spawn 時に該当 project の secret を取得し、prefix/include/exclude を適用して子プロセス env にリレー (`process/inject.ts` の `resolveInjectEnv`)。
-- **起動前チェック (preflight)**: 選択セットの各サービスで cwd / compose_file 実在 + (inject 対象なら) identity 有無 + secret 解決可否を spawn 前に検査。NG は起動から除外しレポート。`POST /api/v1/launch/preflight`、`/launch/start` は内部で preflight 実行。
+通常起動と secret-agent の正本は Ex 所有の共有／プロジェクト Vault。
+process/inject.ts と secrets/resolve.ts は resolveVaultEnv を共用し、Infisical fetch を行わない。
+requires_secret は消費サービスの binding に限定し、不足時は失敗する。
+preflight は identity を検査せず、注入 env と必須キーを一度の解決で検査する。
+.env 生成・平文コピーはしない。暗号化 runtime config のプロセス env 注入は維持する。
+既存 source peer/federation/暗号化控えを再利用し、同期・可用性方針を追加しない。
+詳細は spec/feature/vault.md と spec/feature/secret-agent.md。
+Infisical 一回限り import と移行互換設定は残すが通常起動の fallback に使わない。
+
 - **動的project credential**: `cernere_launch_credentials`を持つserviceは、Exが実spawn直前に
   launch IDと32-byte secretを生成してCernereへ送る。Cernereがissuer grantを検査して暗号化
   永続化・現行hash rotateを完了した場合だけ、target用credentialを子envへ注入する。
@@ -376,8 +381,8 @@ raw INSERT が `created_at`/`updated_at`/`ts` を渡しておらず、これら�
 
 ### 12.6 残課題
 
-- leaf 各サービスの `infisical.project_id` を catalog に充填する (現状 Cernere のみ設定済。他は inject 不要扱いで自前 .env.secrets fallback)。
-- Excubitor 自身の machine identity の供給経路 (`.env.secrets` / bootstrap)。
+- 後続: 各サービスの env-cli / dotenv / 自前 Infisical 取得を Vault-only 契約へ移す。
+- Infisical identity は移行 import 完了まで保持。通常起動の必須条件にはしない。
 - `/api/v1/launch/start` の実走 smoke (Corpus + leaf を実際に起動して Corpus discovery が拾うか)。
 
 ---

@@ -224,7 +224,7 @@ export interface LaunchPlan {
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface PreflightCheck {
-  kind: 'cwd' | 'compose_file' | 'infisical' | 'env' | 'start_script' | 'port' | 'disabled';
+  kind: 'cwd' | 'compose_file' | 'vault' | 'requires_secret' | 'env' | 'start_script' | 'port' | 'disabled';
   status: CheckStatus;
   detail: string;
 }

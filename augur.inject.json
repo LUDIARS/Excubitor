@@ -1,0 +1,5 @@
+{
+  "service": "excubitor",
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.contract.ts"]
+}

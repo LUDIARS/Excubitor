@@ -48,7 +48,7 @@ repository 内の ignored config file を人手で用意し忘れると、サー
   不正は fail-closed で起動エラーになる。
 - port は payload に含めない。Excubitor catalog / ProcessMap が唯一の正本で、Genius には
   `GENIUS_PORT` が注入される。
-- Infisical secret / `requires_secret` が同名 environment variable を提供する場合はそれらが
+- Vault binding / `requires_secret` が同名 environment variable を提供する場合はそれらが
   runtime config より優先する。runtime config 自身は単一 JSON environment variable なので、
   config の個別 field を直接上書きしない。
 

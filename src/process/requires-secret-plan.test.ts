@@ -27,9 +27,9 @@ describe('planRequiresSecret', () => {
     });
   });
 
-  it('treats an empty string in the Vault as a provided value', () => {
+  it('treats an empty required value as missing', () => {
     const plan = planRequiresSecret([{ service: 'cernere', keys: ['A'] }], { A: '' });
-    expect(plan.remaining).toEqual([]);
-    expect(plan.fromVault).toEqual({ A: '' });
+    expect(plan.remaining).toEqual([{ service: 'cernere', keys: ['A'] }]);
+    expect(plan.fromVault).toEqual({});
   });
 });

@@ -1,29 +1,16 @@
-/**
- * service spawn 時の env 注入解決 (Infisical relay).
- *
- * Excubitor が「ランチャー兼 secret relay」として、 起動する子プロセスに env を配る。
- * catalog の `infisical.inject: true` なサービスは、 Excubitor 自身の machine identity で
- * 該当 project の secret を fetch し、 prefix/include/exclude を適用して env map を返す。
- * 各サービスはこれを process.env として受け取るので、 自前 Infisical fetch が不要になる。
- *
- * (2026-06-04 方針転換: 旧「各サービス自前 fetch」 から Excubitor relay へ戻した)
- */
+/** Vault-only process env injection; never writes plaintext env files. */
 import path from 'node:path';
 import { type Service } from '../catalog/loader.js';
 import { createNamedLogger } from '../shared/logger.js';
-import { readIdentity, fetchProjectSecrets, toEnvMap, hasIdentity } from '../secrets/infisical.js';
 import { getServiceRuntimeConfig, resolveServiceInfisical } from '../secrets/config-store.js';
 import { sharedLogsRoot } from '../log/logs-root.js';
 import { arsRoot } from '../shared/roots.js';
 import { getTopologyEnv } from './topology.js';
-import { getServiceByCode } from './service-registry.js';
 import { injectServiceRuntimeVersion } from './service-version.js';
 import { resolveVaultEnv } from '../vault/vault-inject.js';
 import { planRequiresSecret } from './requires-secret-plan.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
-
-export { hasIdentity };
 
 /** catalog の `global.env` から設定されるグローバル env。 起動時 / catalog reload 時に更新。 */
 let _globalEnv: Record<string, string> = {};
@@ -66,18 +53,7 @@ function runtimeConfigEnvFor(svc: Pick<Service, 'code'>): Record<string, string>
   return { EXCUBITOR_SERVICE_CONFIG_JSON: JSON.stringify(config) };
 }
 
-/**
- * `svc.requires_secret` (他サービスの secret から NAMED key を借りる設定) を解決する。
- * - **Vault 優先**: 要求キーのうち、そのサービスの Vault 紐付けで値が得られるものは Vault から満たし
- *   Infisical に取りに行かない。全キーが Vault で揃えば machine identity も Infisical 呼び出しも不要。
- * - 足りないキーだけ従来どおり source service の Infisical project から取る:
- *   - source service は catalog 上に存在しなければならない (service-registry 未登録 → throw)。
- *   - source は自身の infisical 設定を持たなければならない (無ければ throw、 借りる先が無い)。
- *   - 足りないキーのみを toEnvMap の include で絞る (source の secret 全量を渡さない)。
- * - 失敗は全て throw (fail-fast、 preflight で事前検知させる)。
- *
- * `vaultEnv` は呼び出し側で解決済みならそれを渡す (二重取得を避ける)。省略時はここで解決する。
- */
+/** Resolve requirements only through the consumer's own Vault bindings. */
 export async function resolveRequiresSecretEnv(
   svc: Service,
   vaultEnv?: Record<string, string>,
@@ -93,48 +69,13 @@ export async function resolveRequiresSecretEnv(
   }
   if (plan.remaining.length === 0) return plan.fromVault;
 
-  const id = readIdentity();
-  if (!id) {
-    throw new Error(
-      `service ${svc.code} has requires_secret but Excubitor has no machine identity ` +
-        `(set INFISICAL_SITE_URL / INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET); ` +
-        `not in Vault: ${plan.remaining.flatMap((r) => r.keys).join(', ')}`,
-    );
-  }
-
-  let merged: Record<string, string> = { ...plan.fromVault };
-  for (const req of plan.remaining) {
-    const source = getServiceByCode(req.service);
-    if (!source) {
-      throw new Error(
-        `service ${svc.code} requires_secret from unknown service "${req.service}" (not in catalog)`,
-      );
-    }
-    const cfg = resolveServiceInfisical(req.service, source.infisical);
-    if (!cfg) {
-      throw new Error(
-        `service ${svc.code} requires_secret from "${req.service}" but that service has no infisical config`,
-      );
-    }
-    const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
-    const env = toEnvMap(secrets, { include: req.keys });
-    logger.info(
-      { consumer: svc.code, sourceService: req.service, project: cfg.project_id, keys: Object.keys(env) },
-      'cross-service secret injected via requires_secret',
-    );
-    merged = { ...merged, ...env };
-  }
-  return merged;
+  throw new Error(
+    `service ${svc.code} missing required Vault bindings or values: ` +
+      plan.remaining.flatMap((r) => r.keys).join(', '),
+  );
 }
 
-/**
- * spawn する子プロセスに渡す env を解決する。
- * - 常に topology env (URL/port、 Excubitor が catalog から特定可能な情報) を含む
- * - infisical inject 設定があれば secret を fetch して topology に上書きマージ
- * - requires_secret があれば他サービスの named secret を fetch し最優先でマージ
- * - identity 不足 (infisical inject / requires_secret のキーが Vault で揃わない時) → throw (preflight で事前検知させる)
- * - fetch 失敗 → throw
- *
+/** Resolve Vault-only child env, preserving runtime config and topology priority.
  * @implements SPEC-SERVICE-RUNTIME-VERSION
  */
 export async function resolveInjectEnv(svc: Service): Promise<Record<string, string>> {
@@ -148,49 +89,14 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   const arsRootEnv = arsRootEnvFor();
   const vestigiumEnv = vestigiumEnvFor(svc);
 
-  const cfg = resolveServiceInfisical(svc.code, svc.infisical);
-  // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
-  //           < encrypted runtime config < secret < requires_secret < Vault。
-  if (!cfg || !cfg.inject) {
-    const vaultEnv = await resolveVaultEnv(svc.code);
-    const requiresSecretEnv = await resolveRequiresSecretEnv(svc, vaultEnv);
-    return (await injectServiceRuntimeVersion(
-      svc,
-      {
-        ...arsRootEnv,
-        ...vestigiumEnv,
-        ..._globalEnv,
-        ...topology,
-        ...staticEnv,
-        ...runtimeConfigEnv,
-        ...requiresSecretEnv,
-        ...vaultEnv,
-      },
-    )).env;
-  }
-
-  const id = readIdentity();
-  if (!id) {
-    throw new Error(
-      `service ${svc.code} requires Infisical inject but Excubitor has no machine identity ` +
-        `(set INFISICAL_SITE_URL / INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET)`,
-    );
-  }
-
-  const secrets = await fetchProjectSecrets(id, cfg.project_id, cfg.environment);
-  const env = toEnvMap(secrets, {
-    prefix: cfg.prefix,
-    include: cfg.include,
-    exclude: cfg.exclude,
-  });
-  logger.info(
-    { code: svc.code, project: cfg.project_id, secrets: Object.keys(env).length, topology: Object.keys(topology).length },
-    'resolved inject env (topology + infisical)',
-  );
   const vaultEnv = await resolveVaultEnv(svc.code);
+  // Legacy inject is a migration requirement, never permission to fetch Infisical.
+  if (resolveServiceInfisical(svc.code, svc.infisical)?.inject && Object.keys(vaultEnv).length === 0) {
+    throw new Error(`service ${svc.code} requires Vault bindings before legacy inject can be retired`);
+  }
   const requiresSecretEnv = await resolveRequiresSecretEnv(svc, vaultEnv);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
-  //           < encrypted runtime config < secret < requires_secret < Vault (Infisical の置き換え)。
+  //           < encrypted runtime config < requires_secret < Vault。
   return (await injectServiceRuntimeVersion(
     svc,
     {
@@ -200,7 +106,6 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
       ...topology,
       ...staticEnv,
       ...runtimeConfigEnv,
-      ...env,
       ...requiresSecretEnv,
       ...vaultEnv,
     },
