@@ -3,6 +3,7 @@
  * service through the local-control supervisor before probing health.
  */
 import { spawn } from 'node:child_process';
+import { spawnOneShot } from '@ludiars/one-shot';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { sql } from 'drizzle-orm';
@@ -217,9 +218,9 @@ function buildPrompt(ctx: AutoFixContext, branch: string, af: NonNullable<Servic
 
 async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolveP) => {
-    const proc = spawn(autoFixConfig.claudeCli, ['-p'], {
+    const proc = spawnOneShot(autoFixConfig.claudeCli, ['-p'], {
       cwd,
-      shell: true,
+      shell: false,
       windowsHide: true,
       env: {
         ...process.env,

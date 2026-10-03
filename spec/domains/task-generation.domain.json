@@ -27,5 +27,8 @@
       "namePattern": "resolveTaskAndService"
     }
   ],
-  "cardTemplate": "Summarise the task-generation domain: generated remediation, investigation, review/update/release work, and discovery outputs."
+  "cardTemplate": "Summarise the task-generation domain: generated remediation, investigation, review/update/release work, and discovery outputs.",
+  "specRefs": [
+    "spec/feature/shared-one-shot.md"
+  ]
 }

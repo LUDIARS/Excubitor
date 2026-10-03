@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { spawnOneShot as spawn } from '@ludiars/one-shot';
 import { dirname } from 'node:path';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { listListeners } from '../scanner/ports.js';
@@ -121,7 +122,7 @@ async function runClaudeCli(cwd: string, prompt: string): Promise<{ exitCode: nu
   return new Promise((resolveP) => {
     const proc = spawn(autoFixConfig.claudeCli, ['-p'], {
       cwd,
-      shell: true,
+      shell: false,
       windowsHide: true,
       env: {
         ...process.env,

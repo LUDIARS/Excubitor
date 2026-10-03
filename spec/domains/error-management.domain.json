@@ -21,5 +21,8 @@
       "namePattern": "resolveTaskAndService"
     }
   ],
-  "cardTemplate": "Summarise the error-management domain: error rules, task state, emergency actions, audit trail, and triage risks."
+  "cardTemplate": "Summarise the error-management domain: error rules, task state, emergency actions, audit trail, and triage risks.",
+  "specRefs": [
+    "spec/feature/shared-one-shot.md"
+  ]
 }
