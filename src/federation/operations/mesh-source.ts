@@ -10,7 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execCapture } from '../../shared/exec.js';
-import { tail, type StepResult } from '../../update/steps.js';
+import { syncSubmodules, tail, type StepResult } from '../../update/steps.js';
 import { downloadBundle, type BundleDownloadResult } from '../client.js';
 import type { RemotePeer } from '../store.js';
 
@@ -61,6 +61,11 @@ export async function fastForwardFromMesh(
 
     const merge = await exec('git', ['merge', '--ff-only', MESH_REMOTE_REF], repoDir, GIT_TIMEOUT_MS);
     steps.push({ step: 'pull', ok: merge.ok, detail: tail(merge.ok ? merge.stdout : (merge.stderr || 'ff-only マージ不可 (分岐あり)')) });
+    if (!merge.ok) return steps;
+    // bundle は親リポの履歴だけを運ぶ。 submodule の版が変わっていれば取得が要り、 外へ出られない
+    // 拠点ではここで失敗として表に出る (黙って古い submodule のまま build させない)。
+    const submodules = await syncSubmodules(repoDir, exec);
+    if (submodules) steps.push(submodules);
     return steps;
   } finally {
     await rm(dir, { recursive: true, force: true });

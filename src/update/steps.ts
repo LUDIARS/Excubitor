@@ -18,6 +18,8 @@ export interface StepResult {
 }
 
 const GIT_TIMEOUT_MS = 60_000;
+// submodule の初回 clone はリポ 1 本ぶんの取得になるので、 fetch より長く待つ。
+const SUBMODULE_TIMEOUT_MS = 300_000;
 const INSTALL_TIMEOUT_MS = 300_000;
 const BUILD_TIMEOUT_MS = 1_800_000;
 
@@ -56,7 +58,40 @@ export async function fastForwardFromOrigin(repoDir: string, branch: string): Pr
 
   const pull = await execCapture('git', ['merge', '--ff-only', `origin/${branch}`], repoDir, GIT_TIMEOUT_MS);
   steps.push({ step: 'pull', ok: pull.ok, detail: tail(pull.ok ? pull.stdout + pull.stderr : (pull.stderr || 'ff-only マージ不可 (分岐あり)')) });
+  if (!pull.ok) return steps;
+
+  const submodules = await syncSubmodules(repoDir);
+  if (submodules) steps.push(submodules);
   return steps;
+}
+
+/**
+ * 取り込んだコミットが記録する submodule を、 その gitlink の版へ揃える。 `.gitmodules` が
+ * 無ければ手順ごと省く (null)。
+ *
+ * submodule を `file:` 依存に使うリポ (例: lib/lapilli の @ludiars/one-shot) は、 pull だけでは
+ * submodule が空か古い版のまま残り、 install が空ディレクトリへのリンクを張って build が
+ * 型・モジュール解決で落ちる (2026-10-03 AWS 拠点の Excubitor deploy)。 URL の変更も
+ * 取り込むため sync してから update する。 既に揃っていれば update は通信せずに終わる。
+ */
+export async function syncSubmodules(
+  repoDir: string,
+  exec: typeof execCapture = execCapture,
+): Promise<StepResult | null> {
+  if (!existsSync(join(repoDir, '.gitmodules'))) return null;
+  const sync = await exec('git', ['submodule', 'sync', '--recursive'], repoDir, GIT_TIMEOUT_MS);
+  if (!sync.ok) return { step: 'submodules', ok: false, detail: tail(sync.stderr || sync.stdout || 'submodule sync failed') };
+  const update = await exec(
+    'git',
+    ['submodule', 'update', '--init', '--recursive'],
+    repoDir,
+    SUBMODULE_TIMEOUT_MS,
+  );
+  return {
+    step: 'submodules',
+    ok: update.ok,
+    detail: tail(update.ok ? (update.stdout + update.stderr).trim() || 'up to date' : (update.stderr || 'submodule update failed')),
+  };
 }
 
 async function updateMainBranch(repoDir: string, currentBranch: string) {
