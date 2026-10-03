@@ -34,7 +34,7 @@ export function execCapture(
 ): Promise<ExecResult> {
   return new Promise((resolveP) => {
     const needsShell = shell || (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(cmd));
-    const proc = spawn(cmd, args, { cwd, shell: needsShell, env: normalizedEnv(), windowsHide: true });
+    const proc = spawn(cmd, args, { cwd, shell: needsShell, env: spawnEnvFor(cmd), windowsHide: true });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -53,6 +53,27 @@ export function execCapture(
     proc.on('error', (err) => finish({ ok: false, code: null, stdout, stderr: err.message }));
     proc.on('close', (code) => finish({ ok: code === 0, code, stdout, stderr }));
   });
+}
+
+/**
+ * 子プロセスへ渡す env。 git には `GIT_OPTIONAL_LOCKS=0` を足す。
+ *
+ * `git status` は読むだけでも index の stat 情報を書き戻すために `.git/index.lock` を取る
+ * (optional lock)。 ここは timeout で子を木ごと kill するので、 負荷の高いときに status が
+ * 時間切れになると lock を握ったまま死に、 0 バイトの index.lock が残って以後の commit /
+ * Revisor の自動マージが「index.lock: File exists」で止まっていた (2026-10-03、 GLAB で 2 回・
+ * ほか 7 リポで 9/26 からの残骸)。 optional lock を切っても commit / merge などの必須 lock は
+ * 従来どおり取る。
+ */
+export function spawnEnvFor(cmd: string): NodeJS.ProcessEnv {
+  const env = normalizedEnv();
+  if (!isGitCommand(cmd)) return env;
+  return { ...env, GIT_OPTIONAL_LOCKS: '0' };
+}
+
+function isGitCommand(cmd: string): boolean {
+  const base = cmd.replace(/\\/g, '/').split('/').pop() ?? cmd;
+  return /^git(?:\.exe)?$/i.test(base);
 }
 
 function normalizedEnv(): NodeJS.ProcessEnv {
