@@ -70,3 +70,22 @@ PUT /api/v1/config/services/:code/runtime-config
 `config` は object または `null` だけを受け付ける。本文の再取得 API は提供しない。
 service code / config の検証エラーは 400、保存 I/O の失敗は local path を含まない generic な
 `runtime_config_save_failed` (500) を返す。
+
+## 配列要素の条件一致更新 {#SPEC-SERVICE-RUNTIME-CONFIG-ELEMENT-UPDATE}
+
+全体 PUT は保存済みの値 (共有 secret を含む) を知らないと使えない。本文を読まずに一部だけ直すため、
+トップレベルの配列キーの要素を条件一致で書き換える API を置く。
+
+```text
+PATCH /api/v1/config/services/:code/runtime-config/elements
+{ "key": "actioTaskBindings", "match": { "projectId": "At", "teamId": null }, "set": { "teamId": "team_..." } }
+{ "key": "actioTaskBindings", "match": { "projectId": "At" }, "remove": true }
+→ { ok: true, code, matched, runtime_config: { configured, keys } }
+```
+
+- `key` の値は配列であること。要素は object のときだけ照合する。
+- `match` は 1 フィールド以上。全フィールドが厳密一致した要素が対象。`null` は「null または未設定」に一致する。
+- `set` (スカラー値の上書き) と `remove` (要素の削除) はどちらか一方だけ。値はスカラー (string / number / boolean / null) に限る。
+- 一致が 0 件なら保存しない。応答は一致件数とトップレベルのキー名だけで、値本文・要素の内容は返さない。
+- 未設定のサービス・配列でないキー・不正な指定は 400 (`invalid_runtime_config_update`)。エラー文に値本文を含めない。
+- 反映は次回 spawn から (全体 PUT と同じ)。

@@ -19,6 +19,7 @@ import {
   setDomainRootOverride,
   getDiscordNotificationConfig,
   getDiscordNotificationStatus,
+  getServiceRuntimeConfig,
   getServiceRuntimeConfigStatus,
   saveDiscordNotificationConfig,
   saveServiceRuntimeConfig,
@@ -30,6 +31,7 @@ import {
   saveCfTunnelSettings,
 } from './config-store.js';
 import { verifyIdentity } from './infisical.js';
+import { RuntimeConfigElementUpdateError, updateRuntimeConfigElements } from './runtime-config-element-update.js';
 import { sendDiscordWebhook } from '../notify/discord-webhook.js';
 
 const IdentitySchema = z.object({
@@ -81,6 +83,14 @@ const PackageAuditNotificationSchema = z.object({
 const RuntimeConfigSchema = z.object({
   config: z.record(z.unknown()).nullable(),
 });
+
+const RuntimeConfigScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const RuntimeConfigElementUpdateSchema = z.object({
+  key: z.string().min(1).max(128),
+  match: z.record(RuntimeConfigScalarSchema),
+  set: z.record(RuntimeConfigScalarSchema).optional(),
+  remove: z.boolean().optional(),
+}).strict();
 
 export interface ConfigRouterDeps {
   onDomainRootChanged?: () => unknown | Promise<unknown>;
@@ -135,6 +145,27 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     } catch (err) {
       if (err instanceof ServiceRuntimeConfigValidationError) {
         return c.json({ error: 'invalid_runtime_config', message: err.message }, 400);
+      }
+      return c.json({ error: 'runtime_config_save_failed' }, 500);
+    }
+  });
+
+  // 配列要素を条件一致で書き換える。値本文は返さず、一致件数とキー名だけを返す。
+  /** @implements SPEC-SERVICE-RUNTIME-CONFIG-ELEMENT-UPDATE */
+  app.patch('/api/v1/config/services/:code/runtime-config/elements', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = RuntimeConfigElementUpdateSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      const code = c.req.param('code');
+      const result = updateRuntimeConfigElements(getServiceRuntimeConfig(code), parsed.data);
+      const runtime_config = result.matched === 0
+        ? getServiceRuntimeConfigStatus(code)
+        : saveServiceRuntimeConfig(code, result.config);
+      return c.json({ ok: true, code, matched: result.matched, runtime_config });
+    } catch (err) {
+      if (err instanceof RuntimeConfigElementUpdateError || err instanceof ServiceRuntimeConfigValidationError) {
+        return c.json({ error: 'invalid_runtime_config_update', message: err.message }, 400);
       }
       return c.json({ error: 'runtime_config_save_failed' }, 500);
     }
