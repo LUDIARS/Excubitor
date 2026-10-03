@@ -10,7 +10,7 @@ interface ServiceEntry {
 }
 
 function selectedFromUrl(): string {
-  return new URLSearchParams(location.search).get('service') ?? 'villa';
+  return new URLSearchParams(location.search).get('service') ?? '';
 }
 
 export default function Viewer() {

@@ -3,7 +3,7 @@ id: EX-UNIFIED-VIEWER
 status: implemented-unverified
 ---
 
-# Ex Viewer と Villa
+# Ex Viewer
 
 2026-09-10: 公開・配備境界は [DMZワーカー仕様](viewer-dmz.md) に更新。
 以下のViewer経路はEx管理プロセスではなく `excubitor-viewer-dmz` が提供する。
@@ -20,8 +20,6 @@ status: implemented-unverified
   `frontend_port` / `port` のみ。利用者入力の URL や port を転送先に採用しない。
 - `/api/v1/viewer/services`: 公開許可済みの閲覧候補だけを返す。対象外の名前や理由、
   worker / native / infra はDMZへ渡さない。
-- `/viewer/apps/villa/*`: Ex の `villa/` から資料を直接配信。Villa プロセスへの中継はしない。
-- `/villa/`: Villa 閲覧経路への互換入口。メニューボタンは Viewer の外枠にのみ存在する。
 
 `src/viewer/catalog.ts` は対象判定、`urls.ts` は経路解決、`headers.ts` は HTTP/Cookie 境界、
 `proxy.ts` はストリーム転送、`rewrite.ts` は文書の URL 変換、`websocket.ts` は upgrade と
@@ -75,6 +73,11 @@ X-Frame-Options と frame-ancestors は削除せず、埋込禁止のサービ�
   この Viewer は同じ信頼範囲の内部サービス用。DMZ入口のCloudflare Accessを適切に設定する前提。
 
 ## Villa の所有と移行
+
+2026-10-03: Villa の HTML は Ex に同梱せず、クローズドな Villa リポで運用する (neco 指示)。
+Ex は public リポで役割も異なるため、`villa/`・`src/villa/`・`/viewer/apps/villa/*`・`/villa/` を削除した。
+Viewer の既定選択も Villa ではなくなり、`?service=` が無いときはメニューから選ぶ。
+以下は 2026-09 時点の移行記録で、現在の構成ではない。
 
 公開可能性を確認した既存 Villa の HTML と routes.json を Ex の `villa/` に収容する。
 更新先は Ex の `villa/`。資料の業務上の正本は引き続き各プロジェクト。

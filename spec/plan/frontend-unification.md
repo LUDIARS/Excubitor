@@ -17,7 +17,7 @@ Ex が共通シェルを所有し、対象サービスは共通のブラウザ�
 | fetch/XHR/WS/History 等 | Ex `frontend/public/viewer/` の互換処理 | 新対応アプリは明示的な共通 API を使用。互換層は移行期間のみ |
 | 許可対象・接続先 | Ex `src/viewer/catalog.ts` | Ex の server-side 判定を正本として維持 |
 | 文書 URL と cookie 変換 | Ex `src/viewer/rewrite.ts` / `headers.ts` | reverse proxy の責務として保持。クライアントへ移さない |
-| Villa | Ex `src/villa/documents.ts` / `villa/` | Ex 所有の静的 HTML 配信。共通シェルから選択可能 |
+| Villa | (2026-10-03 に Ex から削除) | クローズドな Villa リポで運用。Ex には同梱しない |
 
 参照する Viewer 実装は `feat/unified-viewer-villa` のレビュー修正を含む版。本体への反映とは区別する。Cc/Pf/Pe の既存ベースパス変更は移行の出発点として利用し、同じ一行修正を再提出しない。
 

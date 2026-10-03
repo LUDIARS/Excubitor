@@ -20,12 +20,12 @@ describe('DMZ HTTP surface', () => {
     expect((await app.request('/viewer/apps/unpublished/')).status).toBe(404);
   });
 
-  it('returns unavailable for expired directory including Villa, without reading documents', async () => {
+  it('returns unavailable for an expired directory', async () => {
     const app = buildDmzRouter({
       entries: () => { throw new Error('expired'); },
       target: () => { throw new Error('expired'); },
     });
-    for (const path of ['/health', '/api/v1/viewer/services', '/viewer/apps/villa/', '/viewer/apps/example/']) {
+    for (const path of ['/health', '/api/v1/viewer/services', '/viewer/apps/example/']) {
       expect((await app.request(path)).status).toBe(503);
     }
   });

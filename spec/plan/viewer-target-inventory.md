@@ -15,7 +15,7 @@ workspace 直下の本体 git リポジトリの `excubitor.catalog.yaml` を確
 | Concordia / concordia | `Concordia/web/package.json`、React/Vite/React Router | 共通 router/API adapter。既存 basename 対応は利用する |
 | Praeforma / praeforma | `Praeforma/web/package.json`、React/Vite/router | 共通 router/API adapter。catalog frontend_url あり |
 | Peregrinatio / peregrinatio | `Peregrinatio/apps/web/`、React/Vite/React Router/PWA | 共通 adapter と Viewer 内 SW 登録停止。standalone PWA 維持 |
-| Villa / villa | Ex `villa/routes.json` と静的 HTML | Ex 内蔵資料。旧プロセスを proxy しない。資料除外を維持 |
+| Villa / villa | (2026-10-03 に Ex から削除) | クローズドな Villa リポで運用。Ex には同梱しない |
 
 ## 条件付き候補
 

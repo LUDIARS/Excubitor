@@ -55,9 +55,9 @@ function upstreamUrl(service: Service): URL | null {
 }
 
 export function viewerEntries(catalog: Catalog, prefs: Map<string, boolean>): ViewerEntry[] {
-  const entries: ViewerEntry[] = [{ code: 'villa', name: 'Villa — 資料', href: '/viewer/apps/villa/', excludedReason: null }];
+  const entries: ViewerEntry[] = [];
   for (const service of catalog.services) {
-    if (service.code === 'villa' || !CODE.test(service.code)) continue;
+    if (!CODE.test(service.code)) continue;
     const excludedReason = exclusionReason(service, prefs) ?? (upstreamUrl(service) ? null : 'Web入口が未登録');
     // Worker / native / infra entries do not have useful browser destinations.
     if (excludedReason === 'Web入口が未登録' || excludedReason === 'Web画面ではありません') continue;

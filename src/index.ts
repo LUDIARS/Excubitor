@@ -800,8 +800,6 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // Viewer HTTP and WebSocket traffic belongs exclusively to the DMZ worker.
   app.all('/viewer', (c) => c.notFound());
   app.all('/viewer/*', (c) => c.notFound());
-  app.all('/villa', (c) => c.notFound());
-  app.all('/villa/*', (c) => c.notFound());
   app.all('/api/v1/viewer/*', (c) => c.notFound());
 
   // ランチャー API (/api/v1/launch/* + /api/v1/projects)

@@ -9,7 +9,7 @@ status: implemented-unverified
 
 利用者はCloudflare Accessで許可された統合ビューから各サービスを使う。
 管理者用Ex Monitorとは別のプロセス・HTTP入口・フロントエンド成果物を使う。
-Villaはこのビュー内の資料サービスであり、旧Villaホストからの転送は要件ではない。
+Villa の資料は Ex に同梱しない (2026-10-03、クローズドな Villa リポで運用)。
 
 利用者が承認した前提は、PC内のアクセスを信頼しloopback待受に限定すること、
 Cloudflare Access設定が適切であること。DMZワーカーはAccess設定監査やJWT検証を
@@ -20,13 +20,13 @@ Cloudflare Access設定が適切であること。DMZワーカーはAccess設定
 - EX-DMZ-01: Tunnelは `excubitor-viewer-dmz` のcatalogポートへ向ける。
   Ex管理フロント、MCP、設定・制御・秘密情報APIをワーカーにmountしない。
 - EX-DMZ-02: Ex本体とDMZワーカーはいずれも127.0.0.1待受。
-  本体の `/viewer`、`/villa` とViewer APIは404とし、WebSocket中継も外す。
+  本体の `/viewer` とViewer APIは404とし、WebSocket中継も外す。
 - EX-DMZ-03: DMZフロントは独立entryと `frontend/dist-dmz` を使い、Monitorをbundleしない。
 - EX-DMZ-04: ワーカーはEx DB、Infisical設定、サービス起動・停止モジュールをimportしない。
   Ex本体が生成する経路一覧だけを読み、公開対象の名前・URL・中継先を得る。
 - EX-DMZ-05: 経路一覧は既存catalogのViewer許可とCorpus除外を適用して生成する。
   コマンド、環境変数、秘密設定、全catalogを渡さない。対象外の一覧も渡さない。
-- EX-DMZ-06: 一覧の欠落・不正・期限切れはHTTP/SSE開始、VillaとWebSocket開始を拒否する。
+- EX-DMZ-06: 一覧の欠落・不正・期限切れはHTTP/SSE開始、WebSocket開始を拒否する。
   本体は10秒ごとに更新し、最後の成功から30秒で期限切れ。既存接続を即時失効させる契約ではない。
 
 ## 所有と寿命

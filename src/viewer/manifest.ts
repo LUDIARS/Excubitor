@@ -48,7 +48,7 @@ export function parseViewerManifest(text: string, now: number): ViewerManifest {
       if (!manifest.monitor || entry.href !== '/viewer/apps/excubitor/' || targetCodes.has(entry.code)) {
         throw new Error('Invalid Monitor entry');
       }
-    } else if (entry.code !== 'villa' && !targetCodes.has(entry.code)) throw new Error('Missing Viewer target');
+    } else if (!targetCodes.has(entry.code)) throw new Error('Missing Viewer target');
     entryCodes.add(entry.code);
   }
   for (const target of manifest.targets) {
