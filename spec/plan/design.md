@@ -690,6 +690,20 @@ cmd.exe が本当に必要なのは `.cmd` / `.bat` を入口にするサービ�
 
 `runtime: 'app'` は従来どおり `exec` を直接起動する (解決を通さない)。
 
+**追補 (2026-10-05) — npm / npx は node で直接起動する**: `.cmd` に解決された `npm` / `npx` も、
+cmd.exe 経由のままだと同じ pid 契約破れが残っていた。launcher は shell 経由の子に `detached` を
+付けられないため、cmd.exe は Node (libuv) が launcher の寿命に縛る Job に入る。この Job は
+SILENT_BREAKAWAY_OK なので孫 (npm の node) は外れて生き残り、launcher の終了で **cmd.exe だけ**が
+消える。返り pid (cmd.exe) は即死に見え (`exited immediately after breakaway spawn`)、実サービスは
+管理外で残る。実測: Discutere (`npm run dev:server`) で起動のたびに `npm → tsx watch → node` の木が
+1 本ずつ残り、ポート 3110 を取り合った。
+
+`npm.cmd` / `npx.cmd` に解決されたら、同じフォルダの `node.exe` + 同梱 CLI
+(`node_modules/npm/bin/npm-cli.js` / `npx-cli.js`、`%APPDATA%\npm` の global prefix にあれば
+そちらを優先 — シムと同じ選択) の直起動に置き換える (`ResolvedCommand.prefixArgs` に CLI js)。
+shell が要らないので `detached` で切り離せ、返り pid は長生きする npm 本体になる。node.exe か CLI が
+見つからなければ従来どおり cmd.exe 経由。`start_script` 等の他の `.bat` / `.cmd` は対象外。
+
 ### 17.4.3 v0.8.4 — 生き残った pid を捨てない / 宣言ポートで拾い直す (2026-08-10)
 
 **背景 (実測)**: 2026-08-10、`concordia` の起動で Excubitor は `stopped` / `pid=null` を

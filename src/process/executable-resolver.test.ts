@@ -131,6 +131,63 @@ describe('resolveExecutable', () => {
       .toEqual({ command: exe, shell: false });
   });
 
+  describe('npm / npx shims', () => {
+    // cmd.exe 経由の npm は launcher の Job で cmd.exe だけが消え、返り pid が即死に見えて
+    // 実サービスが管理外に積み上がる (2026-10-05)。node + CLI js の直起動に置き換える。
+    function nodeInstall(): { bin: string; nodeExe: string; npmCli: string; npxCli: string } {
+      const bin = workspace();
+      touch(bin, 'npm.cmd');
+      touch(bin, 'npx.cmd');
+      const nodeExe = touch(bin, 'node.exe');
+      const cliDir = join(bin, 'node_modules', 'npm', 'bin');
+      mkdirSync(cliDir, { recursive: true });
+      return { bin, nodeExe, npmCli: touch(cliDir, 'npm-cli.js'), npxCli: touch(cliDir, 'npx-cli.js') };
+    }
+
+    it('starts npm through node.exe and the bundled npm-cli.js without a shell', () => {
+      const { bin, nodeExe, npmCli } = nodeInstall();
+      expect(resolveExecutable('npm', { ...WIN, cwd: workspace(), env: { PATH: bin, PATHEXT: '.EXE;.CMD' } }))
+        .toEqual({ command: nodeExe, shell: false, prefixArgs: [npmCli] });
+    });
+
+    it('starts npx through node.exe and npx-cli.js', () => {
+      const { bin, nodeExe, npxCli } = nodeInstall();
+      expect(resolveExecutable('npx', { ...WIN, cwd: workspace(), env: { PATH: bin, PATHEXT: '.CMD' } }))
+        .toEqual({ command: nodeExe, shell: false, prefixArgs: [npxCli] });
+    });
+
+    it('prefers the npm installed in the global prefix, as npm.cmd does', () => {
+      const { bin, nodeExe } = nodeInstall();
+      const appData = workspace();
+      const globalCliDir = join(appData, 'npm', 'node_modules', 'npm', 'bin');
+      mkdirSync(globalCliDir, { recursive: true });
+      const globalCli = touch(globalCliDir, 'npm-cli.js');
+      expect(
+        resolveExecutable('npm', {
+          ...WIN,
+          cwd: workspace(),
+          env: { PATH: bin, PATHEXT: '.CMD', APPDATA: appData },
+        }),
+      ).toEqual({ command: nodeExe, shell: false, prefixArgs: [globalCli] });
+    });
+
+    it('keeps the shell when the bundled CLI is missing', () => {
+      const bin = workspace();
+      touch(bin, 'npm.cmd');
+      touch(bin, 'node.exe');
+      expect(resolveExecutable('npm', { ...WIN, cwd: workspace(), env: { PATH: bin, PATHEXT: '.CMD' } }))
+        .toEqual({ command: 'npm', shell: true });
+    });
+
+    it('leaves other batch entries on the shell', () => {
+      const { bin } = nodeInstall();
+      touch(bin, 'start-service.bat');
+      expect(
+        resolveExecutable('start-service.bat', { ...WIN, cwd: workspace(), env: { PATH: bin, PATHEXT: '.CMD' } }),
+      ).toEqual({ command: 'start-service.bat', shell: true });
+    });
+  });
+
   it('never asks for a shell off win32', () => {
     expect(resolveExecutable('npm', { platform: 'linux', cwd: '/tmp', env: {} }))
       .toEqual({ command: 'npm', shell: false });

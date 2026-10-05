@@ -16,14 +16,35 @@
  * `node ...` のように実行ファイルへ解決できる入口は直接起動すれば、pid も窓もログも正しくなる。
  */
 import { statSync } from 'node:fs';
-import { isAbsolute, join, resolve, extname } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, extname } from 'node:path';
 
 export interface ResolvedCommand {
   /** 起動に使うコマンド。直接起動時は絶対パス、batch は cmd.exe に渡す元の token。 */
   command: string;
   /** cmd.exe を挟む必要があるか。 */
   shell: boolean;
+  /**
+   * サービスの args の前に足す引数。npm / npx の batch シムを node 直起動に置き換えたとき、
+   * CLI の js (`npm-cli.js` 等) をここで渡す。それ以外では付かない。
+   */
+  prefixArgs?: string[];
 }
+
+/**
+ * node 直起動に置き換えられる batch シム (`<name>.cmd`) → 同梱 CLI の相対パス。
+ *
+ * `npm.cmd` を cmd.exe で起動すると、breakaway launcher の子は cmd.exe になる。cmd.exe は
+ * shell 経由なので `detached` を付けられず、Node (libuv) が launcher の寿命に縛る Job に入る。
+ * その Job は SILENT_BREAKAWAY_OK なので **孫 (npm の node) は Job から外れて生き残り、
+ * launcher の終了で cmd.exe だけが消える**。返り pid (= cmd.exe) が即死に見え、実サービスは
+ * 管理外で積み上がっていた (2026-10-05 Discutere: 起動のたびに `npm run dev:server` の木が
+ * 1 本ずつ残り、ポート 3110 を取り合った)。node で CLI を直接起動すれば shell が要らず、
+ * `detached` で切り離せて、返り pid も長生きする npm 本体になる。
+ */
+const NODE_CLI_SHIMS: Record<string, string> = {
+  'npm.cmd': join('node_modules', 'npm', 'bin', 'npm-cli.js'),
+  'npx.cmd': join('node_modules', 'npm', 'bin', 'npx-cli.js'),
+};
 
 /** cmd.exe でしか起動できない拡張子 (Windows のバッチ)。 */
 const BATCH_EXTENSIONS = new Set(['.cmd', '.bat']);
@@ -77,6 +98,8 @@ export function resolveExecutable(
 
   for (const candidate of candidatePaths(command, { cwd, env, extensions })) {
     if (!isExecutableFile(candidate)) continue;
+    const viaNode = resolveNodeCliShim(candidate, env);
+    if (viaNode) return viaNode;
     const requiresShell = BATCH_EXTENSIONS.has(extname(candidate).toLowerCase());
     // Node joins `file` and `args` into one command string when shell=true. Replacing a
     // bare token such as `npm` with `C:\Program Files\nodejs\npm.cmd` therefore makes
@@ -85,6 +108,26 @@ export function resolveExecutable(
     return { command: requiresShell ? command : candidate, shell: requiresShell };
   }
   return { command, shell: true };
+}
+
+/**
+ * npm / npx の batch シムを、同じフォルダの node.exe + 同梱 CLI の直起動へ置き換える。
+ * シム (`npm.cmd`) と同じく、グローバル prefix (`%APPDATA%\npm`) に入れた npm があれば優先する。
+ * node.exe か CLI が見つからなければ null (従来どおり cmd.exe 経由に任せる)。
+ */
+function resolveNodeCliShim(candidate: string, env: NodeJS.ProcessEnv): ResolvedCommand | null {
+  const cli = NODE_CLI_SHIMS[basename(candidate).toLowerCase()];
+  if (!cli) return null;
+  const shimDir = dirname(candidate);
+  const nodeExe = join(shimDir, 'node.exe');
+  if (!isExecutableFile(nodeExe)) return null;
+  const appData = lookupEnv(env, 'APPDATA');
+  const cliCandidates = [
+    ...(appData ? [join(appData, 'npm', cli)] : []),
+    join(shimDir, cli),
+  ];
+  const cliPath = cliCandidates.find(isExecutableFile);
+  return cliPath ? { command: nodeExe, shell: false, prefixArgs: [cliPath] } : null;
 }
 
 /** 探索順に候補パスを生成する。拡張子付きの指定はそのまま、無指定は PATHEXT を順に試す。 */

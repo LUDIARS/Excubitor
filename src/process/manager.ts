@@ -396,9 +396,10 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     const resolved = svc.runtime === 'app'
       ? { command: cmd, shell: false }
       : resolveExecutable(cmd, { cwd: resolvedCwd, env: childEnv });
+    // npm / npx は cmd.exe を挟まず node + CLI js の直起動に置き換わる (prefixArgs = CLI js)。
     return spawnBreakawayService(svc, opts, generation, childEnv, resolvedCwd, {
       command: resolved.command,
-      args,
+      args: [...(resolved.prefixArgs ?? []), ...args],
       shell: resolved.shell,
     }, version);
   }
@@ -421,7 +422,7 @@ async function spawnReservedService(svc: Service, opts: SpawnOptions): Promise<S
     const resolvedChild = svc.runtime === 'app'
       ? { command: cmd, shell: false }
       : resolveExecutable(cmd, { cwd: resolvedCwd, env: childEnv });
-    child = spawn(resolvedChild.command, args, {
+    child = spawn(resolvedChild.command, [...(resolvedChild.prefixArgs ?? []), ...args], {
       cwd: resolvedCwd,
       shell: resolvedChild.shell,
       env: childEnv,
