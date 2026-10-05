@@ -94,6 +94,9 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   管理名から役割サフィックス (`-backend` 等) を外し純粋名にする (cernere / actio)。
 - サービス固有の静的 env は catalog の `env:` で注入 (例 discutere `BACKEND_PORT: "3110"` で
   Nuntius(3100) との port 競合を回避)。 優先順位: topology < `env:` < secret。
+- 他拠点で動くサービスへ全サービスを向けるときは拠点ごとの env `EXCUBITOR_TOPOLOGY_HOSTS`
+  (`code=host,...`、例 `cernere=100.84.227.24`) で topology の host を上書きする (`<CODE>_URL` と
+  `provides` の `${host}` に効く)。catalog は全拠点共有なので拠点差は catalog に書かない。不正な値は警告して無視する。
 - runtime=app は port を持たないため、 `process_match` (image 名) で host プロセススキャンし
   「Excubitor 外から起動した実体」 の生存も死活に反映する (scanner/host-process.ts)。
 

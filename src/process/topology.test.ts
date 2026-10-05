@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTopologyEnv, envKey } from './topology.js';
+import { buildTopologyEnv, envKey, parseTopologyHosts } from './topology.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 
 function svc(p: Partial<Service>): Service {
@@ -76,5 +76,30 @@ describe('buildTopologyEnv', () => {
     expect(env['CERNERE_WS_URL']).toBe('ws://localhost:8080');
     // auto キーも共存
     expect(env['CERNERE_BACKEND_DEV_URL']).toBe('http://localhost:8080');
+  });
+
+  it('uses a per-site host override for a service hosted on another site', () => {
+    const catalog = cat([
+      svc({ code: 'cernere', port: 8080, provides: { CERNERE_BASE_URL: 'http://${host}:${port}', CERNERE_WS_URL: 'ws://${host}:${port}' } }),
+      svc({ code: 'aedilis', port: 17502 }),
+    ]);
+    const env = buildTopologyEnv(catalog, parseTopologyHosts('cernere=100.84.227.24'));
+    expect(env['CERNERE_BASE_URL']).toBe('http://100.84.227.24:8080');
+    expect(env['CERNERE_WS_URL']).toBe('ws://100.84.227.24:8080');
+    expect(env['CERNERE_URL']).toBe('http://100.84.227.24:8080');
+    expect(env['AEDILIS_URL']).toBe('http://localhost:17502');
+  });
+});
+
+describe('parseTopologyHosts', () => {
+  it('parses code=host pairs and ignores blanks', () => {
+    expect(parseTopologyHosts(undefined)).toEqual({});
+    expect(parseTopologyHosts(' cernere = 100.84.227.24 , ,actio=macat.local')).toEqual({ cernere: '100.84.227.24', actio: 'macat.local' });
+  });
+
+  it('rejects malformed items so the operator notices', () => {
+    for (const raw of ['cernere', 'cernere=', '=host', 'cernere=a=b', 'cernere=http://x', 'cernere=a b']) {
+      expect(() => parseTopologyHosts(raw)).toThrow('EXCUBITOR_TOPOLOGY_HOSTS');
+    }
   });
 });
