@@ -30,7 +30,17 @@ function requireEnv(env: Record<string, string>, key: string): string {
   return value;
 }
 
-function normalizeCernereBaseUrl(value: string): string {
+/**
+ * Tailscale の CGNAT 帯 (100.64.0.0/10)。拠点間の通信は WireGuard で暗号化されるため、
+ * 他拠点で動く Cernere へは http で直接つないでよい (2026-10-05 neco 判断: バックエンド間は Tailscale)。
+ */
+export function isTailscaleAddress(hostname: string): boolean {
+  const octets = hostname.split('.');
+  if (octets.length !== 4 || !octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
+  return Number(octets[0]) === 100 && Number(octets[1]) >= 64 && Number(octets[1]) <= 127;
+}
+
+export function normalizeCernereBaseUrl(value: string): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -38,8 +48,9 @@ function normalizeCernereBaseUrl(value: string): string {
     throw new Error('CERNERE_BASE_URL must be a valid absolute URL');
   }
   const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
-    throw new Error('CERNERE_BASE_URL must use HTTPS except for loopback development');
+  const plainHttpAllowed = isLoopback || isTailscaleAddress(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && plainHttpAllowed)) {
+    throw new Error('CERNERE_BASE_URL must use HTTPS except for loopback or Tailscale (100.64.0.0/10)');
   }
   if (url.username || url.password || url.search || url.hash) {
     throw new Error('CERNERE_BASE_URL must not contain credentials, query, or fragment');

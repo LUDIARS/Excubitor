@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Service } from '../catalog/loader.js';
-import { prepareSpawnEnv } from './cernere-launch-credential.js';
+import { isTailscaleAddress, normalizeCernereBaseUrl, prepareSpawnEnv } from './cernere-launch-credential.js';
 
 function service(patch: Partial<Service> = {}): Service {
   return {
@@ -166,5 +166,17 @@ describe('prepareSpawnEnv', () => {
       EXCUBITOR_CERNERE_CLIENT_ID: 'ex-id',
       EXCUBITOR_CERNERE_CLIENT_SECRET: 'ex-secret',
     })).rejects.toThrow('must use HTTPS');
+  });
+
+  it('accepts plain http only for loopback and Tailscale (100.64.0.0/10) hosts', () => {
+    expect(normalizeCernereBaseUrl('http://100.84.227.24:8080/')).toBe('http://100.84.227.24:8080');
+    expect(normalizeCernereBaseUrl('http://localhost:8080')).toBe('http://localhost:8080');
+    expect(normalizeCernereBaseUrl('https://cr.ai-run-do.com')).toBe('https://cr.ai-run-do.com');
+    for (const url of ['http://100.63.255.1:8080', 'http://100.128.0.1:8080', 'http://192.168.0.9:8080', 'http://100.84.227.24.evil.example']) {
+      expect(() => normalizeCernereBaseUrl(url)).toThrow('must use HTTPS');
+    }
+    expect(isTailscaleAddress('100.64.0.0')).toBe(true);
+    expect(isTailscaleAddress('100.127.255.255')).toBe(true);
+    expect(isTailscaleAddress('100.84.227.256')).toBe(false);
   });
 });
