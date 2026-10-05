@@ -94,7 +94,8 @@ export async function runServiceOperation(
   if (action === 'update') return succeeded();
 
   // 外部に出られない拠点 (mesh) は npm のキャッシュを優先する。 足りなければ install の失敗として表に出る。
-  const installed = await (deps.install ?? installDependencies)(ready.repoDir, { preferOffline: ctx.op.source === 'mesh' });
+  // 依存はサービスの作業ディレクトリ (cwd) に入れる。 cwd が repo のサブディレクトリでも同じ。
+  const installed = await (deps.install ?? installDependencies)(ready.workDir, { preferOffline: ctx.op.source === 'mesh' });
   const badInstall = recordSteps(ctx, [installed]);
   if (badInstall) return failedAt(badInstall);
   const badBuild = recordSteps(ctx, [await (deps.build ?? buildService)(svc, ready.repoDir, 'auto')]);

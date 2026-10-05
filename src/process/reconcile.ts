@@ -19,6 +19,9 @@ import { adoptProcess, getManagedPid, isManaged, isPidAlive, isPidManaged } from
 import { readProcessIdentity, verifyProcessIdentity, type VerifiedProcessIdentity } from './identity.js';
 import { listListeners } from '../scanner/ports.js';
 import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
+import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
+import { listProcesses } from '../memory/process-sampler.js';
+import { isContainerPortForwarder, type ProcessDescription } from './container-forwarder.js';
 
 const logger = createNamedLogger('excubitor.process.reconcile');
 
@@ -63,7 +66,9 @@ export async function reconcileProcesses(catalog: Catalog): Promise<ReconcileRes
     const identity = row.pid && expectedStartedAt && isPidAlive(row.pid)
       ? await verifyProcessIdentity(row.pid, expectedStartedAt)
       : null;
-    if (identity && (!isPidManaged(identity.pid) || getManagedPid(row.code) === identity.pid)) {
+    // 以前の版が採用してしまったコンテナの転送プロセスは、記録が残っていても再採用しない。
+    const forwarder = identity ? isContainerPortForwarder(await describeProcess(identity.pid).catch(() => null)) : false;
+    if (identity && !forwarder && (!isPidManaged(identity.pid) || getManagedPid(row.code) === identity.pid)) {
       // Persist before publishing the in-memory adoption so DB/UI state cannot remain
       // crashed or pending while lifecycle commands already treat the process as running.
       persistAdoptedIdentity(row.code, identity);
@@ -108,6 +113,14 @@ export interface PortAdoptionDeps {
   managed: (code: string) => boolean;
   pidManaged: (pid: number) => boolean;
   persist: (code: string, identity: VerifiedProcessIdentity) => void;
+  /** pid のプロセス名と command line (コンテナの転送プロセスを除外する)。 読めなければ null。 */
+  describe?: (pid: number) => Promise<ProcessDescription | null>;
+}
+
+async function describeProcess(pid: number): Promise<ProcessDescription | null> {
+  const processes = getFreshProcessSnapshot()?.processes ?? await listProcesses();
+  const entry = processes?.find((p) => p.pid === pid);
+  return entry ? { name: entry.name, commandLine: entry.commandLine } : null;
 }
 
 const DEFAULT_PORT_ADOPTION_DEPS: PortAdoptionDeps = {
@@ -118,6 +131,7 @@ const DEFAULT_PORT_ADOPTION_DEPS: PortAdoptionDeps = {
   managed: isManaged,
   pidManaged: isPidManaged,
   persist: persistAdoptedIdentity,
+  describe: describeProcess,
 };
 
 function persistAdoptedIdentity(code: string, identity: VerifiedProcessIdentity): void {
@@ -186,6 +200,17 @@ export async function adoptDeclaredPortOwners(
       || deps.managed(service.code)
       || deps.pidManaged(pid)
     ) continue;
+    let description: ProcessDescription | null = null;
+    try {
+      description = await deps.describe?.(pid) ?? null;
+    } catch (error) {
+      logger.warn({ code: service.code, pid, err: (error as Error).message }, 'could not read listener name while reconciling');
+    }
+    if (isContainerPortForwarder(description)) {
+      // docker の転送プロセスは実体ではない。採用すると stop/restart が全コンテナを止める。
+      logger.warn({ code: service.code, pid, port: service.port, name: description?.name }, 'skipped a container port forwarder while reconciling');
+      continue;
+    }
     let stillOwnsPort = false;
     try {
       const refreshedListeners = await deps.listeners();

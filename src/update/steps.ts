@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { execCapture } from '../shared/exec.js';
 import type { Service } from '../catalog/loader.js';
 import { repoDirOf, checkUpdate } from './checker.js';
@@ -24,14 +24,43 @@ const INSTALL_TIMEOUT_MS = 300_000;
 const BUILD_TIMEOUT_MS = 1_800_000;
 
 export interface RepoReady {
+  /** git の取り込みを行う checkout の root。 */
   repoDir: string;
+  /** サービスの作業ディレクトリ (catalog の cwd)。 依存の install はここで行う。 */
+  workDir: string;
   branch: string;
+}
+
+/** cwd から git root を探す段数。 これより上はワークスペース (Castra) の checkout になりうる。 */
+const GIT_ROOT_MAX_DEPTH = 2;
+
+/**
+ * サービスの cwd を含む git checkout の root を返す。 cwd が repo のサブディレクトリ
+ * (例: Cernere/server) でも取り込めるようにする。 ワークスペース root (EXCUBITOR_ARS_ROOT) は
+ * 別リポの checkout なので採らない。
+ */
+export function findGitRoot(
+  dir: string,
+  exists: (path: string) => boolean = existsSync,
+  workspaceRoot: string | undefined = process.env.EXCUBITOR_ARS_ROOT,
+): string | null {
+  const stop = workspaceRoot ? resolve(workspaceRoot) : null;
+  let current = resolve(dir);
+  for (let depth = 0; depth <= GIT_ROOT_MAX_DEPTH; depth++) {
+    if (stop && current === stop) return null;
+    if (exists(join(current, '.git'))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return null;
 }
 
 /** 更新してよい状態か (git リポジトリ・未コミット変更なし・ブランチが特定できる)。 */
 export async function checkRepoReady(svc: Service): Promise<{ ready: RepoReady | null; step: StepResult | null }> {
-  const repoDir = repoDirOf(svc);
-  if (!repoDir || !existsSync(`${repoDir}/.git`)) {
+  const workDir = repoDirOf(svc);
+  const repoDir = workDir ? findGitRoot(workDir) : null;
+  if (!workDir || !repoDir) {
     return { ready: null, step: { step: 'repo', ok: false, detail: 'no git repository' } };
   }
   const status = await checkUpdate(svc, false);
@@ -39,7 +68,7 @@ export async function checkRepoReady(svc: Service): Promise<{ ready: RepoReady |
     return { ready: null, step: { step: 'dirty_check', ok: false, detail: '未コミット変更があるため中断 (手動で commit/stash してください)' } };
   }
   if (!status.branch) return { ready: null, step: { step: 'branch', ok: false, detail: 'ブランチを特定できません' } };
-  return { ready: { repoDir, branch: status.branch }, step: null };
+  return { ready: { repoDir, workDir, branch: status.branch }, step: null };
 }
 
 /**

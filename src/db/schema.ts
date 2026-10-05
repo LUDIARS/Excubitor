@@ -197,6 +197,8 @@ export const memorySamples = sqliteTable('memory_samples', {
 export const servicePrefs = sqliteTable('service_prefs', {
   code: text('code').primaryKey(),
   uses_corpus: integer('uses_corpus', { mode: 'boolean' }),
+  /** この拠点での自動起動の上書き。 catalog は全拠点共有なので拠点差はここに置く。 */
+  autostart: integer('autostart', { mode: 'boolean' }),
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 });
 
@@ -335,6 +337,8 @@ const ADD_COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   // 版の突き合わせ (scanner/version-reconcile.ts)。 ディスク側と稼働側を別々に持つ。
   { table: 'service_instances', column: 'disk_version', ddl: 'disk_version TEXT' },
   { table: 'service_instances', column: 'reported_version', ddl: 'reported_version TEXT' },
+  // 拠点ごとの自動起動の上書き (launch/autostart-prefs.ts)。 null = catalog の autostart に従う。
+  { table: 'service_prefs', column: 'autostart', ddl: 'autostart INTEGER' },
 ];
 
 function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {

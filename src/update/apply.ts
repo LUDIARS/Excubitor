@@ -69,7 +69,7 @@ export async function applyUpdate(
 
   // 3. 依存インストール (node 系 + package.json あり)。
   if (install) {
-    const npm = await installDependencies(ready.repoDir);
+    const npm = await installDependencies(ready.workDir);
     if (npm) {
       steps.push(npm);
       if (!npm.ok) return finish(false);

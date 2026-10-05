@@ -22,7 +22,7 @@ function ctx(action: OperationAction, source: UpdateSource = 'origin'): Operatio
 function deps(overrides: Partial<ServiceOperationDeps> = {}): Required<ServiceOperationDeps> {
   return {
     control: vi.fn(async (_svc, action) => ({ step: action, ok: true, detail: '' })),
-    checkRepo: vi.fn(async () => ({ ready: { repoDir: 'C:/repos/a', branch: 'main' }, step: null })),
+    checkRepo: vi.fn(async () => ({ ready: { repoDir: 'C:/repos/a', workDir: 'C:/repos/a', branch: 'main' }, step: null })),
     fetch: vi.fn(async () => [{ step: 'pull', ok: true, detail: 'Fast-forward' }]),
     install: vi.fn(async () => ({ step: 'install', ok: true, detail: '' })),
     build: vi.fn(async () => ({ step: 'build', ok: true, detail: '' })),

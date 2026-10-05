@@ -3,6 +3,7 @@ import type { Catalog } from '../catalog/loader.js';
 import { spawnService, isManaged } from './manager.js';
 import { resolveInjectEnv } from './inject.js';
 import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
+import { effectiveAutostart, readAutostartPrefs } from '../launch/autostart-prefs.js';
 
 const logger = createNamedLogger('concordia.observability.autostart');
 
@@ -15,6 +16,7 @@ const logger = createNamedLogger('concordia.observability.autostart');
 export async function runAutostart(
   catalog: Catalog,
   shouldStop?: () => boolean,
+  prefs: Map<string, boolean> = readAutostartPrefs(),
 ): Promise<{ started: string[]; skipped: string[]; failed: string[] }> {
   const started: string[] = [];
   const skipped: string[] = [];
@@ -22,7 +24,8 @@ export async function runAutostart(
 
   for (const svc of catalog.services) {
     if (shouldStop?.()) break;
-    if (!svc.autostart) continue;
+    // 拠点の DB 上書き → catalog の autostart (拠点差は catalog に書かない)。
+    if (!effectiveAutostart(svc, prefs)) continue;
     if (svc.disabled) {
       skipped.push(svc.code);
       continue;

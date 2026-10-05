@@ -52,6 +52,36 @@ describe('adoptDeclaredPortOwners', () => {
     );
   });
 
+  // 2026-10-05 GROMAC: docker の -p 8080 を受ける OrbStack を cernere として採用し、
+  // stop / restart が全コンテナを止めうる状態になっていた。
+  it('does not adopt a container runtime port forwarder', async () => {
+    const adopt = vi.fn();
+    const persist = vi.fn();
+    const result = emptyResult();
+
+    await adoptDeclaredPortOwners(
+      catalogWith([{ code: 'cernere', port: 11111 }]),
+      new Set(['cernere']),
+      result,
+      deps({ adopt, persist, describe: async () => ({ name: 'OrbStack', commandLine: '/Applications/OrbStack.app/Contents/MacOS/OrbStack' }) }),
+    );
+
+    expect(result.adoptedByPort).toEqual([]);
+    expect(adopt).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('still adopts a real service when the process name is readable', async () => {
+    const result = emptyResult();
+    await adoptDeclaredPortOwners(
+      catalogWith([{ code: 'cernere', port: 11111 }]),
+      new Set(['cernere']),
+      result,
+      deps({ describe: async () => ({ name: 'node', commandLine: 'node --run dev' }) }),
+    );
+    expect(result.adoptedByPort).toEqual(['cernere']);
+  });
+
   it('leaves an already managed service alone', async () => {
     const adopt = vi.fn();
     const result = emptyResult();

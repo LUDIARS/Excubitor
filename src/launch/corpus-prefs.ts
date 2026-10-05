@@ -37,7 +37,8 @@ export function usesCorpusByCode(catalog: Catalog): Map<string, boolean> {
 /** UI からの override を保存する (null クリアで catalog デフォルトに戻す)。 */
 export function setCorpusPref(code: string, usesCorpus: boolean | null): void {
   if (usesCorpus === null) {
-    db().run(sql`DELETE FROM service_prefs WHERE code = ${code}`);
+    // 行ごと消すと同じ行の autostart 上書きまで失うので列だけ戻す。
+    db().run(sql`UPDATE service_prefs SET uses_corpus = NULL, updated_at = unixepoch() * 1000 WHERE code = ${code}`);
     return;
   }
   db().run(sql`

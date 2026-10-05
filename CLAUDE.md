@@ -120,6 +120,12 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   error-detector / parquet 圧縮を止め、自身の pino も warn へ落として起動する。 ログ I/O 起因の
   障害切り分け用 (監視/制御/WebUI/ログ読み出しは動く)。 状態は `/health` の `log_safe_mode`。
 - `uses_corpus` (catalog) は UI から `service_prefs` (DB) で上書きできる。 起動セットに含めると Corpus を自動補完。
+- `autostart` も拠点ごとに `service_prefs.autostart` で上書きできる (`PUT /api/v1/services/:code/autostart-pref`
+  `{ autostart: true | false | null }`、null で catalog に戻す)。例: Cernere は GROMAC でだけ常駐させる。
+- 宣言ポートの採用 (reconcile) は docker の転送プロセス (OrbStack / Docker Desktop / vpnkit / docker-proxy 等) を
+  サービスの実体として採らない。採ると stop / restart が全コンテナを止める。
+- update / deploy の git 取り込みは cwd を含む checkout の root で行い (cwd が `Cernere/server` のようなサブディレクトリでも可、
+  2 段まで・ワークスペース root は採らない)、依存の install は cwd で行う。
 - **他拠点連携 (federation)**: ピアの認証は各ノードの agent token (secret-agent と共用、
   `EXCUBITOR_AGENT_TOKEN` or token ファイル) を Bearer で交換する。 ローカル DB (remote_peers) に
   相手の base_url + token を保存するため (token は at-rest 暗号化) DB ファイル自体を機密扱いにする。 他拠点向け公開面

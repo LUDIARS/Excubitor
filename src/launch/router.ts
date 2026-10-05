@@ -21,6 +21,7 @@ import { runPreflight } from './preflight.js';
 import { startSelection, stopSelection } from './orchestrator.js';
 import { expandWithDependencies } from './order.js';
 import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
+import { setAutostartPref } from './autostart-prefs.js';
 import type { DowntimeSummaryReader } from '../scanner/downtime-reader.js';
 import {
   getServiceMap,
@@ -175,6 +176,17 @@ export function buildLaunchRouter(
     if (v !== true && v !== false && v !== null) return c.json({ error: 'invalid_body' }, 400);
     setCorpusPref(code, v);
     return c.json({ ok: true, code, uses_corpus: v });
+  });
+
+  // 拠点ごとの自動起動の上書き。 autostart=null で catalog の値に戻す。
+  app.put('/api/v1/services/:code/autostart-pref', async (c) => {
+    const code = c.req.param('code');
+    if (!getCatalog().services.some((s) => s.code === code)) return c.json({ error: 'not_found' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { autostart?: boolean | null };
+    const v = body.autostart;
+    if (v !== true && v !== false && v !== null) return c.json({ error: 'invalid_body' }, 400);
+    setAutostartPref(code, v);
+    return c.json({ ok: true, code, autostart: v });
   });
 
   // 既存 Catalog 画面用 (project 別グルーピング)。frontend api.ts fetchProjects が叩く。
