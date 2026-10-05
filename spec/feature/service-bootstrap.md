@@ -41,6 +41,18 @@ All three entrypoints must exist inside the checkout before any setup is run. Ex
 
 After setup, catalog identity is checked again and start uses the supervisor. start:false is the migration preparation mode. Service autostart must remain false during setup/import. No automatic stop or rollback is attempted. Operators must not issue competing lifecycle commands while setup/migration is active; service scripts must protect their own storage against concurrent access.
 
+### Service-specific manifests
+
+For repositories containing multiple services, an exact root filename
+`excubitor.bootstrap.<code>.json` takes precedence over `excubitor.bootstrap.json`.
+Codes must match `[A-Za-z0-9][A-Za-z0-9_-]*`. Only absence of that exact file permits
+the legacy root manifest; malformed JSON, identity mismatch, permissions errors,
+directories and symlinks fail closed. There is no directory scanning or manifest
+merging. The version-1 schema, matching service identity, containment and all three
+entrypoint checks apply equally to both formats. Setup, export and import share
+this resolver, so a service cannot accidentally execute another service's hooks.
+Existing single-service repositories require no changes.
+
 ### Data and Taildrop
 
 Both export and import require a verified stopped service and the service-owned manifest. Export receives --output <Ex-cwd>/data/transfers/<code>/<artifact>.bundle; no overwrite is allowed. Ex verifies a regular file and reports SHA-256 in operation steps. The service owns the format (not Git bundle), service identity, version, consistency, sensitive-field exclusions and migration rollback. A data-less service explicitly implements its empty format, not a placeholder success.
