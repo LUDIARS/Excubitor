@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { closeDb, openDb } from '../db/index.js';
 import type { Catalog, Service } from '../catalog/loader.js';
 import { runEmergencyAction } from '../ops/emergency.js';
 import {
@@ -27,7 +28,11 @@ vi.mock('../ops/emergency.js', () => ({
 
 const temporaryDirectories: string[] = [];
 
+// The isolated dispatcher fixture bypasses the supervisor's normal DB initialization.
+beforeEach(() => { openDb(':memory:'); });
+
 afterEach(async () => {
+  closeDb();
   vi.clearAllMocks();
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });

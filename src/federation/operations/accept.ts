@@ -9,6 +9,7 @@ import { toSummary } from './store.js';
 import type { OperationSummary } from './types.js';
 import { resolveUpdateSource } from './update-source.js';
 import { validateOperationRequest } from './validate.js';
+import { activeDailyRun } from '../../update/daily/store.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
@@ -24,6 +25,7 @@ export interface Requester {
 }
 
 export function acceptOperation(body: unknown, catalog: Catalog, runner: OperationRunner, requester: Requester): AcceptResult {
+  if (activeDailyRun()) return { ok: false, status: 409, error: 'daily_update_active', detail: 'Daily update is active; retry after completion' };
   const checked = validateOperationRequest(body, catalog, readCoveragePrefs(), resolveUpdateSource());
   if (!checked.ok) return { ok: false, status: checked.status, error: checked.error, detail: checked.detail ?? null };
   const op = runner.enqueue({

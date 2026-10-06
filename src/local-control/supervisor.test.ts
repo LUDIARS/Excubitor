@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { closeDb, openDb } from '../db/index.js';
+import { beginDailyRun } from '../update/daily/store.js';
 import type { ExcubitorBackendController } from './excubitor-backend.js';
 import {
   LOCAL_CONTROL_PROTOCOL_VERSION,
@@ -14,11 +16,36 @@ import type { LocalControlDispatch } from './server.js';
 
 const temporaryDirectories: string[] = [];
 
+// These tests deliberately bypass start(), which normally opens the exclusion journal.
+beforeEach(() => { openDb(':memory:'); });
+
 afterEach(async () => {
+  closeDb();
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 describe('LocalControlSupervisor deferred operations', () => {
+  it('rejects lifecycle changes during a daily update while keeping status available', async () => {
+    const running = status('running');
+    const restart = vi.fn(async () => running);
+    const supervisor = new LocalControlSupervisor({
+      backend: { restart, status: () => running } as unknown as ExcubitorBackendController,
+    });
+    const internals = supervisor as unknown as {
+      resolveReady: () => void;
+      dispatch: (request: LocalControlRequest) => Promise<LocalControlDispatch>;
+    };
+    internals.resolveReady();
+    expect(beginDailyRun('2026-10-06', new Date())).not.toBeNull();
+    const request: LocalControlRequest = {
+      protocol_version: LOCAL_CONTROL_PROTOCOL_VERSION, operation_id: 'daily-exclusion',
+      target: { kind: 'excubitor' }, action: 'restart', actor: 'test', dispatch: 'execute',
+    };
+    expect((await internals.dispatch(request)).response).toMatchObject({ ok: false });
+    expect(restart).not.toHaveBeenCalled();
+    expect((await internals.dispatch({ ...request, action: 'status' })).response)
+      .toMatchObject({ ok: true, payload: { state: 'running' } });
+  });
   it('executes a concurrently committed deferred operation id exactly once', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'excubitor-supervisor-test-'));
     temporaryDirectories.push(rootDir);

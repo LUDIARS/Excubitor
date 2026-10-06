@@ -20,6 +20,7 @@ import {
 } from '../lib/api';
 import GeniusRuntimeConfigCard from '../components/GeniusRuntimeConfigCard';
 import CfTunnelRoutesCard from '../components/CfTunnelRoutesCard';
+import DailyUpdateCard from '../components/DailyUpdateCard';
 
 interface SvcRow extends ServiceInfisical {
   code: string;
@@ -449,6 +450,7 @@ export default function Config() {
       </section>
 
       <GeniusRuntimeConfigCard busy={busy} setBusy={setBusy} />
+      <DailyUpdateCard />
 
       <section className="config-card">
         <h2>Infisical machine identity</h2>

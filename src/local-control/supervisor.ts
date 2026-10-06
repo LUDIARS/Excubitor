@@ -3,6 +3,7 @@ import { closeDb, openDb } from '../db/index.js';
 import { controlService } from '../control/manager.js';
 import {
   getManagedPid,
+  isServiceDesiredRunning,
   markServiceStopped,
   resumeProcessRestarts,
   suspendProcessRestarts,
@@ -32,6 +33,10 @@ import { LocalControlStateStore } from './state-store.js';
 import { publishSupervisorVersion } from './supervisor-version.js';
 import { TargetOperationQueue } from './target-queue.js';
 import { isLocalProcessRuntime } from '../catalog/runtime-kind.js';
+import { arsRoot } from '../shared/roots.js';
+import { DailyUpdateScheduler } from '../update/daily/scheduler.js';
+import { createDailyRuntime } from '../update/daily/runtime.js';
+import { activeDailyRun, clearInterruptedManualUpdates } from '../update/daily/store.js';
 
 const logger = createNamedLogger('excubitor.local-control');
 const DEFAULT_OPERATION_DRAIN_TIMEOUT_MS = 30_000;
@@ -76,6 +81,7 @@ export class LocalControlSupervisor {
   private closeRequestVersion = 0;
   private closing = false;
   private lifecycleTail: Promise<void> = Promise.resolve();
+  private dailyScheduler: DailyUpdateScheduler | null = null;
 
   constructor(options: LocalControlSupervisorOptions = {}) {
     this.rootDir = options.rootDir ?? process.cwd();
@@ -89,6 +95,7 @@ export class LocalControlSupervisor {
       queue: this.operations,
       refreshCatalog: () => this.catalog.refresh(),
       service: (code) => this.catalog.service(code),
+      shouldRecover: (code) => !activeDailyRun() && isServiceDesiredRunning(code),
       intervalMs: options.adoptedReapIntervalMs,
       onError: (error, code) => logger.error(
         { code, err: error.message },
@@ -141,6 +148,7 @@ export class LocalControlSupervisor {
       if (shouldStop()) return;
       resumeProcessRestarts();
       openDb(this.databasePath);
+      clearInterruptedManualUpdates();
       const supervisorStartedAt = this.now();
       await this.stateStore.initialize({ pid: process.pid, startedAt: supervisorStartedAt });
       await publishSupervisorVersion(this.rootDir, { pid: process.pid, started_at: supervisorStartedAt });
@@ -160,7 +168,7 @@ export class LocalControlSupervisor {
       });
       if (shouldStop()) return;
       try {
-        await this.catalog.initialize({ shouldStop });
+        await this.catalog.initialize({ shouldStop, skipAutostart: activeDailyRun() !== null });
       } catch (error) {
         // Keep the supervisor available for Excubitor recovery. Service
         // commands retry catalog refresh and surface the configuration error.
@@ -170,6 +178,12 @@ export class LocalControlSupervisor {
       }
       if (shouldStop()) return;
       this.adoptedProcessReaper.start();
+      this.dailyScheduler = new DailyUpdateScheduler({
+        root: arsRoot(), selfRoot: this.rootDir,
+        runtime: createDailyRuntime(this.backend, () => this.catalog.refresh()),
+        drainControls: () => this.drainOperations(),
+      });
+      await this.dailyScheduler.start();
     } catch (error) {
       this.startupError = asError(error);
       suspendProcessRestarts();
@@ -187,6 +201,8 @@ export class LocalControlSupervisor {
     if (!this.started) return;
     const errors: unknown[] = [];
     suspendProcessRestarts();
+    // Do not release DB/IPC ownership while a deployment or rollback can still write.
+    await this.dailyScheduler?.close();
     await collectCleanupError(errors, () => this.adoptedProcessReaper.close());
     try {
       // Keep the IPC endpoint and DB ownership until every accepted side effect
@@ -243,6 +259,9 @@ export class LocalControlSupervisor {
       return {
         response: failedResponse(request.operation_id, 'SUPERVISOR_CLOSING', 'local-control supervisor is closing'),
       };
+    }
+    if (request.action !== 'status' && activeDailyRun()) {
+      return { response: failedResponse(request.operation_id, 'OPERATION_FAILED', 'Daily repository update is active; retry after it finishes') };
     }
     if (request.target.kind === 'service') {
       await this.catalogReady;

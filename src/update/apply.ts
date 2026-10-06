@@ -7,6 +7,8 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { beginManualUpdate, endManualUpdate } from './daily/store.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { db } from '../db/client.js';
 import type { Service } from '../catalog/loader.js';
@@ -40,6 +42,17 @@ export interface ApplyOptions {
 }
 
 export async function applyUpdate(
+  svc: Service,
+  actor: string,
+  opts: ApplyOptions = {},
+): Promise<ApplyResult> {
+  const id = randomUUID();
+  if (!beginManualUpdate(id)) return { code: svc.code, ok: false, steps: [{ step: 'busy', ok: false, detail: 'Daily update is active' }] };
+  try { return await applyManualUpdate(svc, actor, opts); }
+  finally { endManualUpdate(id); }
+}
+
+async function applyManualUpdate(
   svc: Service,
   actor: string,
   opts: ApplyOptions = {},

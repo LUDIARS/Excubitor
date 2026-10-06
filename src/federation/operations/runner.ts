@@ -11,6 +11,7 @@
  */
 
 import { runBootstrapOperation } from '../../bootstrap/operation.js';
+import { beginManualUpdate, endManualUpdate } from '../../update/daily/store.js';
 import type { Catalog } from '../../catalog/loader.js';
 import { createNamedLogger } from '../../shared/logger.js';
 import type { StepResult } from '../../update/steps.js';
@@ -69,6 +70,7 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
   let stopped = false;
 
   const runOne = async (op: OperationRecord): Promise<ExecutionOutcome> => {
+    if (!beginManualUpdate(op.id)) return { kind: 'finished', ok: false, error: 'Daily update is active; retry after completion' };
     markRunning(op.id, now());
     const ctx: OperationContext = {
       op,
@@ -80,6 +82,8 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
       return await execute(op, ctx, deps.getCatalog());
     } catch (err) {
       return { kind: 'finished', ok: false, error: `unexpected: ${(err as Error).message}` };
+    } finally {
+      endManualUpdate(op.id);
     }
   };
 

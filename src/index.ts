@@ -83,6 +83,7 @@ import { buildMemoryRouter } from './memory/router.js';
 import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
+import { buildDailyUpdateRouter } from './update/daily/router.js';
 import { buildFederationPublicRouter } from './federation/public-router.js';
 import {
   startFederationListener,
@@ -824,6 +825,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)
   app.route('/', buildUpdateRouter(() => currentCatalog!));
+  app.route('/', buildDailyUpdateRouter());
 
   // 新規サービス候補の読み取り専用検出 (/api/v1/discovery)
   app.route('/', buildDiscoveryRouter(() => currentCatalog!));

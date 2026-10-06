@@ -20,11 +20,11 @@ export class SupervisorCatalogRuntime {
     private readonly runtimeConfigPath = join(rootDir, 'excubitor.config.yaml'),
   ) {}
 
-  async initialize(options: { shouldStop?: () => boolean } = {}): Promise<Catalog> {
+  async initialize(options: { shouldStop?: () => boolean; skipAutostart?: boolean } = {}): Promise<Catalog> {
     const catalog = await this.refresh();
     if (options.shouldStop?.()) return catalog;
     await reconcileProcesses(catalog);
-    if (detectSafeMode() || options.shouldStop?.()) return catalog;
+    if (detectSafeMode() || options.skipAutostart || options.shouldStop?.()) return catalog;
     await runAutostart(catalog, options.shouldStop);
     if (options.shouldStop?.()) return catalog;
     const profile = getLaunchProfile();
