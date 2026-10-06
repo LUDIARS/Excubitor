@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Catalog } from '../../catalog/loader.js';
 import { restartExcubitorViaLocalTool } from '../../local-control/service-adapter.js';
-import { readGitDirty } from '../../scanner/git.js';
+import { readUpdateDirty } from '../../update/checker.js';
 import { hasBuildScript, installDependencies, runNpmBuild, type StepResult } from '../../update/steps.js';
 import { getSelfVersion, readCurrentHead } from '../self-version.js';
 import { failed, failedAt, recordSteps, succeeded, type ExecutionOutcome, type OperationContext } from './context.js';
@@ -76,7 +76,7 @@ export async function runSelfOperation(
 
   if (action !== 'update' && action !== 'deploy') return failed(`action ${action} は Excubitor 自身には使えません`);
 
-  const dirty = await (deps.isDirty ?? readGitDirty)(self.dir);
+  const dirty = await (deps.isDirty ?? readUpdateDirty)(self.dir);
   if (dirty !== false) {
     return failedAt(recordSteps(ctx, [{
       step: 'dirty_check',

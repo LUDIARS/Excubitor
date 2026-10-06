@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DIRTY_STATUS_ARGS } from './checker.js';
+import { DIRTY_STATUS_ARGS, readUpdateDirty } from './checker.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'protocol.file.allow=always', ...args], {
@@ -43,7 +43,7 @@ describe('DIRTY_STATUS_ARGS', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('ignores changes inside a submodule that plain status reports', () => {
+  it('ignores changes inside a submodule that plain status reports', async () => {
     const inside = join(parent, 'lib', 'library');
     // npm install が bin に付ける実行権限と同じ種類の変化 (Windows では mode が無いので内容で代用)。
     chmodSync(join(inside, 'cli.js'), 0o755);
@@ -51,6 +51,8 @@ describe('DIRTY_STATUS_ARGS', () => {
 
     expect(git(parent, 'status', '--porcelain')).toContain('lib/library');
     expect(git(parent, ...DIRTY_STATUS_ARGS).trim()).toBe('');
+    // Excubitor 自身の update / deploy (self-operation / preflight) が使う判定も同じく止まらない。
+    expect(await readUpdateDirty(parent)).toBe(false);
 
     git(inside, 'checkout', '--', 'cli.js');
   }, 120_000);

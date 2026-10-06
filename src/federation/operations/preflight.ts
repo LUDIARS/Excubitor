@@ -15,7 +15,7 @@
  */
 
 import type { Catalog, Service } from '../../catalog/loader.js';
-import { readGitDirty } from '../../scanner/git.js';
+import { readUpdateDirty } from '../../update/checker.js';
 import { execCapture } from '../../shared/exec.js';
 import { checkRepoReady } from '../../update/steps.js';
 import { readCurrentHead } from '../self-version.js';
@@ -104,7 +104,7 @@ export async function preflightOperation(input: PreflightInput, deps: PreflightD
   } else {
     const self = selfRepoOf(catalog);
     repo = self.repo;
-    const dirty = await (deps.isDirty ?? readGitDirty)(self.dir);
+    const dirty = await (deps.isDirty ?? readUpdateDirty)(self.dir);
     if (dirty === null) return reject('git_status_unavailable', 'Excubitor の git の状態を確認できません');
     if (dirty) return reject('dirty_worktree', 'Excubitor に未コミット変更があります');
     const head = await (deps.readHead ?? readCurrentHead)(self.dir);

@@ -54,6 +54,16 @@ function empty(code: string, repoDir: string | null, note: string): UpdateStatus
  */
 export const DIRTY_STATUS_ARGS = ['status', '--porcelain', '--ignore-submodules=dirty'] as const;
 
+/**
+ * 更新前の未コミット判定 (DIRTY_STATUS_ARGS)。 読めなければ null。
+ * Excubitor 自身の update / deploy もこれを使う (素の `git status` だと lib/lapilli の
+ * 実行権限の変化で全拠点の自己更新が dirty_check で止まっていた、2026-10-06)。
+ */
+export async function readUpdateDirty(repoDir: string): Promise<boolean | null> {
+  const out = await safeExec('git', [...DIRTY_STATUS_ARGS], repoDir);
+  return out !== null ? out.trim().length > 0 : null;
+}
+
 export async function checkUpdate(svc: Service, fetch = false): Promise<UpdateStatus> {
   const repoDir = repoDirOf(svc);
   if (!repoDir) return empty(svc.code, null, 'no_repo');
