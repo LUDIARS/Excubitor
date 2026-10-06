@@ -40,7 +40,7 @@ export function buildFederationRouter(options: FederationRouterOptions): Hono {
   app.route('/', buildPeerCrudRoutes());
   app.route('/', buildPeerTestRoutes(options.getCatalog));
   app.route('/', buildOperationLocalRoutes({ getCatalog: options.getCatalog, runner: options.runner }));
-  app.route('/', buildPeerOperationRoutes());
+  app.route('/', buildPeerOperationRoutes(options.getCatalog));
   return app;
 }
 

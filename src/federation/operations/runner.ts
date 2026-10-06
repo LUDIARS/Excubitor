@@ -51,7 +51,14 @@ export interface OperationRunnerDeps {
   execute?: OperationExecutor;
   recoverSelf?: typeof recoverSelfService;
   findPeer?: (id: string) => RemotePeer | null;
+  /** 日次更新の実行中に順番が来た依頼を、 待ち行列に残したまま再試行するまでの間隔 (ms)。 */
+  dailyRetryMs?: number;
+  setTimer?: (fn: () => void, ms: number) => unknown;
 }
+
+/** 日次更新の実行中は依頼を失敗にせず、 待ち行列に残して後で再試行する (2026-10-06 neco)。 */
+export const DEFAULT_DAILY_RETRY_MS = 30_000;
+type RunOutcome = ExecutionOutcome | { kind: 'deferred' };
 
 export interface OperationRunner {
   enqueue: (input: Omit<NewOperation, 'now'>) => OperationRecord;
@@ -66,11 +73,14 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
   const now = deps.now ?? Date.now;
   const execute = deps.execute ?? executeOperation;
   const findPeer = deps.findPeer ?? getPeer;
+  const dailyRetryMs = deps.dailyRetryMs ?? DEFAULT_DAILY_RETRY_MS;
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms).unref());
   let active: Promise<void> | null = null;
   let stopped = false;
+  let retryScheduled = false;
 
-  const runOne = async (op: OperationRecord): Promise<ExecutionOutcome> => {
-    if (!beginManualUpdate(op.id)) return { kind: 'finished', ok: false, error: 'Daily update is active; retry after completion' };
+  const runOne = async (op: OperationRecord): Promise<RunOutcome> => {
+    if (!beginManualUpdate(op.id)) return { kind: 'deferred' };
     markRunning(op.id, now());
     const ctx: OperationContext = {
       op,
@@ -93,6 +103,12 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
       if (!next) return;
       logger.info({ id: next.id, target: next.target, action: next.action, by: next.requested_by }, 'operation started');
       const outcome = await runOne(next);
+      if (outcome.kind === 'deferred') {
+        // 順番は変えない (先頭のまま残す)。 日次更新が終わったころに続きから処理する。
+        logger.info({ id: next.id, retry_ms: dailyRetryMs }, 'operation deferred while daily update is active');
+        scheduleRetry();
+        return;
+      }
       if (outcome.kind === 'restarting') {
         // backend はまもなく止まる。 残りの依頼は再起動後の recover から続ける。
         logger.info({ id: next.id }, 'operation handed off to self restart');
@@ -101,6 +117,15 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
       finishOperation(next.id, outcome.ok, outcome.error, now());
       logger.info({ id: next.id, ok: outcome.ok, error: outcome.error }, 'operation finished');
     }
+  };
+
+  const scheduleRetry = (): void => {
+    if (retryScheduled || stopped) return;
+    retryScheduled = true;
+    setTimer(() => {
+      retryScheduled = false;
+      kick();
+    }, dailyRetryMs);
   };
 
   const kick = (): void => {

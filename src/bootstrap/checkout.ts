@@ -14,7 +14,17 @@ export async function directory(path: string): Promise<string> {
   return actual;
 }
 
-export async function serviceCheckout(repository: string, clone: boolean): Promise<string> {
+/** 空の target へ main を clone する手段。 既定は GitHub (origin)、 mesh 拠点は依頼元の bundle。 */
+export type CheckoutCloner = (repository: string, target: string, root: string) => Promise<void>;
+
+export const cloneFromGithub: CheckoutCloner = async (repository, target, root) => {
+  // No supplied URL, ref, shell, or recursive submodule execution. Incomplete clones are kept for inspection.
+  const result = await execCapture('git', ['-c', 'credential.interactive=false', 'clone', '--branch', 'main', '--single-branch', '--',
+    'https://github.com/' + repository + '.git', target], root, 300_000);
+  if (!result.ok) throw new Error('clone failed; inspect checkout and Git credentials on the destination');
+};
+
+export async function serviceCheckout(repository: string, clone: boolean, cloner: CheckoutCloner = cloneFromGithub): Promise<string> {
   const name = bootstrapCheckoutName(repository);
   const root = await directory(arsRoot());
   if (['excubitor', 'castra'].includes(name.toLowerCase())) throw new Error('Bootstrap cannot clone Excubitor or the workspace root');
@@ -29,12 +39,7 @@ export async function serviceCheckout(repository: string, clone: boolean): Promi
     await mkdir(target, { mode: 0o750 });
   }
   await directory(target);
-  if ((await readdir(target)).length === 0 && clone) {
-    // No supplied URL, ref, shell, or recursive submodule execution. Incomplete clones are kept for inspection.
-    const result = await execCapture('git', ['-c', 'credential.interactive=false', 'clone', '--branch', 'main', '--single-branch', '--',
-      'https://github.com/' + repository + '.git', target], root, 300_000);
-    if (!result.ok) throw new Error('clone failed; inspect checkout and Git credentials on the destination');
-  }
+  if ((await readdir(target)).length === 0 && clone) await cloner(repository, target, root);
   await directory(join(target, '.git'));
   const origin = await execCapture('git', ['remote', 'get-url', 'origin'], target);
   if (!origin.ok || origin.stdout.trim() !== 'https://github.com/' + repository + '.git') throw new Error('Checkout origin mismatch');

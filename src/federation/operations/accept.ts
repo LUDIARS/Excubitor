@@ -1,11 +1,12 @@
 /**
  * 依頼を受け付ける (検証 → 事前確認 → 待ち行列へ積む)。 他拠点からの依頼と自拠点からの依頼で同じ手順を使う。
+ * 日次更新の実行中でも断らない。 待ち行列に積み、 runner が日次更新の完了を待って実行する。
  */
 
 import type { Catalog } from '../../catalog/loader.js';
 import { readCoveragePrefs } from '../coverage-prefs.js';
 import type { OperationRunner } from './runner.js';
-import { toSummary } from './store.js';
+import { appendStep, toSummary } from './store.js';
 import type { OperationSummary } from './types.js';
 import { resolveUpdateSource } from './update-source.js';
 import { validateOperationRequest } from './validate.js';
@@ -32,7 +33,6 @@ export async function acceptOperation(
   requester: Requester,
   preflightDeps?: PreflightDeps,
 ): Promise<AcceptResult> {
-  if (activeDailyRun()) return { ok: false, status: 409, error: 'daily_update_active', detail: 'Daily update is active; retry after completion' };
   const checked = validateOperationRequest(body, catalog, readCoveragePrefs(), resolveUpdateSource());
   if (!checked.ok) return { ok: false, status: checked.status, error: checked.error, detail: checked.detail ?? null };
   // 実行してから失敗する条件 (未コミット変更 / 分岐 / detached / mesh 取得元不在) は受け付け時点で断る。
@@ -41,8 +41,6 @@ export async function acceptOperation(
     preflightDeps,
   );
   if (!pre.ok) return { ok: false, status: pre.status, error: pre.error, detail: pre.detail };
-  // preflight の await 中に日次更新が始まっていれば、 同じ理由で断る。
-  if (activeDailyRun()) return { ok: false, status: 409, error: 'daily_update_active', detail: 'Daily update is active; retry after completion' };
   const op = runner.enqueue({
     ...requester,
     target: checked.request.target,
@@ -50,5 +48,8 @@ export async function acceptOperation(
     source: checked.source,
     meta: { bootstrap: checked.request.bootstrap, data: checked.request.data },
   });
+  if (activeDailyRun()) {
+    appendStep(op.id, { step: 'queued', ok: true, detail: '日次更新の実行中のため、完了してから実行します' });
+  }
   return { ok: true, operation: toSummary(op) };
 }

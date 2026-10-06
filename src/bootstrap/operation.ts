@@ -1,7 +1,8 @@
 import type { Service } from '../catalog/loader.js';
 import { controlServiceViaLocalTool } from '../local-control/service-adapter.js';
 import { failed, succeeded, type ExecutionOutcome, type OperationContext } from '../federation/operations/context.js';
-import { serviceCheckout } from './checkout.js';
+import { serviceCheckout, type CheckoutCloner } from './checkout.js';
+import { meshCloner } from './mesh-clone.js';
 import { bootstrapService, requireStopped } from './catalog.js';
 import { readBootstrapManifest } from './manifest.js';
 import { runBootstrapHook } from './hook.js';
@@ -19,7 +20,13 @@ export async function runBootstrapOperation(ctx: OperationContext, existing?: Se
     const repository = options?.repository ?? existing?.repo;
     if (!repository) throw new Error('Service repository is required');
     step = 'clone';
-    const root = await serviceCheckout(repository, bootstrap);
+    // 取得元 mesh の拠点は外へ出られないので、 依頼元拠点から bundle で clone する。
+    let cloner: CheckoutCloner | undefined;
+    if (bootstrap && ctx.op.source === 'mesh') {
+      if (!ctx.requester) throw new Error('mesh source requires the requesting peer');
+      cloner = meshCloner(ctx.requester);
+    }
+    const root = await serviceCheckout(repository, bootstrap, cloner);
     ctx.record({ step, ok: true, detail: repository + ' main checkout verified' });
     step = 'preflight';
     const manifest = await readBootstrapManifest(root, code);

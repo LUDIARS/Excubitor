@@ -135,6 +135,16 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
    | `repo_not_found` | サービスに git checkout が無い |
 受け付けた依頼は DB (`federation_operations`) に残り、依頼元 (他拠点なら本拠点での登録ピアと
    名乗った拠点名) を記録する。
+   **本社→他拠点デプロイの許可 (2026-10-06 neco)**:
+   - catalog に無いサービスへの update / deploy は、bootstrap 指定 (`bootstrap: { repository, start }`) が添えてあれば
+     bootstrap として受ける。本社から他拠点へ依頼を中継するとき (`POST /api/v1/peers/:id/operations`) は、本社の catalog に
+     ある repo を bootstrap 指定として自動で添える (deploy は `start: true`、update は `start: false`)。更新前の拠点が
+     400 で断ったら添えずに送り直す。
+   - 日次更新の実行中も依頼を断らない。待ち行列に積み、順番が来ても日次更新が続いていれば先頭に残したまま
+     30 秒ごとに再試行する (`DEFAULT_DAILY_RETRY_MS`)。
+   - 取得元が mesh の拠点でも bootstrap を受ける。依頼元拠点から main の bundle を丸ごと受け取って clone し、origin を
+     GitHub の URL にそろえる (`src/bootstrap/mesh-clone.ts`)。自拠点からの mesh bootstrap は依頼元が無いので
+     409 `mesh_source_unavailable`。
 2. **実行** — 受け付けた順に 1 件ずつ実行する (デプロイ同士の衝突を避ける)。各手順 (取得・install・build・再起動) を
    記録し、最初の失敗で止める。未コミット変更のある checkout には取り込まない。build は catalog の `build_command`、
    無ければ package.json の `scripts.build` (`npm run build`)。Excubitor 自身は本体と frontend の両方を install / build する。

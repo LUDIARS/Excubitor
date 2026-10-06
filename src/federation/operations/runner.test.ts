@@ -4,6 +4,7 @@ import { resetDbClientForTests } from '../../db/client.js';
 import type { Catalog } from '../../catalog/loader.js';
 import { createOperationRunner, type OperationExecutor } from './runner.js';
 import { createOperation, getOperation, listRecentOperations, markRestarting, markRunning } from './store.js';
+import { beginDailyRun, saveDailyRun } from '../../update/daily/store.js';
 
 const catalog = { services: [] } as unknown as Catalog;
 
@@ -132,5 +133,29 @@ describe('operation runner', () => {
     const a = createOperation({ ...serviceRestart, now: 1 });
     const b = createOperation({ ...serviceRestart, now: 2 });
     expect(listRecentOperations(10).map((o) => o.id)).toEqual([b.id, a.id]);
+  });
+
+  it('keeps an operation queued while the daily update runs and retries it afterwards (2026-10-06 neco)', async () => {
+    const execute = vi.fn<OperationExecutor>(async () => ({ kind: 'finished', ok: true, error: null }));
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const run = beginDailyRun('2026-10-06', new Date());
+    expect(run).not.toBeNull();
+    const runner = createOperationRunner({
+      getCatalog: () => catalog, execute, findPeer: () => null,
+      dailyRetryMs: 1234, setTimer: (fn, ms) => { timers.push({ fn, ms }); },
+    });
+
+    const op = runner.enqueue(serviceRestart);
+    await runner.idle();
+    expect(getOperation(op.id)).toMatchObject({ status: 'queued', error: null });
+    expect(execute).not.toHaveBeenCalled();
+    expect(timers).toHaveLength(1);
+    expect(timers[0]!.ms).toBe(1234);
+
+    saveDailyRun({ ...run!, status: 'succeeded', finishedAt: new Date().toISOString() });
+    timers[0]!.fn();
+    await runner.idle();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(getOperation(op.id)).toMatchObject({ status: 'succeeded' });
   });
 });

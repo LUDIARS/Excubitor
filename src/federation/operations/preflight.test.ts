@@ -86,6 +86,16 @@ describe('preflightOperation', () => {
   });
 });
 
+describe('mesh bootstrap preflight', () => {
+  const request = { target: { kind: 'service' as const, code: 'new-svc' }, action: 'bootstrap', bootstrap: { repository: 'LUDIARS/Example', start: true } } as never;
+  it('refuses a local mesh bootstrap (no requesting peer to clone from) and accepts one from a peer', async () => {
+    expect(await preflightOperation({ request, source: 'mesh', catalog, requesterPeerId: null }))
+      .toMatchObject({ ok: false, status: 409, error: 'mesh_source_unavailable' });
+    expect(await preflightOperation({ request, source: 'mesh', catalog, requesterPeerId: 'peer-1' })).toEqual({ ok: true });
+    expect(await preflightOperation({ request, source: 'origin', catalog, requesterPeerId: null })).toEqual({ ok: true });
+  });
+});
+
 describe('upstreamRefFor', () => {
   it('uses origin/<branch> for origin and the imported mesh ref for mesh', () => {
     expect(upstreamRefFor('origin', 'main')).toBe('origin/main');

@@ -21,6 +21,9 @@ export type OperationAction = z.infer<typeof OperationActionSchema>;
 /** Excubitor 自身に対して受け付ける依頼 (自分を止めたら依頼を受けられなくなるので stop / start は無い)。 */
 export const SELF_ACTIONS: ReadonlySet<OperationAction> = new Set(['update', 'restart', 'deploy', 'reflect']);
 
+/** bootstrap 指定を添えられる依頼。 update / deploy は受ける拠点にサービスが無いときだけ bootstrap になる。 */
+export const BOOTSTRAP_CAPABLE_ACTIONS: ReadonlySet<OperationAction> = new Set(['bootstrap', 'update', 'deploy']);
+
 export const OperationTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('service'), code: z.string().min(1).max(200) }),
   z.object({ kind: z.literal('excubitor') }),
@@ -34,7 +37,9 @@ export const OperationRequestSchema = z.object({
   data: DataOptionsSchema.optional(),
 }).superRefine((value, ctx) => {
   const issue = (message: string): void => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
-  if ((value.action === 'bootstrap') !== Boolean(value.bootstrap)) issue('bootstrap options required only for bootstrap');
+  // update / deploy にも bootstrap 指定を添えられる: 受ける拠点の catalog にそのサービスが無ければ bootstrap として扱う。
+  if (value.action === 'bootstrap' && !value.bootstrap) issue('bootstrap options required for bootstrap');
+  if (value.bootstrap && !BOOTSTRAP_CAPABLE_ACTIONS.has(value.action)) issue('bootstrap options are only for bootstrap / update / deploy');
   const migration = value.action === 'data-export' || value.action === 'data-import';
   if (migration !== Boolean(value.data)) issue('data options required only for data operations');
   if (value.action === 'data-import' && !value.data?.sha256) issue('import requires sha256');

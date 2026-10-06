@@ -78,6 +78,10 @@ export function needsPreflight(request: OperationRequest): boolean {
 
 export async function preflightOperation(input: PreflightInput, deps: PreflightDeps = {}): Promise<PreflightResult> {
   const { request, source, catalog } = input;
+  // mesh 拠点の bootstrap は依頼元から bundle で clone する。 自拠点からの依頼では取得元が無い。
+  if (request.action === 'bootstrap' && source === 'mesh' && !input.requesterPeerId) {
+    return reject('mesh_source_unavailable', '取得元が mesh の bootstrap は依頼元の拠点から clone します (他拠点からの依頼でだけ使えます)');
+  }
   if (!needsPreflight(request)) return { ok: true };
   const countAhead = deps.countAhead ?? countAheadOf;
 
