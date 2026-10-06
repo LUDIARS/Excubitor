@@ -119,6 +119,18 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
 | deploy (デプロイ) | 取得 → 依存 install → build → 起動中なら再起動 |
 | reflect (反映) | build → 起動中で、走っている版がディスクの版と一致しないときだけ再起動 (版を名乗らないサービスは確かめられないので再起動) |
 | start / stop | 起動 / 停止 (Excubitor 自身には使えない) |
+| concordia-federation-site (Cc 連合設定) | 拠点の Concordia に連合の拠点設定 (本社 URL / 拠点 ID / token) を入れる。対象は service `concordia` だけ |
+
+**Cc 連合設定 (2026-10-06 neco 判断)** — Concordia の拠点設定 API (`PUT /v1/federation/site`) は loopback 限定なので、
+本社の Concordia で拠点を登録して token を発行し、この依頼で拠点へ運ぶ。受けた拠点の Excubitor が自分の loopback から
+catalog の concordia port へ PUT し、保存後の状態 (siteId / hqUrl / hasToken) が依頼と一致したら成功にする
+(`operations/concordia-site.ts`)。本文は `federation_site: { hq_url (ws:// か wss://), site_id, token }`。
+
+- token は記録 (`federation_operations.meta`・手順・履歴・health) に残さない。受け付けたプロセスのメモリにだけ預け、
+  実行時に 1 回取り出して捨てる。待ち行列にいる間に Excubitor が再起動したら `token_unavailable` で失敗する (再依頼する)。
+- 中継する本社側 (`POST /api/v1/peers/:id/operations`) も本文を保存しない。拠点間は相互登録の署名付きで Tailscale 上を通る。
+- 更新前の拠点は本文検証 (400 `invalid_body`) で断る。先に拠点の Excubitor を更新する。
+- 本社側の手順は Concordia の `tools/federation-provision-site.mjs` (Concordia `spec/setup/federation.md`)。
 
 1. **受け付け** — `POST /api/v1/federation/operations` (他拠点から) / `POST /api/v1/operations` (自拠点) は、
    本文の検証・対象の存在・担保 (担保しないと上書きしたサービスは 409)・取得元設定を確かめてから 202 で

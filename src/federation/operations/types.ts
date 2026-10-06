@@ -12,10 +12,15 @@
 
 import { z } from 'zod';
 import { BootstrapOptionsSchema, DataOptionsSchema } from '../../bootstrap/options.js';
+import { CONCORDIA_SERVICE_CODE, CONCORDIA_SITE_ACTION, ConcordiaSiteOptionsSchema } from './concordia-site.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
-export const OperationActionSchema = z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'bootstrap', 'data-export', 'data-import']);
+export const OperationActionSchema = z.enum([
+  'update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'bootstrap', 'data-export', 'data-import',
+  // 拠点の Concordia に連合の拠点設定を入れる (concordia-site.ts)。 対象は service concordia だけ。
+  'concordia-federation-site',
+]);
 export type OperationAction = z.infer<typeof OperationActionSchema>;
 
 /** Excubitor 自身に対して受け付ける依頼 (自分を止めたら依頼を受けられなくなるので stop / start は無い)。 */
@@ -35,6 +40,7 @@ export const OperationRequestSchema = z.object({
   action: OperationActionSchema,
   bootstrap: BootstrapOptionsSchema.optional(),
   data: DataOptionsSchema.optional(),
+  federation_site: ConcordiaSiteOptionsSchema.optional(),
 }).superRefine((value, ctx) => {
   const issue = (message: string): void => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
   // update / deploy にも bootstrap 指定を添えられる: 受ける拠点の catalog にそのサービスが無ければ bootstrap として扱う。
@@ -43,6 +49,11 @@ export const OperationRequestSchema = z.object({
   const migration = value.action === 'data-export' || value.action === 'data-import';
   if (migration !== Boolean(value.data)) issue('data options required only for data operations');
   if (value.action === 'data-import' && !value.data?.sha256) issue('import requires sha256');
+  const siteConfig = value.action === CONCORDIA_SITE_ACTION;
+  if (siteConfig !== Boolean(value.federation_site)) issue('federation_site options required only for concordia-federation-site');
+  if (siteConfig && !(value.target.kind === 'service' && value.target.code === CONCORDIA_SERVICE_CODE)) {
+    issue('concordia-federation-site targets service concordia only');
+  }
 });
 export type OperationRequest = z.infer<typeof OperationRequestSchema>;
 

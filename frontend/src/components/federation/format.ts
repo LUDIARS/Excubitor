@@ -30,6 +30,7 @@ export const OPERATION_LABEL: Record<OperationAction, string> = {
   bootstrap: '新規導入',
   'data-export': 'データ書き出し',
   'data-import': 'データ取り込み',
+  'concordia-federation-site': 'Cc 連合設定',
 };
 
 export const OPERATION_STATUS_LABEL: Record<OperationStatus, string> = {

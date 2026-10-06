@@ -17,6 +17,7 @@ import { createNamedLogger } from '../../shared/logger.js';
 import type { StepResult } from '../../update/steps.js';
 import { getPeer, type RemotePeer } from '../store.js';
 import type { ExecutionOutcome, OperationContext } from './context.js';
+import { CONCORDIA_SITE_ACTION, runConcordiaSiteOperation } from './concordia-site.js';
 import { recoverSelfService } from './self-recovery.js';
 import { runSelfOperation, selfRepoOf } from './self-operation.js';
 import { runServiceOperation } from './service-operation.js';
@@ -41,6 +42,7 @@ export const executeOperation: OperationExecutor = async (op, ctx, catalog) => {
   const code = op.target.code;
   const svc = catalog.services.find((s) => s.code === code);
   if (['bootstrap', 'data-export', 'data-import'].includes(op.action)) return runBootstrapOperation(ctx, svc);
+  if (op.action === CONCORDIA_SITE_ACTION) return runConcordiaSiteOperation(ctx, svc);
   if (!svc) return { kind: 'finished', ok: false, error: `service ${code} は catalog にありません` };
   return runServiceOperation(svc, ctx);
 };
@@ -61,7 +63,8 @@ export const DEFAULT_DAILY_RETRY_MS = 30_000;
 type RunOutcome = ExecutionOutcome | { kind: 'deferred' };
 
 export interface OperationRunner {
-  enqueue: (input: Omit<NewOperation, 'now'>) => OperationRecord;
+  /** onCreated は記録を作った直後・実行を始める前に呼ぶ (記録に残さない値をメモリへ預ける用)。 */
+  enqueue: (input: Omit<NewOperation, 'now'>, onCreated?: (op: OperationRecord) => void) => OperationRecord;
   /** 起動時に 1 回。 bootHash は起動した Excubitor の git hash。 */
   recover: (bootHash: string | null) => void;
   /** 今ある待ち行列を処理し終えるまで待つ (テスト / shutdown 用)。 */
@@ -138,8 +141,9 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
   };
 
   return {
-    enqueue: (input) => {
+    enqueue: (input, onCreated) => {
       const op = createOperation({ ...input, now: now() });
+      onCreated?.(op);
       kick();
       return op;
     },

@@ -6,6 +6,7 @@
 import type { Catalog } from '../../catalog/loader.js';
 import { readCoveragePrefs } from '../coverage-prefs.js';
 import type { OperationRunner } from './runner.js';
+import { holdSiteToken, publicSiteMeta } from './concordia-site.js';
 import { appendStep, toSummary } from './store.js';
 import type { OperationSummary } from './types.js';
 import { resolveUpdateSource } from './update-source.js';
@@ -41,13 +42,19 @@ export async function acceptOperation(
     preflightDeps,
   );
   if (!pre.ok) return { ok: false, status: pre.status, error: pre.error, detail: pre.detail };
+  const site = checked.request.federation_site;
+  // token は記録 (meta) に残さず、 enqueue と同じ同期区間でメモリに預ける (runner が実行時に取り出す)。
   const op = runner.enqueue({
     ...requester,
     target: checked.request.target,
     action: checked.request.action,
     source: checked.source,
-    meta: { bootstrap: checked.request.bootstrap, data: checked.request.data },
-  });
+    meta: {
+      bootstrap: checked.request.bootstrap,
+      data: checked.request.data,
+      ...(site ? { federation_site: publicSiteMeta(site) } : {}),
+    },
+  }, site ? (created) => holdSiteToken(created.id, site.token) : undefined);
   if (activeDailyRun()) {
     appendStep(op.id, { step: 'queued', ok: true, detail: '日次更新の実行中のため、完了してから実行します' });
   }
