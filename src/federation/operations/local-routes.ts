@@ -27,7 +27,7 @@ export function buildOperationLocalRoutes(deps: OperationLocalRoutesDeps): Hono 
   const app = new Hono();
 
   app.post('/api/v1/operations', async (c) => {
-    const result = acceptOperation(await c.req.json().catch(() => null), deps.getCatalog(), deps.runner, {
+    const result = await acceptOperation(await c.req.json().catch(() => null), deps.getCatalog(), deps.runner, {
       requestedBy: 'local',
       requesterPeerId: null,
     });

@@ -25,7 +25,7 @@ export function buildOperationPublicRoutes(deps: OperationPublicRoutesDeps): Hon
 
   app.post('/api/v1/federation/operations', deps.auth, async (c) => {
     const caller = c.get('federationCaller');
-    const result = acceptOperation(await c.req.json().catch(() => null), deps.getCatalog(), deps.runner, {
+    const result = await acceptOperation(await c.req.json().catch(() => null), deps.getCatalog(), deps.runner, {
       requestedBy: caller.claimedNode ?? caller.peerName,
       requesterPeerId: caller.peerId,
     });

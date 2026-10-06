@@ -122,7 +122,18 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
 
 1. **受け付け** — `POST /api/v1/federation/operations` (他拠点から) / `POST /api/v1/operations` (自拠点) は、
    本文の検証・対象の存在・担保 (担保しないと上書きしたサービスは 409)・取得元設定を確かめてから 202 で
-   受け付ける。受け付けた依頼は DB (`federation_operations`) に残り、依頼元 (他拠点なら本拠点での登録ピアと
+   受け付ける。取り込みを伴う update / deploy は、実行してから失敗する条件を受け付け時点で確かめ、
+   409 とエラーコードで断る (`operations/preflight.ts`)。実行時の同じ確認は、受け付け後に状態が変わった場合の保険として残す。
+
+   | エラーコード | 条件 |
+   |---|---|
+   | `dirty_worktree` | checkout に未コミット変更がある |
+   | `git_status_unavailable` | git の状態を読めない (Excubitor 自身) |
+   | `detached_head` | ブランチを特定できない |
+   | `not_fast_forward` | 手元に取り込み元 (`origin/<branch>` / `refs/remotes/mesh/main`) より先行したコミットがある。取り込み元の ref が無ければ確かめられないので断らない |
+   | `mesh_source_unavailable` | 取得元が mesh なのに依頼元の拠点 (自拠点からの依頼) か catalog の `repo` が無い |
+   | `repo_not_found` | サービスに git checkout が無い |
+受け付けた依頼は DB (`federation_operations`) に残り、依頼元 (他拠点なら本拠点での登録ピアと
    名乗った拠点名) を記録する。
 2. **実行** — 受け付けた順に 1 件ずつ実行する (デプロイ同士の衝突を避ける)。各手順 (取得・install・build・再起動) を
    記録し、最初の失敗で止める。未コミット変更のある checkout には取り込まない。build は catalog の `build_command`、
