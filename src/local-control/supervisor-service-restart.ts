@@ -9,6 +9,7 @@ import {
   type LaunchdJob,
 } from './launchd-job.js';
 import type { SupervisorGeneration } from './supervisor-version.js';
+import { planWindowsSupervisorRestart } from './windows-supervisor-restart.js';
 
 /** @implements SPEC-EX-UNIFIED-UPDATE */
 export interface SupervisorRestartPlan {
@@ -46,10 +47,7 @@ export async function planSupervisorRestart(generation: SupervisorGeneration): P
     // The installed per-user task owns only the supervisor; the backend and services use WMI breakaway.
     // Never fall back to legacy Windows Service/NSSM or launch a second supervisor ourselves.
     await run('schtasks.exe', ['/Query', '/TN', name]);
-    return { commands: [
-      { command: 'schtasks.exe', args: ['/End', '/TN', name] },
-      { command: 'schtasks.exe', args: ['/Run', '/TN', name] },
-    ] };
+    return planWindowsSupervisorRestart(name, generation.pid);
   }
   throw new Error('OS supervisor restart is unsupported on ' + process.platform);
 }
