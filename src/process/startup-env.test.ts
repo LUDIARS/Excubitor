@@ -34,7 +34,7 @@ describe('startup env validation', () => {
   });
 
   it('does not require infisical include keys (include is a filter, not a requirement)', () => {
-    // Volputas の GLAB_SERVICE_TOKEN は Discord リレー専用の任意 secret。 include に
+    // Voluptas の GLAB_SERVICE_TOKEN は Discord リレー専用の任意 secret。 include に
     // 挙げただけで必須化されると、 リレーを使わない構成でサービスが起動できなくなる。
     const svc = service({
       required_env: ['STATIC_KEY'],
