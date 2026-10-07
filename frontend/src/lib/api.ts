@@ -1065,7 +1065,7 @@ export function fetchFederation(): Promise<FederationView> {
 }
 
 // ─────────────── 拠点への依頼 (更新 / 再起動 / デプロイ / 反映 / 起動 / 停止) ───────────────
-export type OperationAction = 'update' | 'restart' | 'deploy' | 'reflect' | 'start' | 'stop' | 'bootstrap' | 'data-export' | 'data-import' | 'concordia-federation-site';
+export type OperationAction = 'update' | 'restart' | 'deploy' | 'reflect' | 'start' | 'stop' | 'stash' | 'bootstrap' | 'data-export' | 'data-import' | 'concordia-federation-site';
 export type OperationTarget = { kind: 'service'; code: string } | { kind: 'excubitor' };
 export type OperationStatus = 'queued' | 'running' | 'restarting' | 'succeeded' | 'failed';
 

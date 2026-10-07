@@ -285,7 +285,8 @@ export function buildMcpServer(baseUrl: string): McpServer {
     {
       peer_id: z.string().optional().describe('ピア ID (excubitor_list_peers で取得)。 省略時は自拠点'),
       target: z.string().describe('サービスコード、 または "excubitor"'),
-      action: z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop']),
+      action: z.enum(['update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'stash'])
+        .describe('stash は未コミット変更と未追跡ファイルを Git stash に退避する明示操作。退避後の deploy は別操作。'),
     },
     async ({ peer_id, target, action }) => {
       try {

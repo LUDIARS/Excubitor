@@ -27,6 +27,7 @@ export const OPERATION_LABEL: Record<OperationAction, string> = {
   reflect: '反映',
   start: '起動',
   stop: '停止',
+  stash: '変更を退避',
   bootstrap: '新規導入',
   'data-export': 'データ書き出し',
   'data-import': 'データ取り込み',

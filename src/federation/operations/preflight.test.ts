@@ -23,6 +23,10 @@ const self = (action: string) => ({ target: { kind: 'excubitor' as const }, acti
 
 describe('preflightOperation', () => {
   it('only checks update and deploy', async () => {
+    expect(needsPreflight(self('stash'))).toBe(false);
+    expect(await preflightOperation({ request: self('stash'), source: 'origin', catalog, requesterPeerId: null }, {
+      isDirty: async () => { throw new Error('stash must not require a clean checkout'); },
+    })).toEqual({ ok: true });
     expect(needsPreflight(service('restart'))).toBe(false);
     expect(needsPreflight(service('reflect'))).toBe(false);
     expect(needsPreflight(service('bootstrap'))).toBe(false);

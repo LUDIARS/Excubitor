@@ -110,6 +110,18 @@ WebUI の Federation タブでは、拠点の一覧から選んだ拠点につ�
 
 ### 拠点への依頼 {#SPEC-FEDERATION-OPERATIONS}
 
+#### 未コミット変更の明示退避
+
+`action: stash` をローカルとピアの既存 operations API で受け付ける。対象は catalog の service または `target: { kind: excubitor }`。任意のパス・Git 引数は受け付けない。既存の担保・認証・直列実行・操作履歴を使用し、日次更新と同時に実行しない。
+
+拠点詳細の「変更を退避」は確認後、対象サービス本体 checkout で `git stash push --include-untracked` を実行する。追跡済みの staged/unstaged 変更と未追跡ファイルを保存する。ignored ファイル、submodule 内、入れ子の別 Git リポジトリは対象外。linked worktree、detached HEAD、競合や merge/rebase 等の途中は拒否する。
+
+保存メッセージは `Excubitor operation <operation-id>`。操作履歴には新しい stash commit ID と退避後の dirty 状態を記録し、ファイル内容・Git の生出力は保存しない。変更なしは成功 no-op。stash 作成後に片付けが失敗した場合も commit ID を残し、変更が残る場合や結果不明は失敗として自動再実行しない。中断した running 操作は既存の復旧規則で failed とし、stash を再発行しない。
+
+fetch、build、deploy、再起動、stash の適用・削除は行わない。更新・配備の dirty_worktree 拒否を維持し、退避成功後に利用者が別途 deploy を依頼する。復元は記録した commit ID を指定して現地で `git stash apply --index <commit-id>` を行う。旧版の拠点は stash を受け付けないため、初回の導入には既存の現地操作で dirty 状態を解消する必要がある。
+
+検証: 実 Git fixture で staged/unstaged/untracked の復元、ignored/HEAD の保持、clean no-op、merge 中の拒否、catalog subdirectory、部分失敗時の receipt 保持を審査テストに追加。対象・担保・bootstrap オプションの拒否と dirty preflight を回避する stash 経路も追加。実行は Revisor に委託し、この session は静的型検査のみ行う。
+
 相互登録済みの拠点 (と自拠点) に、サービスまたはその拠点の Excubitor 自身について次を依頼できる。
 
 | 依頼 | 内容 |

@@ -21,6 +21,7 @@ import { CONCORDIA_SITE_ACTION, runConcordiaSiteOperation } from './concordia-si
 import { recoverSelfService } from './self-recovery.js';
 import { runSelfOperation, selfRepoOf } from './self-operation.js';
 import { runServiceOperation } from './service-operation.js';
+import { runStashOperation } from './stash-operation.js';
 import {
   appendStep,
   createOperation,
@@ -38,6 +39,7 @@ const logger = createNamedLogger('excubitor.federation.operations');
 export type OperationExecutor = (op: OperationRecord, ctx: OperationContext, catalog: Catalog) => Promise<ExecutionOutcome>;
 
 export const executeOperation: OperationExecutor = async (op, ctx, catalog) => {
+  if (op.action === 'stash') return runStashOperation(ctx, catalog);
   if (op.target.kind === 'excubitor') return runSelfOperation(selfRepoOf(catalog), ctx);
   const code = op.target.code;
   const svc = catalog.services.find((s) => s.code === code);

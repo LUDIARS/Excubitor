@@ -54,7 +54,7 @@ export function validateOperationRequest(
   }
   if (request.target.kind === 'service'
       && ['excubitor', 'excubitor-viewer-dmz'].includes(request.target.code)
-      && ['update', 'deploy', 'reflect'].includes(request.action)) {
+      && ['update', 'deploy', 'reflect', 'stash'].includes(request.action)) {
     return { ok: false, status: 409, error: 'use_excubitor_service_target', detail: { target: { kind: 'excubitor' }, action: request.action } };
   }
   if (!source) return { ok: false, status: 500, error: 'invalid_update_source_config' };

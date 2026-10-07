@@ -16,10 +16,10 @@ function fmtGiB(bytes: number | null | undefined): string {
   return `${(bytes / 1024 ** 3).toFixed(1)}GiB`;
 }
 
-const SELF_ACTIONS: OperationAction[] = ['update', 'deploy', 'reflect', 'restart'];
-const SERVICE_ACTIONS: OperationAction[] = ['update', 'deploy', 'reflect', 'restart', 'start', 'stop'];
+const SELF_ACTIONS: OperationAction[] = ['update', 'deploy', 'reflect', 'restart', 'stash'];
+const SERVICE_ACTIONS: OperationAction[] = ['update', 'deploy', 'reflect', 'restart', 'start', 'stop', 'stash'];
 /** 止めたり入れ替えたりする依頼は確認を挟む。 */
-const CONFIRM_ACTIONS: ReadonlySet<OperationAction> = new Set(['deploy', 'restart', 'stop']);
+const CONFIRM_ACTIONS: ReadonlySet<OperationAction> = new Set(['deploy', 'restart', 'stop', 'stash']);
 
 /**
  * 1 拠点の詳細: 拠点情報・担保しているサービス・依頼の履歴と、 その拠点への依頼ボタン。
@@ -42,8 +42,12 @@ export function NodeDetailPanel({ mesh, node, onChanged }: {
     .filter(({ entry, row }) => entry?.covered && !['excubitor', 'excubitor-viewer-dmz'].includes(row.code));
 
   const onRequest = async (target: OperationTarget, action: OperationAction) => {
-    const label = `${node.node} の ${target.kind === 'excubitor' ? 'Excubitor サービス本体' : target.code} を${OPERATION_LABEL[action]}`;
-    if (CONFIRM_ACTIONS.has(action) && !window.confirm(`${label}します。よろしいですか？`)) return;
+    const targetLabel = `${node.node} の ${target.kind === 'excubitor' ? 'Excubitor サービス本体' : target.code}`;
+    const label = `${targetLabel} を${OPERATION_LABEL[action]}`;
+    const confirmation = action === 'stash'
+      ? `${targetLabel} の変更を退避します。未コミット変更と未追跡ファイルを保存して作業場所から取り除きます。退避後のデプロイは別操作です。よろしいですか？`
+      : `${label}します。よろしいですか？`;
+    if (CONFIRM_ACTIONS.has(action) && !window.confirm(confirmation)) return;
     setBusy(true);
     try {
       const res = await requestOperation(peerId, target, action);

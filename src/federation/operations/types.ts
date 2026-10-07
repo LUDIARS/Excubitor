@@ -8,6 +8,7 @@
  * - deploy:  取得 + 依存 install + build + 再起動 (起動中のときだけ)
  * - reflect: build + 走っている版とディスクの版がずれているときだけ再起動 (取得はしない)
  * - start / stop: サービスの起動 / 停止 (Excubitor 自身には使えない)
+ * - stash: 対象 checkout の未コミット変更と未追跡ファイルを Git stash に退避 (配備は別操作)
  */
 
 import { z } from 'zod';
@@ -17,14 +18,14 @@ import { CONCORDIA_SERVICE_CODE, CONCORDIA_SITE_ACTION, ConcordiaSiteOptionsSche
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
 export const OperationActionSchema = z.enum([
-  'update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'bootstrap', 'data-export', 'data-import',
+  'update', 'restart', 'deploy', 'reflect', 'start', 'stop', 'stash', 'bootstrap', 'data-export', 'data-import',
   // 拠点の Concordia に連合の拠点設定を入れる (concordia-site.ts)。 対象は service concordia だけ。
   'concordia-federation-site',
 ]);
 export type OperationAction = z.infer<typeof OperationActionSchema>;
 
 /** Excubitor 自身に対して受け付ける依頼 (自分を止めたら依頼を受けられなくなるので stop / start は無い)。 */
-export const SELF_ACTIONS: ReadonlySet<OperationAction> = new Set(['update', 'restart', 'deploy', 'reflect']);
+export const SELF_ACTIONS: ReadonlySet<OperationAction> = new Set(['update', 'restart', 'deploy', 'reflect', 'stash']);
 
 /** bootstrap 指定を添えられる依頼。 update / deploy は受ける拠点にサービスが無いときだけ bootstrap になる。 */
 export const BOOTSTRAP_CAPABLE_ACTIONS: ReadonlySet<OperationAction> = new Set(['bootstrap', 'update', 'deploy']);
