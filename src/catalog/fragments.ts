@@ -159,7 +159,7 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
       // git worktree は一時的な作業コピーであり、 本番 catalog の供給源にしない。
       // 未マージブランチのサービス定義が混ざるうえ、 本体リポと同じ code を二重供給して
       // マージ順で勝敗が決まる不安定な状態を生む (2026-07-26 実測: ARS_ROOT 直下の
-      // worktree 4 件が ludellus-web / PrivateGame-unity-validation / volputas x2 を供給し、
+      // worktree 4 件が ludellus-web / PrivateGame-unity-validation / voluptas x2 を供給し、
       // ludellus-web は本体リポのどこにも存在しなかった)。
       if (isGitWorktree(repositoryPath)) continue;
       const path = normalizeAbsolute(join(repositoryPath, FRAGMENT_FILENAME));
