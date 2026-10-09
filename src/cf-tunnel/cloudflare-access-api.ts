@@ -6,6 +6,7 @@
  */
 
 import { createNamedLogger } from '../shared/logger.js';
+import type { CfAccessPolicyDetail, CfAccessRule, CfIdentityProvider } from './access-policy-service.js';
 import { cfRequest } from './cloudflare-http.js';
 import type { CfCredentials } from './credentials.js';
 
@@ -84,6 +85,44 @@ export class CloudflareAccessApi {
   async deleteApp(appId: string): Promise<void> {
     logger.info({ appId }, 'deleting access application');
     await this.request<unknown>('DELETE', `/access/apps/${encodeURIComponent(appId)}`);
+  }
+
+  /** ログイン方法 (IdP) の一覧。client secret などの config は返さない。 @implements SPEC-CF-TUNNEL-ROUTES */
+  async listIdentityProviders(): Promise<CfIdentityProvider[]> {
+    const result = await this.request<Array<{ id: string; name?: string; type?: string }>>('GET', '/access/identity_providers');
+    return result.map((p) => ({ id: p.id, name: p.name ?? '', type: p.type ?? 'unknown' }));
+  }
+
+  /** 再利用ポリシー 1 件の条件。 @implements SPEC-CF-TUNNEL-ROUTES */
+  async getPolicy(policyId: string): Promise<CfAccessPolicyDetail> {
+    const p = await this.request<{
+      id: string; name?: string; decision?: string;
+      include?: CfAccessRule[]; require?: CfAccessRule[]; exclude?: CfAccessRule[];
+    }>('GET', `/access/policies/${encodeURIComponent(policyId)}`);
+    return {
+      id: p.id,
+      name: p.name ?? '',
+      decision: p.decision ?? 'unknown',
+      include: p.include ?? [],
+      require: p.require ?? [],
+      exclude: p.exclude ?? [],
+    };
+  }
+
+  /** 再利用ポリシーの条件を置き換える (名前と decision は変えない)。 @implements SPEC-CF-TUNNEL-ROUTES */
+  async updatePolicyRules(
+    policy: CfAccessPolicyDetail,
+    rules: { include: CfAccessRule[]; require: CfAccessRule[]; exclude: CfAccessRule[] },
+  ): Promise<CfAccessPolicyDetail> {
+    logger.info({ policyId: policy.id, include: rules.include.length, require: rules.require.length }, 'updating access policy rules');
+    await this.request<unknown>('PUT', `/access/policies/${encodeURIComponent(policy.id)}`, {
+      name: policy.name,
+      decision: policy.decision,
+      include: rules.include,
+      require: rules.require,
+      exclude: rules.exclude,
+    });
+    return this.getPolicy(policy.id);
   }
 
   /** Zero Trust 組織の認証ドメイン (`<team>.cloudflareaccess.com`)。 @implements SPEC-CF-TUNNEL-ROUTES */

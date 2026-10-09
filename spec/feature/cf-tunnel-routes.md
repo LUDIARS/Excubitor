@@ -96,6 +96,21 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
      route の削除 (route → DNS → Access アプリの順、DNS / Access は選択)、Tunnel の削除。
    - MCP の remove は `remove_dns` / `remove_access` / `access_service` で同じ順に消せる。
    - トークンに要る権限は要求 8 と同じ (各 Edit 権限で削除もできる)。
+10. **通す人 (再利用ポリシーのメールとログイン方法)** — 2026-10-09 neco 指示。Google OAuth の
+    テストユーザのうち通す人だけをポリシーで選べるよう、ポリシーの中身を読み書きする。
+    ```
+    GET /api/v1/cf-access/identity-providers          … {id, name, type} (client secret などの config は返さない)
+    GET /api/v1/cf-access/policies/:id                … {emails, loginMethods, otherRules} の要約
+    PUT /api/v1/cf-access/policies/:id/members        { emails, login_method_ids, replace_other_rules?, apply? }
+    ```
+    - members: Include を個別メールの列、Require をログイン方法 (IdP) の列に置き換える。名前と decision は
+      変えない。Allow ポリシーだけ。メールは 1〜50 件で形式を確かめ、ログイン方法は登録済みの IdP に限る。
+    - 既定は計画だけを返す。`apply: true` のときだけ書き、変更前の要約 (`before`) を返す (戻すときはその値で同じ API を呼ぶ)。
+    - メール・ログイン方法以外の条件 (グループ・ドメイン・国・exclude など) があるポリシーは、書き換えると
+      消えるので `replace_other_rules: true` が無ければ 400。
+    - 再利用ポリシーは複数の Access アプリが共有する。書き換えは付いている全アプリに効く。
+    - ログイン方法 (IdP) の作成は扱わない (client secret をブローカー経由で受け渡さない)。Zero Trust の画面で作る。
+    - メールアドレスはログに件数だけを残す。
 
 ## 運用
 
