@@ -138,7 +138,8 @@ export async function validateManagedProcess(code: string): Promise<boolean> {
   // 作成時刻を読めなかっただけ (pid は生きている / 不在を確認できない) なら、 死亡と決めない。
   // ここで捨てると AdoptedProcessReaper が「死んだ」と信じて二重起動し、 後から起動した
   // インスタンスが port を奪って稼働中の実体を落とす。 照合は 5 秒ごとに powershell / ps を
-  // 起動する外部コマンドで、 負荷が高いと timeout して読めないことがあるため、 実際に起きる。
+  // 起動する外部コマンド (Windows は同時期の照合を 1 回へ相乗り) で、 負荷が高いと timeout して
+  // 読めないことがあるため、 実際に起きる。
   if (check.reason === 'unreadable') {
     logger.warn(
       { code, pid: candidate.pid },

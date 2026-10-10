@@ -1,4 +1,5 @@
 import { execCapture, type ExecResult } from '../shared/exec.js';
+import { queryWindowsStartTimes, readWindowsStartTime } from './windows-start-time.js';
 
 const START_TIME_TOLERANCE_MS = 5_000;
 
@@ -133,28 +134,48 @@ async function probeProcessStartedAt(
   options: ProcessIdentityOptions,
 ): Promise<StartedAtProbe> {
   const platform = options.platform ?? process.platform;
+  if (platform === 'win32') return probeWindowsStartedAt(pid, options);
   const run = options.run ?? ((command, args) => execCapture(command, args, process.cwd(), 5_000));
-  const result = platform === 'win32'
-    ? await run('powershell.exe', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `$p=Get-Process -Id ${pid} -ErrorAction Stop; $p.StartTime.ToUniversalTime().ToString('o')`,
-      ])
-    : await run('ps', ['-p', String(pid), '-o', 'lstart=']);
-  if (!result.ok) {
-    const isProcessAlive = options.isProcessAlive ?? hasLivePid;
-    try {
-      return isProcessAlive(pid) ? { kind: 'unreadable' } : { kind: 'exited' };
-    } catch {
-      // 存在確認そのものの失敗は「不在」の証拠にならない。孤児を見失わない側へ倒す。
-      return { kind: 'unreadable' };
-    }
-  }
+  const result = await run('ps', ['-p', String(pid), '-o', 'lstart=']);
+  if (!result.ok) return probeLiveness(pid, options);
   const startedAt = new Date(result.stdout.trim());
   // 応答はあったが時刻にならない = pid は居るが読めない。 生存しうるので回収対象。
   if (Number.isNaN(startedAt.getTime())) return { kind: 'unreadable' };
   return { kind: 'started-at', startedAt };
+}
+
+/**
+ * Windows は同じ時期の照合を PowerShell 1 回へ相乗りさせる (windows-start-time.ts)。
+ * `run` を渡されたときは相乗りせず、その `run` で 1 回だけ問い合わせる。
+ */
+async function probeWindowsStartedAt(
+  pid: number,
+  options: ProcessIdentityOptions,
+): Promise<StartedAtProbe> {
+  const lookup = options.run
+    ? (await queryWindowsStartTimes([pid], options.run)).get(pid) ?? { kind: 'failed' as const }
+    : await readWindowsStartTime(pid);
+  switch (lookup.kind) {
+    case 'started-at':
+      return { kind: 'started-at', startedAt: lookup.startedAt };
+    // 応答はあったが時刻にならない = pid は居るが読めない。 生存しうるので回収対象。
+    case 'unparsable':
+      return { kind: 'unreadable' };
+    // 行が無いのは不在のほか、 権限で StartTime を読めない場合もある。 存在を独立に確かめる。
+    case 'missing':
+    case 'failed':
+      return probeLiveness(pid, options);
+  }
+}
+
+function probeLiveness(pid: number, options: ProcessIdentityOptions): StartedAtProbe {
+  const isProcessAlive = options.isProcessAlive ?? hasLivePid;
+  try {
+    return isProcessAlive(pid) ? { kind: 'unreadable' } : { kind: 'exited' };
+  } catch {
+    // 存在確認そのものの失敗は「不在」の証拠にならない。孤児を見失わない側へ倒す。
+    return { kind: 'unreadable' };
+  }
 }
 
 /**

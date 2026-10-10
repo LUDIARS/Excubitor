@@ -13,7 +13,7 @@ describe('process identity verification', () => {
     const run = vi.fn(async () => ({
       ok: true,
       code: 0,
-      stdout: '2026-07-12T03:00:00.400Z\n',
+      stdout: '1234 2026-07-12T03:00:00.400Z\n',
       stderr: '',
     }));
 
@@ -61,7 +61,7 @@ describe('process identity verification', () => {
     const run = vi.fn(async () => ({
       ok: true,
       code: 0,
-      stdout: '2026-07-12T04:00:00.000Z',
+      stdout: '1234 2026-07-12T04:00:00.000Z',
       stderr: '',
     }));
 
@@ -76,7 +76,7 @@ describe('process identity verification', () => {
     const run = vi.fn(async () => ({
       ok: true,
       code: 0,
-      stdout: '2026-08-10T00:00:00.000Z\n',
+      stdout: '32456 2026-08-10T00:00:00.000Z\n',
       stderr: '',
     }));
 
@@ -94,7 +94,7 @@ describe('process identity verification', () => {
       .mockResolvedValueOnce({
         ok: true,
         code: 0,
-        stdout: '2026-07-12T03:00:00.400Z\n',
+        stdout: '1234 2026-07-12T03:00:00.400Z\n',
         stderr: '',
       });
     let now = 0;
@@ -188,7 +188,7 @@ describe('process identity failure reason', () => {
 
   it('reports unreadable when the process answers but the time cannot be parsed', async () => {
     // 応答はある = pid は居る。 時刻にならないだけなので、 生存 pid の回収対象。
-    const run = vi.fn(async () => ({ ok: true, code: 0, stdout: '\n', stderr: '' }));
+    const run = vi.fn(async () => ({ ok: true, code: 0, stdout: '1234 not-a-time\n', stderr: '' }));
 
     await expect(waitForProcessIdentityOutcome(1234, expected, waitOptions(run)))
       .resolves.toEqual({ ok: false, reason: 'unreadable' });
@@ -199,7 +199,7 @@ describe('process identity failure reason', () => {
     const run = vi.fn(async () => ({
       ok: true,
       code: 0,
-      stdout: '2026-07-12T09:00:00.000Z\n',
+      stdout: '1234 2026-07-12T09:00:00.000Z\n',
       stderr: '',
     }));
 
@@ -211,7 +211,7 @@ describe('process identity failure reason', () => {
     const run = vi.fn(async () => ({
       ok: true,
       code: 0,
-      stdout: '2026-07-12T03:00:00.400Z\n',
+      stdout: '1234 2026-07-12T03:00:00.400Z\n',
       stderr: '',
     }));
 
