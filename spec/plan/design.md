@@ -439,6 +439,7 @@ crypto round-trip / 改竄検知 / 平文非含有の vitest 5 ケース。ス�
 > 2026-09-19 更新: Windows で child 起動を選ぶ経路は廃止した (§17.6)。本節の「Windows は
 > detached を外す」規定は適用先が無くなり、履歴として残す。窓抑止の要件自体は不変で、
 > job-breakaway 側 (launcher の `ShowWindow=0` と `windowsHide`) が満たす。
+> 2026-10-11 更新: 窓抑止は §17.7 (サービスに窓の無いコンソールを持たせる) が満たす。
 
 - `process/manager.ts` の spawn を **Windows では `windowsHide: true` のみ (detached を外す)** で起動する。
   - **背景の罠**: `windowsHide` が立てる `CREATE_NO_WINDOW` は、 `detached` が立てる `DETACHED_PROCESS` と併用すると CreateProcess 仕様で**無視される** ([process-creation-flags](https://learn.microsoft.com/windows/win32/procthread/process-creation-flags))。 当初 `detached:true + windowsHide:true` を併用したため窓抑止が効かず、 コンソール非保持の `cmd.exe` が自前で新規コンソール窓を出していた (#req1 の再発)。
@@ -560,6 +561,8 @@ CREATE_NEW_PROCESS_GROUP / DETACHED_PROCESS であって CREATE_BREAKAWAY_FROM_J
 - 子の env には起動 credential が含まれるため、**コマンドラインに載せない**。spec 全体を
   base64 JSON にして PowerShell の stdin へ流し、`Win32_ProcessStartup.EnvironmentVariables`
   で渡す。ShowWindow=0 (SW_HIDE) で §15.1 の窓抑止要件を維持する。
+  (2026-10-11 追記: SW_HIDE だけでは窓が一瞬出るため、launcher は `CreateFlags=8` (DETACHED_PROCESS)
+  でコンソールを持たせない。§17.7)
 - stdin へ流すスクリプトは **1 行 = 完結した 1 ステートメント** にする。Windows PowerShell 5.1 の
   `-Command -` は行末で継続する構文 (`@{` を開いたままの複数行ハッシュテーブル、複数行 try/catch 等) を
   受けると、エラーも例外も出さず exit code 0 / 出力ゼロで終わる (2026-08-03 実測)。この不変条件は
@@ -845,6 +848,68 @@ supervisor の再起動・死亡を生き延びる。
 **反映結果 (2026-09-19)**: 18:36 に反映し、autostart 外のサービスを起動し直した後、18:39 に supervisor を
 もう一度再起動した。稼働中の全サービス (17) の pid と health は前後で変わらず、supervisor の auto-launch も
 すべて `already running` で素通りした。
+
+### 17.7 サービスに窓の無いコンソールを持たせる (2026-10-11)
+
+**背景 (実測、neco「Ex でターミナルが毎回一瞬出る挙動をいい加減直す」)**: Excubitor が起動したサービス
+(control-worker / cost-worker / tsx watch 等) はどれも **コンソールを持っていなかった**
+(conhost.exe の子が無い)。launcher が実プロセスを Node の `detached: true` = DETACHED_PROCESS で
+起動していたためである。コンソールの無いプロセスが console app (git / cmd / powershell 等) を
+起動すると、OS はその子に新しいコンソールを確保する。
+
+- 子側が `windowsHide` を付けない (サービス本体・依存ライブラリ・npm / tsx の内部) と、窓がそのまま開く。
+- `windowsHide` を付けても、std に fd を継承させる起動では libuv が CREATE_NO_WINDOW を付けず SW_HIDE だけになる。
+- 既定のターミナルが Windows Terminal の環境では、SW_HIDE のコンソールでも Windows Terminal への
+  引き渡し (`OpenConsole.exe -Embedding`) が起き、窓が一瞬出る。実測では、引き渡しの起動時刻が
+  supervisor / Quaestor の cmd.exe / python / Memoria の各コンソール確保と秒単位で一致した。
+
+サービス側の spawn を 1 つずつ直しても、依存の中までは追えない。
+
+**決定**: コンソールは **窓の無いもの (CREATE_NO_WINDOW) だけ** を作り、サービスにそれを 1 つ持たせて
+子孫に継承させる。
+
+1. **実プロセス** — launcher は Node の spawn をやめ、CreateProcessW を直接呼ぶ PowerShell ヘルパーで
+   起動する (`src/process/hidden-console-spawn.ts`)。フラグは
+   `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT`。
+   - Node の spawn では作れない: `detached` は DETACHED_PROCESS (CREATE_NO_WINDOW は無視される)、
+     `detached` 無しは libuv が launcher の寿命に縛る Job (KILL_ON_JOB_CLOSE、§17.6) に入れる。
+   - ヘルパーは launcher の libuv Job に入るが、その Job は SILENT_BREAKAWAY_OK なので、
+     ヘルパーが作った実プロセスは Job に入らない。**§17.4.1 の不変条件 (子は launcher の寿命に依存しない) は
+     shell 経由でも構造的に満たされ**、`awaitChildStartup` の起動猶予待ちは廃止した。shell 経由の cmd.exe も
+     実サービスの親として生き残るので、返り pid (cmd.exe) が即死に見える問題 (§17.4.2 追補) も起きない。
+   - ログはヘルパーが `FILE_APPEND_DATA` + 共有 (READ|WRITE|DELETE) で開いて std ハンドルとして渡す
+     (§17.4 のロック問題を起こさない)。stdin は NUL。継承させるハンドルは
+     `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` でこの 3 本に限る (ヘルパーの stdout パイプを子が掴むと結果を読み終われない)。
+   - 子の env (起動 credential) はヘルパーの stdin に JSON で流し、コマンドラインに載せない。stdin / stdout は
+     UTF-8 に固定する (既定の cp932 だと日本語の env が化けて JSON が壊れる)。JSON の解析失敗の文言は固定文にして、
+     入力 (env) を例外文に載せない。
+   - ヘルパーの C# は初回だけ Add-Type でコンパイルし、`%TEMP%\excubitor\hidden-console-spawn-<ソースの sha256 先頭12桁>.dll`
+     を使い回す。起動のたびのコンパイル (csc.exe) は負荷下で 15 秒を超え、supervisor の結果待ち (20 秒) に収まらない (実測)。
+   - コマンドラインは CommandLineToArgvW の規則で引用する (libuv と同じ)。shell 経由は Node の
+     `shell: true` と同じ `<ComSpec> /d /s /c "<command> <args...>"`。絶対パスの実行ファイルは
+     `lpApplicationName` に渡して探索させない。
+2. **launcher** — WMI の `Win32_ProcessStartup.CreateFlags = 8` (DETACHED_PROCESS) でコンソールを持たせない
+   (SW_HIDE のコンソールも引き渡しで窓が出るため)。launcher は何も表示せず、ヘルパーは pipe の stdio +
+   `windowsHide` で起動するので、ヘルパーも窓の無いコンソールになる。
+
+**検証**: `src/process/breakaway-console.test.ts` が WMI → launcher → 実プロセスを通しで起動し、
+実プロセスの直下に conhost.exe が 1 つあること (窓の無いコンソールを持つ)、そのプロセスが `windowsHide` 無しで
+起動した cmd.exe の直下に conhost.exe が無いこと (新しいコンソールを作らない) を確かめる (win32 のみ)。
+
+3. **supervisor** — Scheduled Task が node.exe を直接起動すると、起動のたびにコンソールが確保され
+   引き渡しが起きる (実測: supervisor 起動と同じ秒に `OpenConsole -Embedding`)。neco 判断 (2026-10-11) で
+   「Node を直接 main process として起動する」規定を改め、Task の action を窓無しランチャーにした。
+   - `scripts/windows-hidden-launcher.cs` (GUI subsystem) を install 時に PowerShell の Add-Type で
+     `data/excubitor-hidden-launcher-<sha256 先頭12桁>.exe` へビルドする。名前にハッシュを入れて、実行中の Task が
+     掴む exe を上書きしない。ランチャーは自分のコマンドラインの 2 語目以降を CREATE_NO_WINDOW で起動し、
+     終了を待って exit code を返す (Task の状態 = supervisor の生死)。`CREATE_BREAKAWAY_FROM_JOB` は付けないので
+     Node は Task の Job に残り、`Stop-ScheduledTask` による停止・再起動 (windows-supervisor-restart.ts) は変わらない。
+   - 不採用: `conhost.exe --headless <node>` は stdin が EOF (NUL / 空) だと client が動く前に終了する (実測)。
+     Task Scheduler は std ハンドルを渡さないため使えない。
+   - 導入済みの Task は `scripts/set-service-headless.ps1` が action だけを書き換える。install-service.ps1 の再実行は
+     Task を作り直し、手で足した Node 引数 (`--env-file=...` 等) を落とすため。
+   - 検証: `src/local-control/supervisor-headless-console.test.ts` がランチャーを実際にビルドし、その下の Node が
+     窓の無いコンソールを持つこと・子が新しいコンソールを作らないこと・exit code が返ることを確かめる (win32 のみ)。
 
 ## 18. v0.9 — 監視ループの軽量化と拠点メッシュ (2026-09-21) {#SPEC-MONITOR-LIGHTWEIGHT}
 

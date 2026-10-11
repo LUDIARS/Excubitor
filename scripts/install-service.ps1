@@ -19,6 +19,7 @@ $ServiceRunner = [IO.Path]::GetFullPath((Join-Path $Root 'dist\service-runner.js
 $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $NodeExecutable = [IO.Path]::GetFullPath($NodeCommand.Source)
 . (Join-Path $PSScriptRoot 'windows-service-safety.ps1')
+. (Join-Path $PSScriptRoot 'windows-hidden-launcher.ps1')
 
 function Test-IsAdministrator {
   $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -156,8 +157,14 @@ try {
 }
 
 $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$ActionArguments = "`"$ServiceRunner`" --service-name=$Name"
-$Action = New-ScheduledTaskAction -Execute $NodeExecutable -Argument $ActionArguments -WorkingDirectory $Root
+# Starting node.exe directly from Task Scheduler allocates a console on every start, and the
+# default-terminal handoff (Windows Terminal) flashes a window (design.md section 17.7).
+# A GUI-subsystem launcher starts Node with CREATE_NO_WINDOW and waits for it. Node stays in
+# the task's job, so stop/restart semantics are unchanged.
+$HiddenLauncher = Install-ExcubitorHiddenLauncher $DataDir
+$NodeArguments = "`"$ServiceRunner`" --service-name=$Name"
+$ActionArguments = "`"$NodeExecutable`" $NodeArguments"
+$Action = New-ScheduledTaskAction -Execute $HiddenLauncher -Argument $ActionArguments -WorkingDirectory $Root
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Limited
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew

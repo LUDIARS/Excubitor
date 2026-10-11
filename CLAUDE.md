@@ -62,8 +62,13 @@ npm run ctl -- service concordia kill-port --port=17332 --json
 - mutating CLI は supervisor 不在時に導入済みの OS service manager へ起動を要求する。
   CLI の子として supervisor を直接 spawn しない。Web API は起動を試みず 503 で fail-fast し、
   backend 内 process manager へ silent fallback してはならない。常用 supervisor は OS service が所有する。
-- OS service definition は絶対パスの Node + `dist/service-runner.js` を直接 main process として起動する。
+- OS service definition は絶対パスの Node + `dist/service-runner.js` を起動する。
   npm / PowerShell wrapper を挟まず、custom service name は検証済みの `--service-name=<name>` で渡す。
+  Windows だけは Task の action を窓無しランチャー (`scripts/windows-hidden-launcher.cs` を install 時に
+  `data/excubitor-hidden-launcher-<hash>.exe` へビルド) にし、Node をその引数で渡す。node.exe を直接起動すると
+  起動のたびにコンソールが確保され、既定ターミナルへの引き渡しで窓が一瞬出る (neco 2026-10-11、design.md §17.7)。
+  ランチャーは GUI subsystem で Node を CREATE_NO_WINDOW で起動して終了を待つだけで、Node は Task の Job に残る。
+  導入済みの Task は `scripts/set-service-headless.ps1` で action だけ書き換える (手で足した Node 引数を保つ)。
 - Windows installer は `excubitorctl` と同じアカウント・Limited権限の scheduled task を作る。
   Integrity Level が通常CLIと異なるWindows Service/NSSMはlocal-control ownerとしてサポートしない。
   named pipe は account + `EXCUBITOR_SERVICE_NAME` ごとに分離する。
@@ -112,9 +117,12 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   out 側に build 開始・`===== start` (command / cwd / version / 起動方式)・`spawned pid=`、err 側に
   ビルド失敗と起動失敗を `[excubitor-start-failure]` 付きで書く。既定エラールール "Excubitor start failure"
   がこの印でエラータスクを作るので、起動失敗はログ画面とエラー一覧で見える。
-- **win32 の managed service は必ず Job Object 脱出 spawn (job-breakaway) で起動する**。supervisor は Scheduled Task の Job 内で動き `detached: true` では子が Job を継承するため、WMI (Win32_Process.Create) 経由で Job 外に生成し pid を adopted 管理に載せる (`src/process/breakaway-spawn.ts`、判定は `src/process/spawn-strategy.ts`)。win32 で child 起動 (supervisor の直接の子) を選ぶ手段は無い。旧 `EXCUBITOR_SPAWN_STRATEGY` は読まず、残っていれば warn を 1 回出す (design.md §17.6)。なお 2026-09 に supervisor の再起動・死亡で配下が全滅した直接の原因は Task の Job ではなく、Node (libuv) が `detached` なしの子を親の寿命に縛る Job だった。managed service は必ず `detached` で起動する。supervisor が死んでもサービスは残り、再起動時は reconcile が生存 pid を再採用して何もしない。
-  **WMI で出すのは短命 launcher (`src/process/breakaway-launcher.ts`) だけ**で、ログ fd を開いて実プロセスを起動し実 pid を返したら即終了する。起動を `cmd.exe /c "... 1>>log"` の形でコマンドラインに永続化しない (cmd.exe の `>>` は書き込み共有を許さずログを掴むため、残骸が次の起動を無出力で即死させていた。design.md §17.4)。
-- 起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
+- **win32 の managed service は必ず Job Object 脱出 spawn (job-breakaway) で起動する**。supervisor は Scheduled Task の Job 内で動き `detached: true` では子が Job を継承するため、WMI (Win32_Process.Create) 経由で Job 外に生成し pid を adopted 管理に載せる (`src/process/breakaway-spawn.ts`、判定は `src/process/spawn-strategy.ts`)。win32 で child 起動 (supervisor の直接の子) を選ぶ手段は無い。旧 `EXCUBITOR_SPAWN_STRATEGY` は読まず、残っていれば warn を 1 回出す (design.md §17.6)。なお 2026-09 に supervisor の再起動・死亡で配下が全滅した直接の原因は Task の Job ではなく、Node (libuv) が `detached` なしの子を親の寿命に縛る Job だった。managed service は launcher の寿命から切り離して起動する (2026-10-11 からは下記の窓無しコンソール起動で満たす)。supervisor が死んでもサービスは残り、再起動時は reconcile が生存 pid を再採用して何もしない。
+  **WMI で出すのは短命 launcher (`src/process/breakaway-launcher.ts`) だけ**で、実プロセスを起動し実 pid を返したら即終了する。起動を `cmd.exe /c "... 1>>log"` の形でコマンドラインに永続化しない (cmd.exe の `>>` は書き込み共有を許さずログを掴むため、残骸が次の起動を無出力で即死させていた。design.md §17.4)。
+- **サービスは窓の無いコンソール (CREATE_NO_WINDOW) を持たせて起動する** (`src/process/hidden-console-spawn.ts`、design.md §17.7)。
+  Node の `detached` (DETACHED_PROCESS) で起動するとサービスはコンソールを持たず、配下の git / cmd 等が起動のたびに
+  新しいコンソールを確保して窓が一瞬出る。SW_HIDE のコンソールも既定ターミナル (Windows Terminal) への引き渡しで窓が出る。
+  WMI の launcher は `CreateFlags=8` でコンソールを持たない。Excubitor 自身の起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
 - **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /
   error-detector / parquet 圧縮を止め、自身の pino も warn へ落として起動する。 ログ I/O 起因の

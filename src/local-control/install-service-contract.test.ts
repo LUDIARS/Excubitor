@@ -31,12 +31,15 @@ describe('local-control installation contracts', () => {
     expect(daemon).toContain('<key>AbandonProcessGroup</key><true/>');
   });
 
-  it('registers the Windows task with Node as the owned main process', async () => {
+  it('registers the Windows task with Node behind the windowless launcher', async () => {
     const script = await readFile(new URL('../../scripts/install-service.ps1', import.meta.url), 'utf8');
     expect(script).toContain("Get-Command node.exe -CommandType Application");
     expect(script).toContain("Join-Path $Root 'dist\\service-runner.js'");
     expect(script).toContain('"`"$ServiceRunner`" --service-name=$Name"');
-    expect(script).toContain('-Execute $NodeExecutable -Argument $ActionArguments -WorkingDirectory $Root');
+    // node.exe を直接起動すると起動のたびにコンソール窓が出る (design.md §17.7)。
+    expect(script).toContain('$HiddenLauncher = Install-ExcubitorHiddenLauncher $DataDir');
+    expect(script).toContain('"`"$NodeExecutable`" $NodeArguments"');
+    expect(script).toContain('-Execute $HiddenLauncher -Argument $ActionArguments -WorkingDirectory $Root');
     expect(script).not.toContain('New-ScheduledTaskAction -Execute "powershell.exe"');
     expect(script).toContain('$Arguments.IndexOf($RunScript');
     expect(script).toContain('$Arguments.IndexOf($ServiceRunner');

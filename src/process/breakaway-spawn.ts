@@ -180,8 +180,11 @@ export function buildCreateScript(params: {
   return [
     "$ErrorActionPreference = 'Stop'",
     `$spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')) | ConvertFrom-Json`,
-    // ShowWindow=0 (SW_HIDE): launcher のコンソール窓を出さない (windowsHide 相当)。
-    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [UInt16]0; EnvironmentVariables = [string[]]$spec.env }',
+    // CreateFlags=8 (DETACHED_PROCESS): launcher にコンソールを確保させない。ShowWindow=0 (SW_HIDE) の
+    // コンソールでも、既定ターミナルが Windows Terminal だと引き渡し (OpenConsole -Embedding) が起きて
+    // 窓が一瞬出る (2026-10-11 実測、design.md §17.7)。launcher は何も表示せず、実プロセスは
+    // hidden-console-spawn で自前の窓無しコンソールを持つので、launcher にコンソールは要らない。
+    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [UInt16]0; CreateFlags = [UInt32]8; EnvironmentVariables = [string[]]$spec.env }',
     '$arguments = @{ CommandLine = $spec.commandLine; ProcessStartupInformation = $startup }',
     'if ($null -ne $spec.cwd) { $arguments.CurrentDirectory = $spec.cwd }',
     '$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $arguments',

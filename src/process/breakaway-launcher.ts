@@ -29,31 +29,28 @@
  * 意味しない。結果として node ランタイムのサービスが軒並み無出力で消え、supervisor からは
  * `could not be verified after breakaway spawn` にしか見えなかった。
  *
- * 対処は 2 段。**不変条件は「子は launcher の寿命に依存しない」こと**なので、
- *   1. `shell` を挟まない起動 (= サービスの大半) は `detached: true` で構造的に切り離す。
- *      launcher が即終了しても子は生き残り、ログ fd もそのまま効く。
- *   2. `shell` 経由 (npm / .bat) だけは `detached` を付けられない。DETACHED_PROCESS の
- *      cmd.exe はコンソールを持たず、その子へ std ハンドルを渡せなくなるため
- *      **ログが落ちる** (2026-08-09 実測: 子は生き残るが stdout が空になる)。
- *      こちらは起動猶予だけ待って凌ぐ。
+ * 2026-08-09 からは、shell を挟まない起動を `detached: true` で切り離し、shell 経由 (npm / .bat) は
+ * 起動猶予だけ待って凌いでいた。だが `detached` は DETACHED_PROCESS で、サービスはコンソールを
+ * 一切持たない。そのサービスが console app (git / cmd 等) を `windowsHide` 無しで起動するたびに
+ * 新しいコンソールが確保され、ターミナルの窓が一瞬出ていた (2026-10-11 実測)。
  *
- * どちらの経路でも、supervisor 再起動後の再採用は `reconcile.ts` が
- * 永続化した pid + 起動時刻の identity 照合で行う (子は Job 外に残るため見つかる)。
+ * **現在の起動 (design.md §17.7)**: 実プロセスは CreateProcessW の `CREATE_NO_WINDOW` で起動し
+ * (`hidden-console-spawn.ts`)、**窓の無いコンソール**を持たせる。子孫はそれを継承するので窓が出ない。
+ * CreateProcessW を呼ぶヘルパーは launcher の libuv Job に入るが、その Job は SILENT_BREAKAWAY_OK
+ * なので実プロセスは Job に入らない。**不変条件「子は launcher の寿命に依存しない」** は
+ * shell 経由でも構造的に満たされ、起動猶予の待ちは要らなくなった (cmd.exe も実サービスの親として残る)。
+ * ログはヘルパーが共有を許す append で開いて std ハンドルとして渡すので、ロックも起きない。
+ *
+ * supervisor 再起動後の再採用は `reconcile.ts` が永続化した pid + 起動時刻の identity 照合で行う
+ * (子は Job 外に残るため見つかる)。
  */
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, renameSync, writeFileSync } from 'node:fs';
 
+import { spawnWithHiddenConsole, type HiddenConsoleSpawnRequest } from './hidden-console-spawn.js';
+
 /** launcher へ spec を渡す env 名 (コマンドラインには載せない)。 */
 export const BREAKAWAY_SPEC_ENV = 'EXCUBITOR_BREAKAWAY_SPEC';
-
-/**
- * `spawn` 後に子の生存を確かめる猶予 (ms)。supervisor 側の結果待ち
- * (`DEFAULT_RESULT_TIMEOUT_MS` = 20s) に対して十分短く取る。
- */
-export const CHILD_SETTLE_TIMEOUT_MS = 750;
-
-/** 生存確認の間隔 (ms)。 */
-export const CHILD_SETTLE_INTERVAL_MS = 50;
 
 export interface BreakawayLaunchSpec {
   /** 実行するコマンド (shell=false なら実行ファイルそのもの)。 */
@@ -143,88 +140,33 @@ export function writeLaunchResult(resultPath: string, result: BreakawayLaunchRes
   renameSync(temporaryPath, resultPath);
 }
 
-/** 生存確認の差し替え口 (テスト用)。 */
-export interface ChildSettleDeps {
-  isAlive: (pid: number) => boolean;
-  sleep: (ms: number) => Promise<void>;
-  now: () => number;
-}
-
-const DEFAULT_SETTLE_DEPS: ChildSettleDeps = {
-  isAlive: (pid) => {
-    try {
-      // signal 0 は送信せず存在確認だけを行う。権限が無い場合は EPERM = 生存。
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'EPERM';
-    }
-  },
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  now: () => Date.now(),
-};
+/** 実プロセスの起動口 (テスト用に差し替えられる)。実 pid を返し、失敗は throw する。 */
+export type StartChild = (request: HiddenConsoleSpawnRequest) => Promise<number>;
 
 /**
- * 子が起動に入るまで launcher を生かしておく。
- *
- * 猶予を待ち切るのが本質だが、子が既に終了しているなら待つ意味は無いので早く抜ける
- * (`node -e 'process.stdout.write("x")'` のような短命コマンドで無駄に待たない)。
- * 「消えた = 失敗」とは扱わない。正常終了と起動前の消失を pid の生死だけでは
- * 区別できないため、その判定は supervisor 側の identity 照合に任せる。
+ * 既定の起動口。win32 は窓の無いコンソールを持たせて CreateProcessW で起動する
+ * (hidden-console-spawn.ts、design.md §17.7)。launcher は win32 専用だが、POSIX でも
+ * ライブラリとしてテストできるよう、それ以外は Node の detached spawn で起動する。
  */
-export async function awaitChildStartup(
-  pid: number,
-  deps: ChildSettleDeps = DEFAULT_SETTLE_DEPS,
-  timeoutMs = CHILD_SETTLE_TIMEOUT_MS,
-  intervalMs = CHILD_SETTLE_INTERVAL_MS,
-): Promise<void> {
-  const deadline = deps.now() + timeoutMs;
-  while (deps.now() < deadline) {
-    if (!deps.isAlive(pid)) return;
-    await deps.sleep(intervalMs);
-  }
-}
+export const defaultStartChild: StartChild = (request) =>
+  process.platform === 'win32' ? spawnWithHiddenConsole(request) : spawnDetachedWithNode(request);
 
 /** 実プロセスを起動し、結果を書いて終了する。戻り値は launcher の exit code。 */
 export async function launchBreakawayChild(
   spec: BreakawayLaunchSpec,
   childEnv: Record<string, string>,
-  deps: ChildSettleDeps = DEFAULT_SETTLE_DEPS,
+  startChild: StartChild = defaultStartChild,
 ): Promise<number> {
-  let stdoutFd: number | null = null;
-  let stderrFd: number | null = null;
   try {
-    // Node の open は共有を許すため、旧インスタンスが同じログを掴んでいても開ける
-    // (cmd.exe の `>>` と違ってここでロックしない)。
-    stdoutFd = openSync(spec.stdoutPath, 'a');
-    stderrFd = openSync(spec.stderrPath, 'a');
-    const child = spawn(spec.command, spec.args, {
-      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+    const pid = await startChild({
+      command: spec.command,
+      args: spec.args,
       shell: spec.shell,
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
       env: childEnv,
-      stdio: ['ignore', stdoutFd, stderrFd],
-      windowsHide: true,
-      // launcher の寿命に子をぶら下げない (§17.4.1)。shell 経由のときは付けられない —
-      // DETACHED_PROCESS の cmd.exe はコンソールを持たず、その子へ std ハンドルを
-      // 渡せなくなるためログが落ちる (2026-08-09 実測)。そちらは待ちで凌ぐ。
-      detached: !spec.shell,
+      stdoutPath: spec.stdoutPath,
+      stderrPath: spec.stderrPath,
     });
-    const pid = await new Promise<number>((resolve, reject) => {
-      child.once('spawn', () => {
-        if (child.pid === undefined) {
-          reject(new Error('child process started without a pid'));
-          return;
-        }
-        resolve(child.pid);
-      });
-      child.once('error', (error: Error) => reject(error));
-    });
-    // launcher の event loop を子に縛られないようにする。Windows は親の終了で
-    // 子を道連れにしないので、これで実プロセスだけが Job 外に残る。
-    child.unref();
-    // shell 経由は `detached` を付けられないため、launcher の即終了で子が失われる。
-    // 起動猶予だけ待ってから結果を書く。detached で切り離せている経路では不要。
-    if (spec.shell) await awaitChildStartup(pid, deps);
     writeLaunchResult(spec.resultPath, { pid });
     return 0;
   } catch (error) {
@@ -232,17 +174,33 @@ export async function launchBreakawayChild(
       error: error instanceof Error ? error.message : String(error),
     });
     return 1;
-  } finally {
-    // 子は複製したハンドルを持つので、launcher 側は閉じてよい。
-    for (const fd of [stdoutFd, stderrFd]) {
-      if (fd !== null) {
-        try {
-          closeSync(fd);
-        } catch {
-          // 閉じられなくても launcher は終了する。子の出力には影響しない。
-        }
-      }
-    }
   }
 }
 
+async function spawnDetachedWithNode(request: HiddenConsoleSpawnRequest): Promise<number> {
+  const stdoutFd = openSync(request.stdoutPath, 'a');
+  const stderrFd = openSync(request.stderrPath, 'a');
+  try {
+    const child = spawn(request.command, request.args, {
+      ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+      shell: request.shell,
+      env: request.env,
+      stdio: ['ignore', stdoutFd, stderrFd],
+      detached: true,
+      windowsHide: true,
+    });
+    const pid = await new Promise<number>((resolve, reject) => {
+      child.once('spawn', () => {
+        if (child.pid === undefined) reject(new Error('child process started without a pid'));
+        else resolve(child.pid);
+      });
+      child.once('error', (error: Error) => reject(error));
+    });
+    child.unref();
+    return pid;
+  } finally {
+    // 子は複製したハンドルを持つので、launcher 側は閉じてよい。
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
+  }
+}

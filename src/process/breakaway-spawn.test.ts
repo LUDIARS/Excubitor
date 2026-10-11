@@ -111,6 +111,8 @@ describe('buildCreateScript', () => {
     expect(script).not.toContain('hunter2');
     expect(script).toContain('FromBase64String');
     expect(script).toContain('Win32_ProcessStartup');
+    // launcher にコンソールを確保させない (窓の引き渡しを起こさない、design.md §17.7)。
+    expect(script).toContain('CreateFlags = [UInt32]8');
     expect(script).toContain('Invoke-CimMethod');
     const payload = decodePayload(script);
     expect(payload.env).toContain('SECRET_TOKEN=hunter2');
