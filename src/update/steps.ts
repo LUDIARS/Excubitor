@@ -140,7 +140,9 @@ export async function installDependencies(
   const dir = opts.prefix ? join(repoDir, opts.prefix) : repoDir;
   if (!existsSync(join(dir, 'package.json'))) return null;
   // Deployment builds require their compiler/bundler even when the site uses NODE_ENV=production.
-  const args = ['install', '--include=dev', ...(opts.preferOffline ? ['--prefer-offline', '--no-audit', '--no-fund'] : [])];
+  // --no-save: 拠点の npm 版差で package-lock.json が書き換わると、 次の update / deploy が
+  // 未コミット変更 (dirty_check) で止まる。 lockfile は解決に使うだけで書き戻さない。
+  const args = ['install', '--include=dev', '--no-save', ...(opts.preferOffline ? ['--prefer-offline', '--no-audit', '--no-fund'] : [])];
   const npm = await execCapture('npm', args, dir, INSTALL_TIMEOUT_MS, true);
   return { step: opts.prefix ? `install:${opts.prefix}` : 'install', ok: npm.ok, detail: tail(npm.ok ? npm.stdout : npm.stderr) };
 }
