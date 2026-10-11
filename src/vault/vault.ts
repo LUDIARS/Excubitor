@@ -16,6 +16,8 @@ export interface VaultStatus {
   source_peer_id: string | null;
   entries: Array<{ name: string; updated_at: number; used_by: string[] }>;
   bindings: Record<string, Array<{ name: string; present: boolean }>>;
+  /** 拠点の上書き: サービス → 本社の値より優先する変数名 (値は entries)。 */
+  overrides: Record<string, Array<{ name: string; present: boolean }>>;
   cached_services: Array<{ code: string; fetched_at: number }>;
   projects: Array<{ id: string; name: string; entries: VaultStatus['entries']; bindings: VaultStatus['bindings'] }>;
 }
@@ -86,17 +88,20 @@ export class Vault {
 
   status(): VaultStatus {
     const doc = this.read();
-    const usedBy = (name: string) => Object.entries(doc.bindings).filter(([, names]) => names.includes(name)).map(([code]) => code).sort();
+    const usedBy = (name: string) => [...new Set([...Object.entries(doc.bindings), ...Object.entries(doc.overrides)]
+      .filter(([, names]) => names.includes(name)).map(([code]) => code))].sort();
+    const withPresence = (map: Record<string, string[]>) => Object.fromEntries(Object.entries(map).map(([code, names]) => [
+      code,
+      names.map((name) => ({ name, present: name in doc.entries })),
+    ]));
     return {
       keystore: this.keyStore.kind,
       source_peer_id: doc.source_peer_id,
       entries: Object.entries(doc.entries)
         .map(([name, entry]) => ({ name, updated_at: entry.updated_at, used_by: usedBy(name) }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-      bindings: Object.fromEntries(Object.entries(doc.bindings).map(([code, names]) => [
-        code,
-        names.map((name) => ({ name, present: name in doc.entries })),
-      ])),
+      bindings: withPresence(doc.bindings),
+      overrides: withPresence(doc.overrides),
       cached_services: Object.entries(doc.cache)
         .map(([code, cache]) => ({ code, fetched_at: cache.fetched_at }))
         .sort((a, b) => a.code.localeCompare(b.code)),
@@ -167,6 +172,26 @@ export class Vault {
     });
   }
 
+  /** 拠点の上書き: 本社から受け取る値より優先する変数名 (空で外す)。 */
+  setOverrides(code: string, names: readonly string[]): void {
+    if (this.projectId) throw new Error('site overrides belong to the shared Vault');
+    if (!SERVICE_CODE_PATTERN.test(code)) throw new VaultError('invalid_service', 'invalid service code');
+    for (const name of names) assertName(name);
+    const unique = [...new Set(names)].sort();
+    this.update((doc) => {
+      if (unique.length === 0) delete doc.overrides[code];
+      else doc.overrides[code] = unique;
+    });
+  }
+
+  /** 拠点の上書きの値。上書きが無ければ null。値が未登録の名前は missing に入る。 */
+  async overrideEnvFor(code: string): Promise<ServiceVaultEnv | null> {
+    const doc = this.read();
+    const names = doc.overrides[code];
+    if (!names || names.length === 0) return null;
+    return this.open(doc, names);
+  }
+
   bindingsFor(code: string): string[] {
     return this.read().bindings[code] ?? [];
   }
@@ -197,6 +222,10 @@ export class Vault {
     const doc = this.read();
     const names = doc.bindings[code];
     if (!names || names.length === 0) return null;
+    return this.open(doc, names);
+  }
+
+  private async open(doc: VaultDoc, names: readonly string[]): Promise<ServiceVaultEnv> {
     const key = await this.key();
     const env: Record<string, string> = {};
     const missing: string[] = [];

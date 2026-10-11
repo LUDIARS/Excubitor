@@ -6,6 +6,7 @@ import {
   importVaultFromInfisical,
   saveVaultBindings,
   saveVaultEntry,
+  saveVaultOverrides,
   saveVaultSource,
   saveVaultProject,
   type VaultStatus,
@@ -23,6 +24,8 @@ export function VaultCard() {
   const [bindCode, setBindCode] = useState('');
   const [bindNames, setBindNames] = useState('');
   const [importCode, setImportCode] = useState('');
+  const [overrideCode, setOverrideCode] = useState('');
+  const [overrideNames, setOverrideNames] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [project, setProject] = useState('');
@@ -81,6 +84,40 @@ export function VaultCard() {
         <p className="muted">
           控え: {status.cached_services.map((entry) => `${entry.code} (${new Date(entry.fetched_at).toLocaleString()})`).join(', ')}
         </p>
+      )}
+
+      {status.source_peer_id && (
+        <>
+          <h3>拠点の上書き</h3>
+          <p className="muted">本社から受け取る値のうち、ここに挙げた名前だけ共有Vaultの値 (この拠点) を使う。値が未登録なら起動を止める。本社へは送らない。</p>
+          <table className="config-table">
+            <thead><tr><th>サービス</th><th>上書きする環境変数</th></tr></thead>
+            <tbody>
+              {Object.entries(status.overrides ?? {}).map(([code, names]) => (
+                <tr key={code}>
+                  <td><code>{code}</code></td>
+                  <td>{names.map((entry) => (
+                    <span key={entry.name} className={entry.present ? '' : 'error'} title={entry.present ? '登録済み' : '値が未登録 (このままだと起動を止める)'}>
+                      {entry.name}{entry.present ? '' : ' (未登録)'}{' '}
+                    </span>
+                  ))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="config-row">
+            <input placeholder="サービスコード" value={overrideCode} onChange={(event) => setOverrideCode(event.target.value)} />
+            <input placeholder="DATABASE_URL, FRONTEND_URL" value={overrideNames} onChange={(event) => setOverrideNames(event.target.value)} title="空にして保存すると上書きを外す" />
+            <button
+              disabled={busy || !overrideCode.trim()}
+              title="このサービスで本社の値より優先する環境変数を置き換える"
+              onClick={() => void run(async () => {
+                await saveVaultOverrides(overrideCode.trim(), splitNames(overrideNames));
+                return `${overrideCode.trim()} の上書きを保存しました`;
+              })}
+            >上書きを保存</button>
+          </div>
+        </>
       )}
 
       <h3>Vault を選択</h3>

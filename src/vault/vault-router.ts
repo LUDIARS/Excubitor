@@ -5,6 +5,7 @@
  *   PUT    /api/v1/vault/entries/:name             { value }  値を登録 / 差し替え
  *   DELETE /api/v1/vault/entries/:name
  *   PUT    /api/v1/vault/bindings/:code            { names }  サービスが使う環境変数
+ *   PUT    /api/v1/vault/overrides/:code           { names }  拠点の上書き: 本社の値より優先する環境変数 (空で外す)
  *   PUT    /api/v1/vault/source                    { peer_id } 拠点: 値を受け取る本社 (null で本社扱い)
  *   POST   /api/v1/vault/import/infisical/:code    Infisical の値を Vault へ移し、紐付けに足す
  *   POST   /api/v1/vault/import/infisical          { dry_run?, environment? } Infisical の全 project を一括で移す
@@ -93,6 +94,16 @@ export function buildVaultRouter(deps: VaultRouterDeps): Hono {
       const project = c.req.query('project');
       if (project !== undefined) deps.vault().setProjectBindings(project, c.req.param('code'), parsed.data.names);
       else deps.vault().setBindings(c.req.param('code'), parsed.data.names);
+      return { ok: true };
+    });
+  });
+
+  app.put('/api/v1/vault/overrides/:code', async (c) => {
+    const parsed = BindingsSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
+    return handle(c, async () => {
+      deps.vault().setOverrides(c.req.param('code'), parsed.data.names);
+      logger.info({ code: c.req.param('code'), names: parsed.data.names }, 'vault site overrides saved');
       return { ok: true };
     });
   });

@@ -19,6 +19,11 @@ const VaultDocSchema = z.object({
   entries: z.record(z.object({ sealed: SealedSchema, updated_at: z.number() })).default({}),
   /** サービスコード → そのサービスが使う変数名 (「使用する環境変数」)。 */
   bindings: z.record(z.array(z.string())).default({}),
+  /**
+   * 拠点: サービスコード → 本社の値より優先する変数名 (拠点の上書き)。値は entries に置く。
+   * 拠点ローカルで本社へは送らない。
+   */
+  overrides: z.record(z.array(z.string())).default({}),
   /** 拠点: 値を受け取る本社のピア id。本社自身は null。 */
   source_peer_id: z.string().nullable().default(null),
   /** 拠点: 本社から受け取った値の控え。本社に届かないときだけ使う。 */
@@ -39,7 +44,7 @@ export function vaultFilePath(dir = vaultDir()): string {
 }
 
 export function emptyVault(): VaultDoc {
-  return { version: 1, entries: {}, bindings: {}, source_peer_id: null, cache: {} };
+  return { version: 1, entries: {}, bindings: {}, overrides: {}, source_peer_id: null, cache: {} };
 }
 
 export function readVault(path = vaultFilePath()): VaultDoc {

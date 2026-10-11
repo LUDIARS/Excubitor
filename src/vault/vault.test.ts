@@ -108,6 +108,71 @@ describe('resolveVaultEnv', () => {
   });
 });
 
+describe('resolveVaultEnv site overrides', () => {
+  const peer = { id: 'hq', name: 'hq', enabled: true } as RemotePeer;
+  const hq = (env: Record<string, string>, missing: string[] = []) =>
+    vi.fn(async () => ({ ok: true, status: 200, data: { env, missing }, error: null }));
+  const offline = vi.fn(async () => ({ ok: false, status: null, data: null, error: 'ECONNREFUSED' }));
+
+  beforeEach(async () => {
+    vault.setSourcePeer('hq');
+    await vault.setEntry('DATABASE_URL', 'postgres://site');
+    vault.setOverrides('cernere', ['DATABASE_URL']);
+  });
+
+  it('lets the site value win over the headquarters value', async () => {
+    const fetch = hq({ DATABASE_URL: 'postgres://hq', OAUTH_SECRET: 'shared-oauth' });
+    expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch }))
+      .toEqual({ DATABASE_URL: 'postgres://site', OAUTH_SECRET: 'shared-oauth' });
+  });
+
+  it('stops with the name when an override value is not registered', async () => {
+    vault.setOverrides('cernere', ['DATABASE_URL', 'FRONTEND_URL']);
+    const fetch = hq({ FRONTEND_URL: 'https://hq', OAUTH_SECRET: 'shared-oauth' });
+    await expect(resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch })).rejects.toThrow(/not set: FRONTEND_URL/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('caches only the headquarters values and overlays the site values on the cache', async () => {
+    await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: hq({ DATABASE_URL: 'postgres://hq', OAUTH_SECRET: 'o' }) });
+    expect((await vault.cachedEnv('cernere'))?.env).toEqual({ DATABASE_URL: 'postgres://hq', OAUTH_SECRET: 'o' });
+    expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: offline }))
+      .toEqual({ DATABASE_URL: 'postgres://site', OAUTH_SECRET: 'o' });
+  });
+
+  it('resolves only the overrides when the headquarters has no binding', async () => {
+    const notBound = vi.fn(async () => ({ ok: false, status: 404, data: { error: 'not_bound' }, error: 'HTTP 404 not_bound' }));
+    expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: notBound })).toEqual({ DATABASE_URL: 'postgres://site' });
+  });
+
+  it('does not stop on a headquarters-missing name that the site overrides', async () => {
+    const fetch = hq({ OAUTH_SECRET: 'o' }, ['DATABASE_URL']);
+    expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch })).toEqual({ DATABASE_URL: 'postgres://site', OAUTH_SECRET: 'o' });
+  });
+
+  it('keeps the all-local behaviour when the service has a local binding', async () => {
+    await vault.setEntry('OAUTH_SECRET', 'local-oauth');
+    vault.setBindings('cernere', ['OAUTH_SECRET']);
+    const fetch = hq({ DATABASE_URL: 'postgres://hq' });
+    expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch })).toEqual({ OAUTH_SECRET: 'local-oauth' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the headquarters values for services without overrides', async () => {
+    const fetch = hq({ DATABASE_URL: 'postgres://hq' });
+    expect(await resolveVaultEnv('actio', { vault, getPeer: () => peer, fetch })).toEqual({ DATABASE_URL: 'postgres://hq' });
+  });
+
+  it('reports override names without values and removes them with an empty list', () => {
+    const status = vault.status();
+    expect(JSON.stringify(status)).not.toContain('postgres://site');
+    expect(status.overrides).toEqual({ cernere: [{ name: 'DATABASE_URL', present: true }] });
+    expect(status.entries).toEqual([{ name: 'DATABASE_URL', updated_at: 1_000, used_by: ['cernere'] }]);
+    vault.setOverrides('cernere', []);
+    expect(vault.status().overrides).toEqual({});
+  });
+});
+
 describe('vault federation route', () => {
   const pass = async (c: { set: (k: 'federationCaller', v: unknown) => void }, next: () => Promise<void>) => {
     c.set('federationCaller', { peerId: 'branch', peerName: 'kaoimac', claimedNode: null });
@@ -165,6 +230,16 @@ describe('vault admin API', () => {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: 'x' }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it('saves site overrides by name and rejects invalid names', async () => {
+    const api = app();
+    const put = (code: string, names: string[]) => api.request(`/api/v1/vault/overrides/${code}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names }),
+    });
+    expect((await put('cernere', ['FRONTEND_URL'])).status).toBe(200);
+    expect(((await (await api.request('/api/v1/vault')).json()) as { overrides: unknown }).overrides).toEqual({ cernere: [{ name: 'FRONTEND_URL', present: false }] });
+    expect((await put('cernere', ['bad-name'])).status).toBe(400);
   });
 
   it('moves Infisical values into the Vault and binds them to the service', async () => {

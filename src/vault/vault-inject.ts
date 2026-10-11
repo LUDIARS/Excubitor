@@ -5,6 +5,8 @@
  * - 拠点 (取得元ピアを設定済み): 本社から受け取り、控えを更新する。本社に届かなければ控えを使う。
  *   控えも無ければ Vault 分は空で進める (Vault を使わないサービスまで本社の停止で止めないため。
  *   必須の変数が欠ければ startup-env の検査で名前付きで止まる)。
+ * - 拠点の上書き (overrides) があれば、本社の値 (または控え) に拠点の値を後勝ちで重ねる。
+ *   上書きの値が未登録なら本社の値へ戻さず起動を止める。控えには本社の値だけを保存する。
  */
 
 import { z } from 'zod';
@@ -36,25 +38,31 @@ export async function resolveVaultEnv(code: string, deps: VaultInjectDeps = {}):
   }
   const sourceId = vault.sourcePeerId();
   if (!sourceId) return {};
+  const site = await vault.overrideEnvFor(code);
+  if (site && site.missing.length > 0) {
+    throw new Error(`service ${code} has site overrides whose Vault values are not set: ${site.missing.join(', ')}`);
+  }
+  const overlay = (base: Record<string, string>) => (site ? { ...base, ...site.env } : base);
   const peer = (deps.getPeer ?? getPeer)(sourceId);
   if (!peer || !peer.enabled) {
     logger.warn({ code, sourceId }, 'vault source peer is not registered or disabled; using cached values if any');
-    return (await vault.cachedEnv(code))?.env ?? {};
+    return overlay((await vault.cachedEnv(code))?.env ?? {});
   }
   const result = await (deps.fetch ?? fetchVaultEnv)(peer, code);
   const body = result.ok ? VaultEnvResponseSchema.safeParse(result.data) : null;
   if (body?.success) {
-    assertComplete(code, body.data.missing);
+    // 拠点が上書きする名前は本社で未登録でも止めない。
+    assertComplete(code, body.data.missing.filter((name) => !(site && name in site.env)));
     await vault.cacheEnv(code, body.data.env);
-    return body.data.env;
+    return overlay(body.data.env);
   }
-  if (result.status === 404) return {}; // 本社で紐付けが無い = Vault を使わないサービス
+  if (result.status === 404) return overlay({}); // 本社で紐付けが無い = Vault を使わないサービス (上書きだけ使う)
   const cached = await vault.cachedEnv(code);
   logger.warn(
     { code, peer: peer.name, error: result.error, cachedAt: cached?.fetched_at ?? null },
     cached ? 'vault source unreachable; using cached values' : 'vault source unreachable and no cached values',
   );
-  return cached?.env ?? {};
+  return overlay(cached?.env ?? {});
 }
 
 function assertComplete(code: string, missing: readonly string[]): void {

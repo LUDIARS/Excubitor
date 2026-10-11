@@ -48,6 +48,7 @@ backendだけの更新では起動時に新しい値が反映されない。CLI�
 |---|---|
 | `entries.<NAME>` | 暗号化した値 (AAD = 変数名。別の名前へ付け替えると復号できない) と更新時刻 |
 | `bindings.<service>` | サービスが使う変数名 (「使用する環境変数」) |
+| `overrides.<service>` | 拠点: 本社の値より優先する変数名 (拠点の上書き)。値は `entries` に置く。本社へは送らない |
 | `source_peer_id` | 拠点: 取得元の本社ピア。本社は null |
 | `cache.<service>` | 拠点: 本社から受け取った値の控え (AAD = `cache:<service>:<NAME>`) |
 
@@ -65,6 +66,21 @@ Vault 内は明示的な共有 binding < プロジェクト binding。同名の�
    残るサービスで Vault 解決が空なら、未移行設定として明示失敗する。Infisical 取得には戻らない。
 4. 必須 env は required_env / infisical.required_env / requires_secret を検証する。
    古い required_env は移行互換の宣言としてのみ読み、identity を要求しない。
+
+### 拠点の上書き (site override) {#SPEC-EX-VAULT-SITE-OVERRIDE}
+
+2026-10-11 neco 指示 (Actio `actio:316e1a81-606d-4cb3-806e-0f3935204365`)。AWS 拠点の Cernere は本社と
+同じ OAuth アプリ (秘密) を使い、`DATABASE_URL` / `REDIS_URL` / `FRONTEND_URL` / `*_REDIRECT_URI` /
+`CERNERE_PUBLIC_URL` だけを拠点固有にする。Vault は catalog env より優先されるため catalog では上書きできない。
+
+- 拠点の `vault.json` の `overrides.<service>` に変数名を並べ、値は共有 `entries` に登録する。拠点ローカルで本社へは送らない。
+- 適用は「ローカル binding が無く `source_peer_id` がある」場合だけ。本社取得値 (取得失敗時は控え、
+  取得元ピアが未登録・無効なら控え) に上書きの値を後勝ちで重ねる。本社 404 (未紐付け) なら上書きの値だけで解決する。
+- 上書きの名前で値が未登録なら、本社の値へ黙って戻さず名前付きで起動を止める (本社へ問い合わせる前に検査する)。
+  本社側で未登録 (`missing`) の名前でも、拠点が上書きしていれば止めない。
+- 控え (`cache`) には本社の値だけを保存し、上書きの値は混ぜない。
+- ローカル binding がある場合 (全値ローカル) と、上書きの無いサービスの挙動は変えない。取得元の無い本社では上書きは使わない。
+- 管理 API・画面・ログは名前だけを扱い、値を出さない。
 
 ### requires_secret の解決 (Vault-only)
 
@@ -91,6 +107,7 @@ secret-agent も同じ resolveVaultEnv を使う。値返却は既存のトー�
 | PUT | `/api/v1/vault/entries/:name` | `{ value }` 登録 / 差し替え |
 | DELETE | `/api/v1/vault/entries/:name` | 削除 (紐付けは残り未登録として表示) |
 | PUT | `/api/v1/vault/bindings/:code` | `{ names }` 使用する環境変数 (空で外す) |
+| PUT | `/api/v1/vault/overrides/:code` | `{ names }` 拠点の上書き (空で外す)。共有Vaultのみ。`GET /api/v1/vault` の `overrides` に名前と登録有無を返す |
 | PUT | `/api/v1/vault/source` | `{ peer_id }` 拠点の取得元 (null で本社) |
 | POST | `/api/v1/vault/import/infisical/:code` | Infisicalのproject IDに対応するVaultへ移して紐付けに足す。同一プロジェクト内の同名異値は `conflicts` とし上書きしない |
 | POST | `/api/v1/vault/import/infisical` | `{ dry_run?, environment? }` Infisical の全 project を一括で移す (下記)。名前と件数だけ返し、値は返さない |

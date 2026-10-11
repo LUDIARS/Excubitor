@@ -5,6 +5,7 @@ export interface VaultStatus {
   source_peer_id: string | null;
   entries: Array<{ name: string; updated_at: number; used_by: string[] }>;
   bindings: Record<string, Array<{ name: string; present: boolean }>>;
+  overrides: Record<string, Array<{ name: string; present: boolean }>>;
   cached_services: Array<{ code: string; fetched_at: number }>;
   projects: Array<{ id: string; name: string; entries: VaultStatus['entries']; bindings: VaultStatus['bindings'] }>;
 }
@@ -30,6 +31,8 @@ export const deleteVaultEntry = (name: string, project?: string) =>
   send<{ ok: true }>('DELETE', `/api/v1/vault/entries/${encodeURIComponent(name)}${scopeQuery(project)}`);
 export const saveVaultBindings = (code: string, names: string[], project?: string) =>
   send<{ ok: true }>('PUT', `/api/v1/vault/bindings/${encodeURIComponent(code)}${scopeQuery(project)}`, { names });
+export const saveVaultOverrides = (code: string, names: string[]) =>
+  send<{ ok: true }>('PUT', `/api/v1/vault/overrides/${encodeURIComponent(code)}`, { names });
 export const saveVaultSource = (peerId: string | null) =>
   send<{ ok: true }>('PUT', '/api/v1/vault/source', { peer_id: peerId });
 export const importVaultFromInfisical = (code: string) =>
