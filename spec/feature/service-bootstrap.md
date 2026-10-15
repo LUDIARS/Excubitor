@@ -39,6 +39,8 @@ The service must provide excubitor.catalog.yaml with matching code/repo/cwd, dis
 
 All three entrypoints must exist inside the checkout before any setup is run. Ex confirms the service is stopped using the existing supervisor. setup runs under Ex's Node executable with checkout cwd, no shell, no sudo, noninteractive. Setup must be idempotent, preserve data/secrets and not launch daemons. Its nonzero exit or 15-minute timeout fails the operation. Output is not persisted because it may contain secrets; scripts own local diagnostic logs. The process and descendants are reaped on timeout.
 
+Every service-owned script (setup, data export, data import) receives the backend env plus the local management endpoint, so scripts that read secrets from the Vault secret agent work on sites whose backend env lacks them: EXCUBITOR_PORT (the backend port, default 17332), EXCUBITOR_URL (always http://127.0.0.1:<port>, since the backend binds loopback only) and EXCUBITOR_AGENT_TOKEN_PATH (kept when already configured, otherwise the token file Ex itself uses). An invalid EXCUBITOR_PORT fails the operation instead of falling back. Implementation: src/bootstrap/hook-env.ts.
+
 After setup, catalog identity is checked again and start uses the supervisor. start:false is the migration preparation mode. Service autostart must remain false during setup/import. No automatic stop or rollback is attempted. Operators must not issue competing lifecycle commands while setup/migration is active; service scripts must protect their own storage against concurrent access.
 
 ### Service-specific manifests

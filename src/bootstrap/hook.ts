@@ -1,14 +1,17 @@
 import { spawn } from 'node:child_process';
 import { killProcessTree } from '../shared/kill-tree.js';
 import { containedFile } from './manifest.js';
+import { bootstrapHookEnv } from './hook-env.js';
+import { agentTokenPath } from '../secrets/agent-token.js';
 
 /** @implements SPEC-SERVICE-BOOTSTRAP */
 export async function runBootstrapHook(root: string, script: string, args: string[]): Promise<void> {
   const path = await containedFile(root, script);
+  const env = bootstrapHookEnv(process.env, agentTokenPath());
   await new Promise<void>((resolve, reject) => {
     // Discard potentially secret output rather than accumulating it in backend memory or operation history.
     const child = spawn(process.execPath, [path, ...args], {
-      cwd: root, shell: false, windowsHide: true, stdio: 'ignore', detached: process.platform !== 'win32',
+      cwd: root, env, shell: false, windowsHide: true, stdio: 'ignore', detached: process.platform !== 'win32',
     });
     let timedOut = false;
     const timer = setTimeout(() => {

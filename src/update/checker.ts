@@ -7,9 +7,9 @@
  */
 
 import { dirname } from 'node:path';
-import { existsSync } from 'node:fs';
 import { createNamedLogger } from '../shared/logger.js';
 import { safeExec } from '../shared/exec.js';
+import { resolveCheckoutRoot } from './checkout-root.js';
 import type { Service, Catalog } from '../catalog/loader.js';
 
 const logger = createNamedLogger('excubitor.update');
@@ -65,10 +65,10 @@ export async function readUpdateDirty(repoDir: string): Promise<boolean | null> 
 }
 
 export async function checkUpdate(svc: Service, fetch = false): Promise<UpdateStatus> {
-  const repoDir = repoDirOf(svc);
-  if (!repoDir) return empty(svc.code, null, 'no_repo');
-  if (!existsSync(repoDir)) return empty(svc.code, repoDir, 'dir_missing');
-  if (!existsSync(`${repoDir}/.git`)) return empty(svc.code, repoDir, 'not_git');
+  // cwd が checkout のサブディレクトリ (例: Cernere/server) でも branch は checkout の root で読む。
+  const checkout = resolveCheckoutRoot(repoDirOf(svc));
+  if (checkout.note) return empty(svc.code, checkout.repoDir, checkout.note);
+  const repoDir = checkout.repoDir;
 
   const branchRaw = await safeExec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], repoDir);
   const branch = branchRaw?.trim() || null;
@@ -121,8 +121,9 @@ export interface CommitInfo {
  * `git log` を機械可読フォーマットで読む。 取得不能 (no_repo 等) は空配列。
  */
 export async function recentCommits(svc: Service, limit = 5): Promise<CommitInfo[]> {
-  const repoDir = repoDirOf(svc);
-  if (!repoDir || !existsSync(repoDir) || !existsSync(`${repoDir}/.git`)) return [];
+  const checkout = resolveCheckoutRoot(repoDirOf(svc));
+  if (checkout.note) return [];
+  const repoDir = checkout.repoDir;
   // 区切りは制御文字 (US=\x1f 行内, RS=\x1e 行間) でメッセージ内の改行/記号と衝突させない。
   const fmt = '%h\x1f%s\x1f%an\x1f%cI\x1f%cr\x1e';
   const out = await safeExec(
@@ -188,13 +189,12 @@ export function parseBranchList(localRaw: string, remoteRaw: string, current: st
  * fetch はしない (最新の remote 反映が要るときは先に update の fetch を回す)。
  */
 export async function branchStatus(svc: Service): Promise<BranchStatus> {
-  const repoDir = repoDirOf(svc);
+  const checkout = resolveCheckoutRoot(repoDirOf(svc));
   const base: BranchStatus = {
-    code: svc.code, repoDir, current: null, dirty: false, ahead: 0, behind: 0, branches: [], note: null,
+    code: svc.code, repoDir: checkout.repoDir, current: null, dirty: false, ahead: 0, behind: 0, branches: [], note: null,
   };
-  if (!repoDir) return { ...base, note: 'no_repo' };
-  if (!existsSync(repoDir)) return { ...base, note: 'dir_missing' };
-  if (!existsSync(`${repoDir}/.git`)) return { ...base, note: 'not_git' };
+  if (checkout.note) return { ...base, note: checkout.note };
+  const repoDir = checkout.repoDir;
 
   const status = await checkUpdate(svc, false);
   const [localRaw, remoteRaw] = await Promise.all([

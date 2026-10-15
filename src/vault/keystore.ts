@@ -72,7 +72,8 @@ class DpapiKeyStore implements KeyStore {
 
   async save(key: Buffer): Promise<void> {
     mkdirSync(join(this.path, '..'), { recursive: true });
-    writeFileSync(this.path, await runDpapi('Protect', key.toString('base64')), 'utf8');
+    // DPAPI で保護済みでも、 FileKeyStore と同じく所有者だけが読める mode で置く。
+    writeFileSync(this.path, await runDpapi('Protect', key.toString('base64')), { encoding: 'utf8', mode: 0o600 });
   }
 }
 
