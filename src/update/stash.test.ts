@@ -19,6 +19,10 @@ async function repository(): Promise<string> {
   await git(root, 'config', 'user.name', 'Stash fixture');
   await git(root, 'config', 'user.email', 'stash@example.invalid');
   await git(root, 'config', 'core.autocrlf', 'false');
+  // Keep the fixture hermetic: a global core.hooksPath would run the developer's hooks on every
+  // fixture commit, which under full-suite load exceeds the git timeout.
+  await git(root, 'config', 'core.hooksPath', join(root, '.git', 'no-hooks'));
+  await git(root, 'config', 'commit.gpgsign', 'false');
   await writeFile(join(root, '.gitignore'), 'ignored.txt\n');
   await writeFile(join(root, 'tracked.txt'), 'original\n');
   await git(root, 'add', '.');

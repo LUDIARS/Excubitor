@@ -3,7 +3,8 @@
  *
  * - 最後に日次要約を送った日と、 その後に配送先ごとに出した出来事の数
  * - 送れなかったメッセージ (次の回の最初に再送する)。 watch は出来事を 1 回しか出さないので、
- *   送信失敗で落とさないためにここへ残す
+ *   送信失敗で落とさないためにここへ残す。 webhook 直送は `outbox`、 Concordia 経由は runId ごとの束を
+ *   `concordia_outbox` に残し、 再送でも同じ runId で送る (Concordia が既に投稿した添字を飛ばす)
  *
  * @implements SPEC-ERGO-WATCH-DELIVERY
  */
@@ -26,12 +27,19 @@ const DeliveryStateSchema = z.object({
     channel: z.enum(['public', 'private']),
     content: z.string(),
   })).default([]),
+  concordia_outbox: z.array(z.object({
+    run_id: z.string().min(1).max(128),
+    messages: z.array(z.object({
+      text: z.string().min(1),
+      private: z.boolean(),
+    })).min(1),
+  })).default([]),
 });
 
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 
 export function emptyDeliveryState(): DeliveryState {
-  return { schema: 1, last_summary_date: null, since_summary: { public: 0, private: 0 }, outbox: [] };
+  return { schema: 1, last_summary_date: null, since_summary: { public: 0, private: 0 }, outbox: [], concordia_outbox: [] };
 }
 
 export function readDeliveryState(stateDir: string): DeliveryState {

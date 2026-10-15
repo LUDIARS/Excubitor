@@ -162,8 +162,9 @@ npm run build
 ## Ergo パッケージ更新の配送
 
 `npm run ergo:watch` は catalog で `ergo_watch` を付けた checkout に `ergo_pkg watch` を走らせ、
-新しい出来事を表示する (`npm run ergo:watch:job` で Discord へ配送)。webhook は暗号化 config にだけ置く
-(`PUT /api/v1/config/notifications/ergo-watch/discord`)。15 分ごとの登録は
+新しい出来事を表示する (`npm run ergo:watch:job` で配送)。配送先は `excubitor.config.yaml` の
+`ergo_watch.delivery` で、既定の `concordia` は Concordia 経由でデプロイ通知チャンネルへ、`discord` は webhook へ直送
+(webhook は暗号化 config にだけ置く: `PUT /api/v1/config/notifications/ergo-watch/discord`)。15 分ごとの登録は
 `.\scripts\install-ergo-watch-task.ps1`。詳細は
 [`spec/feature/ergo-watch-delivery.md`](spec/feature/ergo-watch-delivery.md)。
 

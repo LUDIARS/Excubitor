@@ -19,6 +19,11 @@ const ErgoWatchConfigSchema = z.object({
     (value) => !SHELL_META_PATTERN.test(value),
     'ergo_pkg must not contain shell metacharacters',
   ).default('ergo_pkg'),
+  /**
+   * 配送先。 concordia は Concordia の `/v1/events/package-updates` 経由でデプロイ通知チャンネルへ、
+   * discord は暗号化 config の webhook へ直送。
+   */
+  delivery: z.enum(['concordia', 'discord']).default('concordia'),
   /** URL を catalog から引くサービス code。 */
   revisor_service: z.string().min(1).default('revisor'),
   concordia_service: z.string().min(1).default('concordia'),

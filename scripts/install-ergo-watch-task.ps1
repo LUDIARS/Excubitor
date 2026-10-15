@@ -47,7 +47,7 @@ Register-ScheduledTask `
   -Trigger $trigger `
   -Principal $principal `
   -Settings $settings `
-  -Description 'Excubitor: run ergo_pkg watch for catalog checkouts with ergo_watch and deliver new events to Discord.' `
+  -Description 'Excubitor: run ergo_pkg watch for catalog checkouts with ergo_watch and deliver new events (via Concordia or a Discord webhook).' `
   -Force
 
 Write-Output "Registered $TaskName every $IntervalMinutes minutes. The task is not started by this installer."

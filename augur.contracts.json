@@ -18,6 +18,8 @@
     {"id": "C-15", "criterion": "C-15 formatRunText(eventCount, messages): 出来事 0 件の回は「新規なし」を返す", "symbol": "formatRunText", "file": "src/update/ergo-watch/summary-format.ts", "module": "src/update/ergo-watch/contracts/run-text.contract.ts"},
     {"id": "C-16", "criterion": "C-16 packDiscordMessages(blocks): どのメッセージも上限以下で、空白を除いた内容を落とさない", "symbol": "packDiscordMessages", "file": "src/notify/discord-messages.ts", "module": "src/update/ergo-watch/contracts/pack-messages.contract.ts"},
     {"id": "C-17", "criterion": "C-17 routeEvents(events, privacy): 非公開ホスト・非公開依存・対応付かないホストの出来事を public に入れない", "symbol": "routeEvents", "file": "src/update/ergo-watch/routing.ts", "module": "src/update/ergo-watch/contracts/route-events.contract.ts"},
-    {"id": "C-18", "criterion": "C-18 buildWatchArgs(input): Revisor / Concordia は loopback の URL だけを渡し、全てのホストを --host に並べる", "symbol": "buildWatchArgs", "file": "src/update/ergo-watch/watch-args.ts", "module": "src/update/ergo-watch/contracts/watch-args.contract.ts"}
+    {"id": "C-18", "criterion": "C-18 buildWatchArgs(input): Revisor / Concordia は loopback の URL だけを渡し、全てのホストを --host に並べる", "symbol": "buildWatchArgs", "file": "src/update/ergo-watch/watch-args.ts", "module": "src/update/ergo-watch/contracts/watch-args.contract.ts"},
+    {"id": "C-19", "criterion": "C-19 buildPackageUpdateBatches(runId, messages): どの束も 1〜20 件・本文 1〜1,900 字・runId 1〜128 字で、束を並べると元の本文と private を順序どおりに保つ", "symbol": "buildPackageUpdateBatches", "file": "src/update/ergo-watch/concordia-batches.ts", "module": "src/update/ergo-watch/contracts/package-update-batches.contract.ts"},
+    {"id": "C-20", "criterion": "C-20 queueConcordiaBatches(state, runId, messages): 前回送れなかった束を runId を変えずに先頭へ置き、0 件の回は新しい束を作らない", "symbol": "queueConcordiaBatches", "file": "src/update/ergo-watch/concordia-batches.ts", "module": "src/update/ergo-watch/contracts/queue-batches.contract.ts"}
   ]
 }

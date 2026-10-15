@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { concordiaHeaders, concordiaTimeoutMs, concordiaUrl } from '../notify/concordia-endpoint.js';
 import { createNamedLogger } from '../shared/logger.js';
 
 const logger = createNamedLogger('excubitor.deployed_dispatch');
@@ -35,7 +36,7 @@ export async function dispatchServiceDeployment(input: ServiceDeployedInput): Pr
   try {
     const response = await fetch(concordiaUrl('/v1/events/service-deployed'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: concordiaHeaders(),
       body: JSON.stringify({
         code: input.code,
         previousHash: previous.git_hash,
@@ -44,7 +45,7 @@ export async function dispatchServiceDeployment(input: ServiceDeployedInput): Pr
         startedAt: input.startedAt.toISOString(),
         restartCount: input.restartCount,
       }),
-      signal: AbortSignal.timeout(resolveTimeoutMs()),
+      signal: AbortSignal.timeout(concordiaTimeoutMs()),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return 'dispatched';
@@ -52,14 +53,4 @@ export async function dispatchServiceDeployment(input: ServiceDeployedInput): Pr
     logger.warn({ code: input.code, err: (err as Error).message }, 'service deployment dispatch failed');
     return 'failed';
   }
-}
-
-function concordiaUrl(path: string): string {
-  const base = process.env.EXCUBITOR_CONCORDIA_URL || 'http://127.0.0.1:11111';
-  return new URL(path, base.endsWith('/') ? base : `${base}/`).toString();
-}
-
-function resolveTimeoutMs(): number {
-  const raw = Number(process.env.EXCUBITOR_CONCORDIA_TIMEOUT_MS ?? '10000');
-  return Number.isFinite(raw) && raw > 0 ? raw : 10000;
 }

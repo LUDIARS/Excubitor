@@ -1,7 +1,9 @@
 /**
  * Ergo パッケージ更新の配送ジョブの入口 (Task Scheduler / cron から 15 分ごとに 1 回起動)。
  *
- * `--discord` で暗号化 config の webhook へ配送する。 無ければ本文を表示するだけで状態を書かない。
+ * `--deliver` で配送する (送り先は `ergo_watch.delivery`: 既定 concordia は Concordia 経由でデプロイ通知チャンネルへ、
+ * discord は暗号化 config の webhook へ直送)。 無ければ本文を表示するだけで状態を書かない。
+ * `--discord` は `--deliver` の旧名として残す。
  *
  * @implements SPEC-ERGO-WATCH-DELIVERY
  */
@@ -12,12 +14,12 @@ import { loadCatalog } from '../../catalog/loader.js';
 import { DEFAULT_RUNTIME_CONFIG_PATH } from '../../catalog/runtime-config.js';
 import { getErgoWatchDiscordConfig } from '../../secrets/config-store.js';
 import { loadErgoWatchConfig } from './config.js';
-import { runErgoWatchJob } from './job.js';
+import { runErgoWatchJob, type JobDelivery } from './job.js';
 
 interface CliOptions {
   configPath: string;
   stateDir: string;
-  discord: boolean;
+  deliver: boolean;
   json: boolean;
 }
 
@@ -30,7 +32,7 @@ async function main(argv: string[]): Promise<void> {
     config,
     stateDir: options.stateDir,
     now: new Date(),
-    webhooks: options.discord ? requireWebhooks() : null,
+    delivery: options.deliver ? resolveDelivery(config.delivery) : null,
   });
 
   if (options.json) {
@@ -39,9 +41,11 @@ async function main(argv: string[]): Promise<void> {
       hosts: result.hosts,
       events: result.events,
       messages: result.messages.length,
+      delivery: result.delivery?.mode ?? null,
+      run_id: result.delivery?.runId ?? null,
       sent: result.delivery?.sent ?? 0,
       withheld: result.delivery?.withheld ?? 0,
-      unsent: result.delivery?.unsent.length ?? 0,
+      unsent: result.delivery?.unsent ?? 0,
       issues: result.issues,
       error: result.error,
     }, null, 2)}\n`);
@@ -51,6 +55,10 @@ async function main(argv: string[]): Promise<void> {
   for (const issue of result.issues) process.stderr.write(`ergo watch: ${issue.service}: ${issue.message}\n`);
   if (result.error) process.stderr.write(`ergo watch: ${result.error}\n`);
   if (!result.ok) process.exitCode = 1;
+}
+
+function resolveDelivery(mode: 'concordia' | 'discord'): JobDelivery {
+  return mode === 'discord' ? { mode, webhooks: requireWebhooks() } : { mode };
 }
 
 function requireWebhooks(): { public: string; private: string } {
@@ -65,12 +73,12 @@ function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     configPath: DEFAULT_RUNTIME_CONFIG_PATH,
     stateDir: resolve(process.cwd(), 'data', 'ergo-watch'),
-    discord: false,
+    deliver: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--discord') options.discord = true;
+    if (argument === '--deliver' || argument === '--discord') options.deliver = true;
     else if (argument === '--json') options.json = true;
     else if (argument === '--config') options.configPath = requiredValue(argv, ++index, argument);
     else if (argument === '--state') options.stateDir = resolve(requiredValue(argv, ++index, argument));

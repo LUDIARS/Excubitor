@@ -23,7 +23,7 @@ $logPath = Join-Path $logDirectory ("{0}.log" -f (Get-Date -Format 'yyyy-MM-dd')
 
 Push-Location $repoRoot
 try {
-  $output = & $node.Source $cliPath '--discord' '--json' 2>&1
+  $output = & $node.Source $cliPath '--deliver' '--json' 2>&1
   $exitCode = $LASTEXITCODE
   $output | Out-File -LiteralPath $logPath -Encoding utf8 -Append
   $output

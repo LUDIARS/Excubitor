@@ -94,6 +94,9 @@ ergo_watch:
   # ergo_watch: true を付けたサービスの checkout。webhook はここに置かない (暗号化 config だけ)。
   # ergo_pkg は PATH 上のもの。別の場所なら "${ARS_ROOT}/..." で書く。
   ergo_pkg: ergo_pkg
+  # 配送先。concordia (既定) は Concordia の /v1/events/package-updates 経由でデプロイ通知チャンネルへ、
+  # discord は暗号化 config の webhook へ直送。
+  delivery: concordia
   # Revisor / Concordia の URL は catalog のこのサービスの port から loopback で作る。
   revisor_service: revisor
   concordia_service: concordia
