@@ -159,6 +159,14 @@ npm run build
 .\scripts\install-package-audit-task.ps1 -At 09:00
 ```
 
+## Ergo パッケージ更新の配送
+
+`npm run ergo:watch` は catalog で `ergo_watch` を付けた checkout に `ergo_pkg watch` を走らせ、
+新しい出来事を表示する (`npm run ergo:watch:job` で Discord へ配送)。webhook は暗号化 config にだけ置く
+(`PUT /api/v1/config/notifications/ergo-watch/discord`)。15 分ごとの登録は
+`.\scripts\install-ergo-watch-task.ps1`。詳細は
+[`spec/feature/ergo-watch-delivery.md`](spec/feature/ergo-watch-delivery.md)。
+
 ## ラテン語の名前
 
 **Excubitor** — ラテン語で「見張り」「警備兵」。ローマ皇宮警備隊 Excubitores の単数形。

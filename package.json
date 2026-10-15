@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit",
     "packages:audit": "tsx src/update/package-audit/cli.ts",
     "packages:audit:daily": "node dist/update/package-audit/cli.js --discord --json",
+    "ergo:watch": "tsx src/update/ergo-watch/cli.ts",
+    "ergo:watch:job": "node dist/update/ergo-watch/cli.js --discord --json",
     "release": "tsx src/release/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
     "test": "vitest run --pool=forks",

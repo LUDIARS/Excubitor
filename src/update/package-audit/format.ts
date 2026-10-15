@@ -4,6 +4,7 @@
  * @implements SPEC-PACKAGE-UPDATE-AUDIT
  */
 
+import { escapeDiscord, packDiscordMessages } from '../../notify/discord-messages.js';
 import type { PackageAuditReport, PackageUpdate, PackageVulnerability } from './types.js';
 
 const CATEGORY_LABEL = {
@@ -12,45 +13,12 @@ const CATEGORY_LABEL = {
   native: 'ネイティブ/再ビルド要',
 } as const;
 
-const DISCORD_MESSAGE_LIMIT = 1_900;
-
 export function formatPackageAuditText(report: PackageAuditReport): string {
   return reportLines(report).join('\n');
 }
 
 export function formatPackageAuditDiscordMessages(report: PackageAuditReport): string[] {
-  const messages: string[] = [];
-  let current = '';
-  for (const unsplitBlock of reportBlocks(report)) {
-    for (const block of splitDiscordBlock(unsplitBlock)) {
-      if (!current) {
-        current = block;
-        continue;
-      }
-      if (`${current}\n\n${block}`.length <= DISCORD_MESSAGE_LIMIT) {
-        current = `${current}\n\n${block}`;
-      } else {
-        messages.push(current);
-        current = block;
-      }
-    }
-  }
-  if (current) messages.push(current);
-  return messages;
-}
-
-function splitDiscordBlock(block: string): string[] {
-  const chunks: string[] = [];
-  let remaining = block;
-  while (remaining.length > DISCORD_MESSAGE_LIMIT) {
-    let splitAt = remaining.lastIndexOf('\n', DISCORD_MESSAGE_LIMIT + 1);
-    if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', DISCORD_MESSAGE_LIMIT + 1);
-    if (splitAt <= 0) splitAt = DISCORD_MESSAGE_LIMIT;
-    chunks.push(remaining.slice(0, splitAt).trimEnd());
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  if (remaining) chunks.push(remaining);
-  return chunks;
+  return packDiscordMessages(reportBlocks(report));
 }
 
 function reportLines(report: PackageAuditReport): string[] {
@@ -136,10 +104,6 @@ function vulnerabilityBlock(vulnerability: PackageVulnerability): string {
   if (title) lines.push(`  ${truncate(title, 240)}`);
   if (url) lines.push(`  ${url}`);
   return lines.join('\n');
-}
-
-function escapeDiscord(value: string): string {
-  return value.replace(/([\\`*_{}\[\]()<>#+\-.!|])/g, '\\$1');
 }
 
 function truncate(value: string, max: number): string {

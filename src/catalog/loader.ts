@@ -255,6 +255,15 @@ const ServiceSchema = z.object({
    */
   uses_corpus: z.boolean().optional(),
   /**
+   * Ergo のパッケージ更新監視 (`ergo_pkg watch`) の対象にするか。 cwd を含む checkout の root を
+   * `--host` に並べる。 `{ private: true }` は非公開ホストで、 出来事を非公開用 webhook にだけ送る。
+   * 詳細 spec/feature/ergo-watch-delivery.md。
+   */
+  ergo_watch: z.union([
+    z.boolean(),
+    z.object({ private: z.boolean().default(false) }),
+  ]).optional(),
+  /**
    * runtime=app の更新適用 (update apply) で git ff の後に走らせるビルドコマンド。
    * node の `npm install` 相当。 例: 'cargo build --release' / 'npm run build'。
    * 省略時はビルドせず取り込みのみ。

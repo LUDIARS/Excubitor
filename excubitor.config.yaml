@@ -88,3 +88,14 @@ package_audit:
       workspace_package: "${ARS_ROOT}/Anatomia/package.json"
       version_args: ["--version"]
       required: true
+
+ergo_watch:
+  # Ergo のパッケージ更新監視 (spec/feature/ergo-watch-delivery.md)。対象は catalog で
+  # ergo_watch: true を付けたサービスの checkout。webhook はここに置かない (暗号化 config だけ)。
+  # ergo_pkg は PATH 上のもの。別の場所なら "${ARS_ROOT}/..." で書く。
+  ergo_pkg: ergo_pkg
+  # Revisor / Concordia の URL は catalog のこのサービスの port から loopback で作る。
+  revisor_service: revisor
+  concordia_service: concordia
+  # 日次要約を送る時 (ローカル時刻)。
+  summary_hour: 9

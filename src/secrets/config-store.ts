@@ -61,6 +61,7 @@ interface ExcubitorConfig {
     notifications?: {
       discord?: DiscordNotificationConfig;
       packageAuditDiscord?: PackageAuditDiscordConfig;
+      ergoWatchDiscord?: ErgoWatchDiscordConfig;
     };
   };
 }
@@ -109,6 +110,31 @@ export interface PackageAuditDiscordInput {
   webhookUrl?: string;
   enabled: boolean;
   clearWebhook?: boolean;
+}
+
+/**
+ * Ergo パッケージ更新の配送先。 公開ホスト用と非公開ホスト用の 2 本を暗号化 config にだけ持つ
+ * (env では受けない)。 未設定の webhook には送らない。
+ */
+export interface ErgoWatchDiscordConfig {
+  webhookUrl: string;
+  privateWebhookUrl: string;
+  enabled: boolean;
+}
+
+export interface ErgoWatchDiscordStatus {
+  configured: boolean;
+  private_configured: boolean;
+  enabled: boolean;
+  storePath: string;
+}
+
+export interface ErgoWatchDiscordInput {
+  webhookUrl?: string;
+  privateWebhookUrl?: string;
+  enabled: boolean;
+  clearWebhook?: boolean;
+  clearPrivateWebhook?: boolean;
 }
 
 export type ServiceRuntimeConfig = Record<string, unknown>;
@@ -479,6 +505,59 @@ export function savePackageAuditDiscordConfig(
   writeConfig(cfg);
   logger.info({ enabled: packageAuditDiscord.enabled }, 'saved package audit Discord notification settings');
   return getPackageAuditDiscordStatus();
+}
+
+/**
+ * Ergo パッケージ更新の配送先 webhook。 値は暗号化 config にだけ置き、 API・ログへ返さない。
+ *
+ * @implements SPEC-ERGO-WATCH-DELIVERY
+ */
+export function getErgoWatchDiscordConfig(): ErgoWatchDiscordConfig | null {
+  const stored = readConfig().settings?.notifications?.ergoWatchDiscord;
+  if (!stored) return null;
+  return {
+    webhookUrl: stored.webhookUrl ? normalizeDiscordWebhookUrl(stored.webhookUrl) : '',
+    privateWebhookUrl: stored.privateWebhookUrl ? normalizeDiscordWebhookUrl(stored.privateWebhookUrl) : '',
+    enabled: stored.enabled,
+  };
+}
+
+/** @implements SPEC-ERGO-WATCH-DELIVERY */
+export function getErgoWatchDiscordStatus(): ErgoWatchDiscordStatus {
+  const config = getErgoWatchDiscordConfig();
+  return {
+    configured: Boolean(config?.webhookUrl),
+    private_configured: Boolean(config?.privateWebhookUrl),
+    enabled: config?.enabled ?? false,
+    storePath: configPath(),
+  };
+}
+
+/** @implements SPEC-ERGO-WATCH-DELIVERY */
+export function saveErgoWatchDiscordConfig(input: ErgoWatchDiscordInput): ErgoWatchDiscordStatus {
+  const cfg = readConfig();
+  const current = cfg.settings?.notifications?.ergoWatchDiscord;
+  const pick = (clear: boolean | undefined, next: string | undefined, prev: string | undefined): string => (
+    clear ? '' : next?.trim() ? normalizeDiscordWebhookUrl(next) : prev ?? ''
+  );
+  const ergoWatchDiscord: ErgoWatchDiscordConfig = {
+    webhookUrl: pick(input.clearWebhook, input.webhookUrl, current?.webhookUrl),
+    privateWebhookUrl: pick(input.clearPrivateWebhook, input.privateWebhookUrl, current?.privateWebhookUrl),
+    enabled: input.enabled,
+  };
+  if (ergoWatchDiscord.enabled && !ergoWatchDiscord.webhookUrl) {
+    throw new Error('Ergo watch Discord webhook URL is required when notifications are enabled');
+  }
+  cfg.settings = {
+    ...(cfg.settings ?? {}),
+    notifications: {
+      ...(cfg.settings?.notifications ?? {}),
+      ergoWatchDiscord,
+    },
+  };
+  writeConfig(cfg);
+  logger.info({ enabled: ergoWatchDiscord.enabled }, 'saved Ergo watch Discord notification settings');
+  return getErgoWatchDiscordStatus();
 }
 
 function normalizeDowntimeThreshold(value: number | undefined): number {

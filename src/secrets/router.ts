@@ -24,8 +24,10 @@ import {
   saveDiscordNotificationConfig,
   saveServiceRuntimeConfig,
   ServiceRuntimeConfigValidationError,
+  getErgoWatchDiscordStatus,
   getPackageAuditDiscordConfig,
   getPackageAuditDiscordStatus,
+  saveErgoWatchDiscordConfig,
   savePackageAuditDiscordConfig,
   getCfTunnelStatus,
   saveCfTunnelSettings,
@@ -80,6 +82,14 @@ const PackageAuditNotificationSchema = z.object({
   clear_webhook: z.boolean().optional(),
 });
 
+const ErgoWatchNotificationSchema = z.object({
+  webhook_url: z.string().optional(),
+  private_webhook_url: z.string().optional(),
+  enabled: z.boolean(),
+  clear_webhook: z.boolean().optional(),
+  clear_private_webhook: z.boolean().optional(),
+});
+
 const RuntimeConfigSchema = z.object({
   config: z.record(z.unknown()).nullable(),
 });
@@ -115,6 +125,7 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     c.json({
       discord: getDiscordNotificationStatus(),
       package_audit_discord: getPackageAuditDiscordStatus(),
+      ergo_watch_discord: getErgoWatchDiscordStatus(),
     }),
   );
 
@@ -229,6 +240,25 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
       return c.json({ ok: true, message: 'Package audit Discord webhook test succeeded' });
     } catch (err) {
       return c.json({ ok: false, message: (err as Error).message }, 502);
+    }
+  });
+
+  /** @implements SPEC-ERGO-WATCH-DELIVERY */
+  app.put('/api/v1/config/notifications/ergo-watch/discord', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = ErgoWatchNotificationSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
+    try {
+      const discord = saveErgoWatchDiscordConfig({
+        webhookUrl: parsed.data.webhook_url,
+        privateWebhookUrl: parsed.data.private_webhook_url,
+        enabled: parsed.data.enabled,
+        clearWebhook: parsed.data.clear_webhook,
+        clearPrivateWebhook: parsed.data.clear_private_webhook,
+      });
+      return c.json({ ok: true, discord });
+    } catch (err) {
+      return c.json({ error: 'invalid_discord_webhook', message: (err as Error).message }, 400);
     }
   });
 
