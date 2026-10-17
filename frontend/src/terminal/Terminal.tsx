@@ -6,6 +6,7 @@ import './terminal.css';
 /** @implements SPEC-TERMINAL-CONNECTIONS */
 export default function Terminal() {
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
+  const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState<TerminalProfile | 'new' | null>(null);
   const [selected, setSelected] = useState('');
   const [command, setCommand] = useState('');
@@ -26,10 +27,18 @@ export default function Terminal() {
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const remove = async (profile: TerminalProfile) => {
-    if (!window.confirm(`${profile.serverName} の接続設定を削除しますか？ Vaultの認証情報は残ります。`)) return;
+    if (!window.confirm(`${profile.serverName} の接続設定と専用の認証情報を削除しますか？`)) return;
     setError('');
     try { await terminalRequest(`/profiles/${profile.id}`, 'DELETE'); if (selected === profile.id) setSelected(''); await reload(); }
     catch (e) { setError((e as Error).message); }
+  };
+  const importLegacy = async (profile: TerminalProfile) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await terminalRequest<{ imported: number; preserved: number }>(`/profiles/${profile.id}/import-vault`, 'POST');
+      setNotice(`${result.imported}件を取り込みました。専用保存先の既存情報と、Vault側の元の情報は変更していません。`);
+      await reload();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   return <section className="terminal-page">
     <h2>ターミナル接続</h2>
@@ -40,6 +49,8 @@ export default function Terminal() {
     <ul>{profiles.map((p) => <li key={p.id}>
       <strong>{p.serverName}</strong> — {p.host}:{p.port} / {p.network === 'private' ? 'LAN・VPN' : '外部'} / {p.auth === 'password' ? 'パスワード' : 'SSH鍵'}
       {' '}<button disabled={busy} onClick={() => setEditing(p)}>編集</button>{' '}<button disabled={busy} onClick={() => void remove(p)}>削除</button>
+      <details><summary>旧方式からの引き継ぎ</summary><p>この接続先を以前Vaultに保存した場合は、元の情報を残して専用の保存先へ取り込めます。</p>
+        <button disabled={busy} onClick={() => void importLegacy(p)}>旧Vaultから取り込む</button></details>
     </li>)}</ul>
     <h3>コマンドを実行</h3>
     <p>1回ずつ実行します。cdなどの状態は次の実行には引き継がれません。対話入力が必要なコマンドは使えません。</p>
@@ -50,6 +61,7 @@ export default function Terminal() {
       <label>コマンド<textarea required disabled={busy} maxLength={16384} value={command} onChange={(e) => setCommand(e.target.value)} /></label>
       <button disabled={busy || !selected || !command}>{busy ? '実行中…' : '実行'}</button>
     </form>
+    {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{error}</p>}
     {result && <div aria-live="polite"><p>終了コード: {result.exitCode ?? 'なし'} {result.signal}</p><pre>{result.stdout}</pre><pre>{result.stderr}</pre></div>}
   </section>;

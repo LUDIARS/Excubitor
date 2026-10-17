@@ -1,4 +1,5 @@
-import { sharedVault, type Vault } from '../vault/vault.js';
+import type { Vault } from '../vault/vault.js';
+import { terminalCredentialStore, writeCredentials } from './credential-store.js';
 import { TerminalError, type CredentialsInput, type TerminalProfile } from './schema.js';
 
 /** @implements SPEC-TERMINAL-CONNECTIONS */
@@ -7,15 +8,26 @@ export function credentialNames(id: string): Record<keyof Required<CredentialsIn
   return { username: `${prefix}_USERNAME`, password: `${prefix}_PASSWORD`, privateKey: `${prefix}_PRIVATE_KEY`, passphrase: `${prefix}_PASSPHRASE` };
 }
 
-export async function saveCredentials(id: string, input: CredentialsInput, vault: Vault = sharedVault()): Promise<void> {
+/** @implements SPEC-TERMINAL-CONNECTIONS */
+export async function saveCredentials(id: string, input: CredentialsInput, vault: Vault = terminalCredentialStore()): Promise<void> {
   const names = credentialNames(id);
-  for (const key of Object.keys(input) as Array<keyof CredentialsInput>) {
-    const value = input[key];
-    if (value !== undefined) await vault.setEntry(names[key], value);
-  }
+  await writeCredentials(vault, async () => {
+    for (const key of Object.keys(input) as Array<keyof CredentialsInput>) {
+      const value = input[key];
+      if (value !== undefined) await vault.setEntry(names[key], value);
+    }
+  });
 }
 
-export async function resolveCredentials(profile: TerminalProfile, vault: Pick<Vault, 'valuesOf'> = sharedVault()): Promise<CredentialsInput & { username: string }> {
+/** @implements SPEC-TERMINAL-CONNECTIONS */
+export async function removeCredentials(id: string, vault: Vault = terminalCredentialStore()): Promise<void> {
+  await writeCredentials(vault, () => {
+    for (const name of Object.values(credentialNames(id))) vault.deleteEntry(name);
+  });
+}
+
+/** @implements SPEC-TERMINAL-CONNECTIONS */
+export async function resolveCredentials(profile: TerminalProfile, vault: Pick<Vault, 'valuesOf'> = terminalCredentialStore()): Promise<CredentialsInput & { username: string }> {
   const names = credentialNames(profile.id);
   const keys = profile.auth === 'password' ? [names.username, names.password] : [names.username, names.privateKey, names.passphrase];
   const values = await vault.valuesOf(keys);

@@ -1,10 +1,10 @@
 {
   "name": "terminal-connections",
-  "description": "Vault-backed SSH connection profiles, private-network authentication policy and bounded remote command execution.",
+  "description": "SSH connection profiles with an independent encrypted credential store, private-network authentication policy and bounded remote command execution.",
   "presetRules": [],
   "templateRules": [],
   "membership": [{ "pathPattern": "(^|/)src/terminal/" }],
-  "cardTemplate": "Summarise the terminal-connections boundary: profile metadata, Vault credentials, DNS pinning, host key verification and SSH channel lifetime.",
+  "cardTemplate": "Summarise the terminal-connections boundary: profile metadata, independent credentials using Vault encryption, explicit legacy import, DNS pinning, host key verification and SSH channel lifetime.",
   "specRefs": ["spec/feature/terminal-connections.md#SPEC-TERMINAL-CONNECTIONS"],
   "rationale": "Remote terminal access has its own credential, target validation and resource lifetime contract; it does not own service supervision."
 }

@@ -5,7 +5,10 @@ import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
 import { CredentialsSchema, ProfileSchema, TargetSchema, TerminalError } from './schema.js';
 import { TerminalProfileStore } from './profile-store.js';
-import { credentialNames, saveCredentials } from './credentials.js';
+import { removeCredentials, saveCredentials } from './credentials.js';
+import { terminalCredentialStore } from './credential-store.js';
+import { importLegacyCredentials } from './legacy-credentials.js';
+import { sharedVault } from '../vault/vault.js';
 import { executeTerminalCommand, inspectHostKey } from './transport.js';
 import { resolveTerminalAddress } from './network-policy.js';
 import { isLocalTerminalRequest } from './request-policy.js';
@@ -15,7 +18,7 @@ const logger = createNamedLogger('excubitor.terminal');
 const CommandSchema = z.object({ command: z.string().min(1).max(16384).refine((s) => !s.includes('\0')),
   timeoutMs: z.number().int().min(1000).max(120000).default(30000) }).strict();
 
-export function buildTerminalRouter(store = new TerminalProfileStore()): Hono {
+export function buildTerminalRouter(store = new TerminalProfileStore(), credentials = terminalCredentialStore(), legacy = sharedVault): Hono {
   const app = new Hono();
   let running = 0;
   // This is a local operator surface, never mounted on the federation or DMZ listeners.
@@ -33,19 +36,26 @@ export function buildTerminalRouter(store = new TerminalProfileStore()): Hono {
     return c.json({ error: code }, 400);
   });
   app.use('/api/v1/terminal/*', bodyLimit({ maxSize: 300_000 }));
-  app.get('/api/v1/terminal/profiles', (c) => c.json({ profiles: store.list().map((p) => ({ ...p, credentialNames: credentialNames(p.id) })) }));
+  app.get('/api/v1/terminal/profiles', (c) => c.json({ profiles: store.list() }));
   app.put('/api/v1/terminal/profiles/:id', async (c) => {
     const parsed = z.object({ profile: ProfileSchema, credentials: CredentialsSchema.optional() }).strict().safeParse(await c.req.json());
     if (!parsed.success || parsed.data.profile.id !== c.req.param('id')) return c.json({ error: 'invalid_profile' }, 400);
     await resolveTerminalAddress(parsed.data.profile);
-    if (parsed.data.credentials) await saveCredentials(parsed.data.profile.id, parsed.data.credentials);
+    if (parsed.data.credentials) await saveCredentials(parsed.data.profile.id, parsed.data.credentials, credentials);
     store.put(parsed.data.profile);
     return c.json({ ok: true });
   });
-  app.delete('/api/v1/terminal/profiles/:id', (c) => {
-    store.remove(c.req.param('id'));
-    // Retain Vault entries: deletion of a profile must not silently destroy reusable credentials.
-    return c.json({ ok: true, credentialsRetained: true });
+  app.delete('/api/v1/terminal/profiles/:id', /** @implements SPEC-TERMINAL-CONNECTIONS */ async (c) => {
+    const profile = store.get(c.req.param('id'));
+    if (!profile) return c.json({ error: 'profile_not_found' }, 404);
+    await removeCredentials(profile.id, credentials);
+    store.remove(profile.id);
+    return c.json({ ok: true });
+  });
+  app.post('/api/v1/terminal/profiles/:id/import-vault', /** @implements SPEC-TERMINAL-CONNECTIONS */ async (c) => {
+    const profile = store.get(c.req.param('id'));
+    if (!profile) return c.json({ error: 'profile_not_found' }, 404);
+    return c.json(await importLegacyCredentials(profile.id, credentials, legacy()));
   });
   app.post('/api/v1/terminal/inspect', async (c) => {
     const parsed = TargetSchema.safeParse(await c.req.json());

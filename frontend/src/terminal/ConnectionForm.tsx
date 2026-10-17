@@ -42,7 +42,7 @@ export default function ConnectionForm({ initial, onSaved, onCancel }: {
       <label>認証方式<select value={profile.auth} onChange={(e) => changeTarget({ auth: e.target.value as TerminalProfile['auth'] })}>
         {profile.network === 'private' && <option value="password">パスワード</option>}<option value="key">SSH鍵</option>
       </select></label>
-      <p>どちらもSSHの暗号化通信です。認証情報はVaultに保存します。編集時の空欄は登録済みの値を維持します。</p>
+      <p>どちらもSSHの暗号化通信です。認証情報は接続専用の保存先で暗号化して保管します。編集時の空欄は登録済みの値を維持します。</p>
       <label>ログイン名<input autoComplete="off" required={!initial} value={credentials.username ?? ''} onChange={(e) => credential('username', e.target.value)} /></label>
       {profile.auth === 'password'
         ? <label>パスワード<input type="password" autoComplete="new-password" required={!initial || initial.auth !== 'password'} value={credentials.password ?? ''} onChange={(e) => credential('password', e.target.value)} /></label>

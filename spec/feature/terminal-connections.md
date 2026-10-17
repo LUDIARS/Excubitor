@@ -15,15 +15,30 @@ operations remain the supported path for service lifecycle actions.
 
 ### Persistence and secrets
 
+2026-10-17 neco revision: connection settings use the same protection mechanism as Vault,
+but are stored independently of the environment-variable Vault.
+
 `terminal-connections.json` next to Vault stores only validated version-1 profile metadata.
-Writes use a temporary file and rename. Credential values are stored using the existing shared
-Vault encryption and OS-protected key; names are scoped to the profile UUID:
+Writes use a temporary file and rename. Credential values reuse the Vault encryption implementation
+in a dedicated `terminal-credentials/vault.json` document with its own OS-protected key in that directory.
+The dedicated store is not a registered Vault project: environment listings, bindings, service injection
+and federation distribution cannot discover its values. Names remain scoped to the profile UUID:
 `TERMINAL_<UUID without hyphens, uppercase>_{USERNAME,PASSWORD,PRIVATE_KEY,PASSPHRASE}`.
 Only the selected authentication method is resolved. No agent, keyboard-interactive or password
 fallback is enabled. Empty UI fields preserve existing credentials; the API can clear the key
-passphrase with an explicit empty string. Profile deletion retains Vault entries, explicitly reported
-in the UI/API; operators can remove retained entries in the Vault tab. Values are never returned by
+passphrase with an explicit empty string. Profile deletion removes dedicated credentials for that
+profile after the UI confirms both will be removed. Values are never returned by
 profile reads, or written to command-line arguments, profile files, request logs or SSH error logs.
+
+Existing metadata remains readable without relocation. Legacy shared Vault credentials are not a
+runtime fallback: users explicitly import them per registered profile in the terminal UI. Import only
+reads the four exact legacy names for that profile, preserves existing destination values (including
+empty passphrases), and retains original environment Vault entries because they may have service
+bindings. Only import counts are returned. Listing, editing and execution do not read the environment
+Vault; only explicit import opens it. Save, import and deletion are serialized
+within the credential store so an asynchronous import cannot overwrite a concurrent newer edit.
+Deleting a profile never deletes legacy environment Vault entries. Those remain independently managed
+in the Vault tab; terminal UI explains this when importing.
 
 ### Network and identity boundary
 
@@ -47,10 +62,12 @@ local trusted operator interface. No new public terminal endpoint is added.
 
 ### API / MCP
 
-- GET `/api/v1/terminal/profiles`: metadata and Vault key names, never values.
+- GET `/api/v1/terminal/profiles`: metadata only, never credential names or values.
 - PUT `/api/v1/terminal/profiles/:id`: `{profile, credentials?}`; validates UUID, host, port,
   network/auth combination, pinned host key, and private DNS scope before writes.
-- DELETE `/api/v1/terminal/profiles/:id`: remove metadata, retain Vault entries.
+- DELETE `/api/v1/terminal/profiles/:id`: remove metadata and dedicated credentials, retain legacy Vault entries.
+- POST `/api/v1/terminal/profiles/:id/import-vault`: explicitly copy legacy credentials to the dedicated
+  store without overwriting existing destination values or deleting originals; returns counts only.
 - POST `/api/v1/terminal/inspect`: `{host, port, network, auth}`; discover host fingerprint only.
 - POST `/api/v1/terminal/profiles/:id/exec`: `{command, timeoutMs?}`; return operation ID,
   stdout/stderr, exit code and exit signal. No command or output is persisted.

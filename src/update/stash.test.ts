@@ -8,7 +8,8 @@ import { stashWorkingTree } from './stash.js';
 
 const exec = promisify(execFile);
 const roots: string[] = [];
-const TEST_TIMEOUT_MS = 60_000;
+// The operation itself permits Git up to 60 seconds; leave time for fixture setup and restoration.
+const TEST_TIMEOUT_MS = 90_000;
 async function git(root: string, ...args: string[]): Promise<string> {
   return (await exec('git', args, { cwd: root, windowsHide: true, timeout: 15_000, encoding: 'utf8' })).stdout.trim();
 }

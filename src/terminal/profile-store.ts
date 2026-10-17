@@ -5,8 +5,9 @@ import { z } from 'zod';
 import { vaultDir } from '../vault/vault-store.js';
 import { ProfileSchema, type TerminalProfile } from './schema.js';
 
-/** Non-secret connection metadata only; credentials remain in Vault. @implements SPEC-TERMINAL-CONNECTIONS */
+/** Non-secret connection metadata; credentials use a dedicated encrypted store. @implements SPEC-TERMINAL-CONNECTIONS */
 export class TerminalProfileStore {
+  /** @implements SPEC-TERMINAL-CONNECTIONS */
   constructor(private readonly path = join(vaultDir(), 'terminal-connections.json')) {}
   list(): TerminalProfile[] {
     if (!existsSync(this.path)) return [];
