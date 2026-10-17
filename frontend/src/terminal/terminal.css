@@ -1,0 +1,9 @@
+.terminal-page { max-width: 960px; }
+.terminal-page label { display: block; margin: 12px 0; }
+.terminal-page label > input:not([type=checkbox]), .terminal-page label > select, .terminal-page textarea { display: block; width: min(100%, 640px); padding: 8px; box-sizing: border-box; }
+.terminal-page textarea { min-height: 100px; font-family: monospace; }
+.terminal-page li { margin: 14px 0; }
+.terminal-page pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #101721; color: #e8eef6; padding: 16px; max-height: 480px; overflow: auto; }
+.terminal-form { margin: 20px 0; padding: 18px; border: 1px solid #687486; border-radius: 8px; }
+.terminal-form fieldset { border: 0; padding: 0; min-width: 0; }
+.terminal-key { display: block; overflow-wrap: anywhere; padding: 12px 0; }

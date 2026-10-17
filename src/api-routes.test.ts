@@ -357,6 +357,7 @@ vi.mock('./launch/orchestrator.js', () => ({
 }));
 
 vi.mock('./secrets/config-store.js', () => ({
+  configPath: () => join(mocks.reviewRoot, 'config.enc'),
   ServiceRuntimeConfigValidationError: class ServiceRuntimeConfigValidationError extends Error {},
   applyInfisicalToEnv: vi.fn(() => false),
   getServiceMap: () => mocks.serviceMap,

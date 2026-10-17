@@ -9,6 +9,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { registerSiteTools } from './site-tools.js';
+import { registerTerminalTools } from './terminal-tools.js';
 
 /** ツール結果を text content にまとめる。 */
 function jsonContent(data: unknown) {
@@ -20,7 +21,7 @@ function errorContent(err: unknown) {
 }
 
 /** baseUrl の backend に紐づく McpServer を組み立てる。 */
-export function buildMcpServer(baseUrl: string): McpServer {
+export function buildMcpServer(baseUrl: string, options: { terminal?: boolean } = {}): McpServer {
   /** backend に GET して JSON を返す。 失敗は説明的な Error。 */
   async function apiGet<T>(path: string): Promise<T> {
     let res: Response;
@@ -55,6 +56,7 @@ export function buildMcpServer(baseUrl: string): McpServer {
 
   const server = new McpServer({ name: 'excubitor', version: '0.2.0' });
   registerSiteTools(server, baseUrl);
+  if (options.terminal !== false) registerTerminalTools(server, baseUrl);
 
   server.tool(
     'excubitor_list_services',

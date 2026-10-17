@@ -53,6 +53,7 @@ import { buildLaunchRouter, readProjectView } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { buildVaultRouter } from './vault/vault-router.js';
+import { buildTerminalRouter } from './terminal/router.js';
 import { sharedVault } from './vault/vault.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
 import { applyInfisicalToEnv, getServiceMap, resolveServiceInfisical, type ServiceInfisical } from './secrets/config-store.js';
@@ -813,6 +814,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
   app.route('/', buildConfigRouter({ onDomainRootChanged: () => reloadCatalog('domain root change') }));
+  app.route('/', buildTerminalRouter());
 
   // secret-agent (/api/v1/secrets/resolve — service code → resolved secret、 token 認証)
   app.route('/', buildSecretAgentRouter((code) => findService(code)?.infisical));
