@@ -33,7 +33,8 @@
   "specRefs": [
     "構成 / src/scanner/",
     "scanner/ports.ts",
-    "spec/feature/service-overview.md#SPEC-EX-HEALTH-CACHE-ONLY"
+    "spec/feature/service-overview.md#SPEC-EX-HEALTH-CACHE-ONLY",
+    "spec/feature/service-port-provenance.md"
   ],
   "rationale": "src/scanner (21 files) is the observability/health-derivation subsystem, independent of control and logging."
 }

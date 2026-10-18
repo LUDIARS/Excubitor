@@ -70,6 +70,7 @@ import { startParquetCompactionLoop } from './log/parquet-compactor.js';
 import { buildPortsRouter } from './scanner/ports-router.js';
 import { createPortReportProvider, type PortReportProvider } from './scanner/port-report-cache.js';
 import { classifyPortOwnership, type PortOwnership } from './process/port-ownership.js';
+import { servicePortView } from './scanner/service-port-view.js';
 import { syncHealthyServiceStates } from './scanner/health-state.js';
 import { reconcileStatus } from './scanner/version-reconcile.js';
 import type { DowntimeSummary } from './scanner/downtime.js';
@@ -305,7 +306,7 @@ async function portOwnershipByCode(
       ? r.pid
       : undefined;
     byCode.set(code, classifyPortOwnership({
-      port: r.port == null ? null : Number(r.port),
+      port: servicePortView(r).port,
       // Lifecycle は別プロセスの local-control supervisor が所有する。backend 内の
       // process manager ではなく、supervisor が service_instances に永続化した PID を使う。
       managedPid: persistedPid,
@@ -349,7 +350,7 @@ function serviceRowView(
       r.disk_version as string | null,
       r.reported_version as string | null,
     ),
-    port: r.port ?? null,
+    ...servicePortView(r),
     host: r.host_hostname ? { hostname: r.host_hostname, name: r.host_name } : null,
     health_ok: r.health_ok === null || r.health_ok === undefined ? null : Boolean(r.health_ok),
     health_reason: health.reason,

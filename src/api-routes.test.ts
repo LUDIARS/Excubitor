@@ -744,6 +744,18 @@ describe('Excubitor HTTP APIs', () => {
     });
   });
 
+  it('uses the catalog port for both service views and ownership despite stale instance data', async () => {
+    db().run(sql`UPDATE service_instances SET port = 3000 WHERE id = 'inst-a'`);
+    const detail = await requestJson<Record<string, unknown>>(router, 'GET', '/api/v1/services/svc-a');
+    expect(detail.data).toMatchObject({ port: 1234, observed_port: 3000, port_source: 'catalog',
+      port_mismatch: true, port_owner: 'managed', health_trusted: true, port_holder_pids: [4242], port_owner_reason: null });
+    const list = await requestJson<{ services: Array<Record<string, unknown>> }>(router, 'GET', '/api/v1/services');
+    expect(list.data.services.find(s => s.code === 'svc-a')).toMatchObject({
+      port: 1234, observed_port: 3000, port_mismatch: true, port_owner: 'managed', health_trusted: true,
+    });
+    expect(db().all(sql`SELECT port FROM service_instances WHERE id = 'inst-a'`)).toEqual([{ port: 3000 }]);
+  });
+
   it('does not report an unmeasured startup fallback as a free port', async () => {
     type MockPortReport = Awaited<ReturnType<typeof mocks.buildPortReport>>;
     let finishScan = (_report: MockPortReport): void => {
