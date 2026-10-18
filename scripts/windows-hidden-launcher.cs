@@ -6,7 +6,9 @@
 // (Windows Terminal) への引き渡しで窓が出る。この exe は GUI subsystem なのでコンソールを持たず、
 // 自分のコマンドラインの 2 語目以降をそのまま CREATE_NO_WINDOW で起動する。子 (supervisor) は
 // 窓の無いコンソールを持ち、その子孫はそれを継承するので窓が出ない。
-// 子は Task の Job に残る (CREATE_BREAKAWAY_FROM_JOB は付けない)ので、Stop-ScheduledTask は従来どおり効く。
+// 子は Task の Job に残る (CREATE_BREAKAWAY_FROM_JOB は付けない) が、Stop-ScheduledTask が終了させるのは
+// このランチャーだけで、子の supervisor は生き残る (実測 2026-10-12)。入れ替え時の旧 supervisor の終了は
+// windows-supervisor-restart.ts が Stop 後に取得済みハンドルの Process.Kill() で行う。
 // 子の終了を待ち、その exit code を返す (Task の状態 = supervisor の生死)。
 using System;
 using System.ComponentModel;

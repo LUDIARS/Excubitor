@@ -903,7 +903,10 @@ supervisor の再起動・死亡を生き延びる。
      `data/excubitor-hidden-launcher-<sha256 先頭12桁>.exe` へビルドする。名前にハッシュを入れて、実行中の Task が
      掴む exe を上書きしない。ランチャーは自分のコマンドラインの 2 語目以降を CREATE_NO_WINDOW で起動し、
      終了を待って exit code を返す (Task の状態 = supervisor の生死)。`CREATE_BREAKAWAY_FROM_JOB` は付けないので
-     Node は Task の Job に残り、`Stop-ScheduledTask` による停止・再起動 (windows-supervisor-restart.ts) は変わらない。
+     Node は Task の Job に残る。ただし `Stop-ScheduledTask` が終了させるのはランチャーだけで、Node (supervisor) は
+     生き残る (実測 2026-10-12: Task は Ready / LastTaskResult 0x41306、旧 pid は生存)。そのため入れ替え
+     (windows-supervisor-restart.ts) は Stop の後に数秒だけ旧 supervisor の終了を待ち、残っていれば Stop 前に取得した
+     プロセスハンドルの `Process.Kill()` で終了させる (pid / 名前での kill や新規プロセス起動はしない)。
    - 不採用: `conhost.exe --headless <node>` は stdin が EOF (NUL / 空) だと client が動く前に終了する (実測)。
      Task Scheduler は std ハンドルを渡さないため使えない。
    - 導入済みの Task は `scripts/set-service-headless.ps1` が action だけを書き換える。install-service.ps1 の再実行は

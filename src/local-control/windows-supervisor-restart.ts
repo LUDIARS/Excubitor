@@ -1,5 +1,8 @@
 import type { SupervisorRestartPlan } from './supervisor-service-restart.js';
 
+/** How long the old supervisor may take to exit after Stop-ScheduledTask before it is killed. */
+const STOP_GRACE_MS = 5_000;
+
 /** @implements SPEC-EX-UNIFIED-UPDATE */
 export function windowsSupervisorRestartScript(name: string, supervisorPid: number, timeoutMs = 45_000): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) throw new Error('Unsupported OS service name');
@@ -16,6 +19,14 @@ try {
   if ($task.State -ne 'Running') { throw 'Expected a running Excubitor scheduled task' }
   $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
   Stop-ScheduledTask -TaskName $taskName -TaskPath '\\' -ErrorAction Stop
+  # The Task action is the hidden launcher; stopping the Task ends only the launcher and
+  # leaves its node child running. After a short grace, end the old supervisor through the
+  # handle taken above (never by PID or name), as Stop did when the Task ran node directly.
+  $remaining = ${timeoutMs} - [int]$stopwatch.ElapsedMilliseconds
+  if ($remaining -gt 0 -and -not $oldSupervisor.WaitForExit([Math]::Min(${STOP_GRACE_MS}, $remaining))) {
+    # Kill throws if the process exited in between; the wait below decides the outcome.
+    try { $oldSupervisor.Kill() } catch { }
+  }
   $remaining = ${timeoutMs} - [int]$stopwatch.ElapsedMilliseconds
   if ($remaining -le 0 -or -not $oldSupervisor.WaitForExit($remaining)) {
     throw 'Old Excubitor supervisor did not exit; replacement was not started'

@@ -10,11 +10,14 @@ const POWERSHELL_TIMEOUT_MS = 15_000;
 const POWERSHELL_TEST_TIMEOUT_MS = 20_000;
 
 // Shadow all OS-control commands: these cases never touch a real process or task.
-async function simulate(options: { exits?: boolean; neverReady?: boolean; stopFails?: boolean; startFails?: boolean } = {}) {
+// exits: the old supervisor exits within the grace after Stop. killExits: it exits after Kill.
+async function simulate(options: { exits?: boolean; killExits?: boolean; neverReady?: boolean; stopFails?: boolean; startFails?: boolean } = {}) {
   const fixture = `
 $global:events = [System.Collections.Generic.List[string]]::new()
 $global:queries = 0
 $global:exits = $${options.exits ?? true}
+$global:killExits = $${options.killExits ?? true}
+$global:killed = $false
 $global:neverReady = $${options.neverReady ?? false}
 $global:stopFails = $${options.stopFails ?? false}
 $global:startFails = $${options.startFails ?? false}
@@ -22,7 +25,12 @@ function Get-Process {
   $process = [pscustomobject]@{ Handle = 1 }
   $process | Add-Member ScriptMethod WaitForExit { param($milliseconds)
     $global:events.Add('wait-process')
+    if ($global:killed) { return $global:killExits }
     return $global:exits
+  }
+  $process | Add-Member ScriptMethod Kill {
+    $global:events.Add('kill')
+    $global:killed = $true
   }
   $process | Add-Member ScriptMethod Dispose { $global:events.Add('dispose') }
   return $process
@@ -43,7 +51,7 @@ function Start-ScheduledTask {
 }
 $failure = $null
 try {
-${windowsSupervisorRestartScript('Excubitor', 4242, options.neverReady ? 30 : 5_000)}
+${windowsSupervisorRestartScript('Excubitor', 4242, options.neverReady ? 2_000 : 5_000)}
 } catch { $failure = $_.Exception.Message }
 [pscustomobject]@{ events = @($global:events.ToArray()); error = $failure } | ConvertTo-Json -Compress
 `;
@@ -58,19 +66,43 @@ describe('Windows supervisor restart plan', () => {
     expect(() => planWindowsSupervisorRestart("Excubitor'; Stop-Process", 4242)).toThrow('service name');
     expect(() => planWindowsSupervisorRestart('Excubitor', 0)).toThrow('PID');
   });
+
+  it('keeps the 45-second stop bound', () => {
+    expect(() => windowsSupervisorRestartScript('Excubitor', 4242, 45_001)).toThrow('stop timeout');
+    expect(() => windowsSupervisorRestartScript('Excubitor', 4242, 0)).toThrow('stop timeout');
+    expect(() => windowsSupervisorRestartScript('Excubitor', 4242, 45_000)).not.toThrow();
+  });
+
+  it('kills the old supervisor by its handle after Stop and before Start', () => {
+    const script = windowsSupervisorRestartScript('Excubitor', 4242);
+    const stop = script.indexOf('Stop-ScheduledTask');
+    const kill = script.indexOf('$oldSupervisor.Kill()');
+    const start = script.indexOf('Start-ScheduledTask');
+    expect(stop).toBeGreaterThan(-1);
+    expect(kill).toBeGreaterThan(stop);
+    expect(start).toBeGreaterThan(kill);
+    // Only the pre-acquired handle is used: no PID or name based termination.
+    expect(script).not.toMatch(/Stop-Process|taskkill/i);
+  });
 });
 
 describe.skipIf(process.platform !== 'win32')('Windows supervisor replacement sequencing', () => {
   it('waits for both the original process and task instance before starting once', async () => {
     const result = await simulate();
     expect(result.error).toBeNull();
-    expect(result.events).toEqual(['task-Running', 'stop', 'wait-process', 'task-Running', 'task-Ready', 'start', 'dispose']);
+    expect(result.events).toEqual(['task-Running', 'stop', 'wait-process', 'wait-process', 'task-Running', 'task-Ready', 'start', 'dispose']);
   }, POWERSHELL_TEST_TIMEOUT_MS);
 
-  it('does not start a replacement while the old process survives', async () => {
+  it('kills an old supervisor left behind by the launcher stop, then starts once', async () => {
     const result = await simulate({ exits: false });
+    expect(result.error).toBeNull();
+    expect(result.events).toEqual(['task-Running', 'stop', 'wait-process', 'kill', 'wait-process', 'task-Running', 'task-Ready', 'start', 'dispose']);
+  }, POWERSHELL_TEST_TIMEOUT_MS);
+
+  it('does not start a replacement while the old process survives the kill', async () => {
+    const result = await simulate({ exits: false, killExits: false });
     expect(result.error).toContain('did not exit');
-    expect(result.events).toEqual(['task-Running', 'stop', 'wait-process', 'dispose']);
+    expect(result.events).toEqual(['task-Running', 'stop', 'wait-process', 'kill', 'wait-process', 'dispose']);
   }, POWERSHELL_TEST_TIMEOUT_MS);
 
   it('does not start if the task remains running after process exit', async () => {
