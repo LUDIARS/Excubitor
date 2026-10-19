@@ -5,6 +5,14 @@ import type { OperationContext } from './context.js';
 import { holdSiteToken, publicSiteMeta, runConcordiaSiteOperation, takeSiteToken } from './concordia-site.js';
 import type { OperationRecord } from './store.js';
 import { OperationRequestSchema } from './types.js';
+import { keys, securityConfig } from '../security/test-fixtures.js';
+import { verifyMeshProof } from '../security/proof.js';
+
+function authorizationDeps() {
+  const config = securityConfig();
+  config.concordia = { audience: 'hq/concordia' };
+  return { config: () => config, issueToken: vi.fn(async () => 'opaque-cc-token'), credential: () => keys.privateKey };
+}
 
 const SITE = { hq_url: 'ws://100.122.174.105:11112', site_id: 'melpot', token: 'secret-token-value' };
 const concordia = { code: 'concordia', name: 'Concordia', port: 11111 } as Service;
@@ -52,16 +60,43 @@ describe('site token holder', () => {
 });
 
 describe('runConcordiaSiteOperation', () => {
+  it('fails closed before contacting Cc for missing audience, authority outage or missing signing key', async () => {
+    const fetchMock = vi.fn();
+    const auth = authorizationDeps();
+    const missing = securityConfig();
+    for (const denied of [
+      { ...auth, config: () => missing },
+      { ...auth, issueToken: async () => { throw new Error('authority unavailable'); } },
+      { ...auth, credential: () => { throw new Error('missing key'); } },
+    ]) {
+      const { ctx } = makeCtx();
+      expect(await runConcordiaSiteOperation(ctx, concordia, { ...denied, fetch: fetchMock, takeToken: () => SITE.token }))
+        .toMatchObject({ ok: false, error: 'concordia_workload_authorization_failed' });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it('PUTs the site role to loopback Concordia and succeeds when the saved state matches', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { hqUrl: SITE.hq_url, siteId: 'melpot', hasToken: true, running: { linked: false } }));
     const { ctx, steps } = makeCtx();
-    const outcome = await runConcordiaSiteOperation(ctx, concordia, { fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
+    const auth = authorizationDeps();
+    const outcome = await runConcordiaSiteOperation(ctx, concordia, { ...auth, fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
     expect(outcome).toEqual({ kind: 'finished', ok: true, error: null });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://127.0.0.1:11111/v1/federation/site');
     expect(init.method).toBe('PUT');
+    expect(auth.issueToken).toHaveBeenCalledWith(auth.config(), 'hq/concordia', 'hq-config', 'service:concordia');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['x-excubitor-audience']).toBe('hq/concordia');
+    expect(headers['x-excubitor-workload']).toBe('hq/excubitor');
+    expect(verifyMeshProof({ publicKey: keys.publicKey, parts: {
+      method: 'PUT', path: '/v1/federation/site', body: String(init.body),
+      timestamp: Number(headers['x-excubitor-ts']), nonce: headers['x-excubitor-nonce'] ?? '',
+      audience: 'hq/concordia', token: 'opaque-cc-token',
+    }, signature: headers['x-excubitor-signature'] ?? '' })).toBe(true);
+    expect(init.redirect).toBe('error');
     expect(JSON.parse(String(init.body))).toEqual({ hq_url: SITE.hq_url, site_id: 'melpot', token: SITE.token });
     expect(JSON.stringify(steps)).not.toContain(SITE.token);
+    expect(JSON.stringify(steps)).not.toContain('opaque-cc-token');
   });
 
   it('fails without calling Concordia when the token is gone (restart while queued)', async () => {
@@ -75,7 +110,7 @@ describe('runConcordiaSiteOperation', () => {
   it('reports Concordia rejection without echoing the token', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(400, { error: `bad hq_url ${SITE.token}`.slice(0, 11) }));
     const { ctx, steps } = makeCtx();
-    const outcome = await runConcordiaSiteOperation(ctx, concordia, { fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
+    const outcome = await runConcordiaSiteOperation(ctx, concordia, { ...authorizationDeps(), fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
     expect(outcome).toMatchObject({ ok: false, error: 'concordia_rejected_400' });
     expect(JSON.stringify(steps)).not.toContain(SITE.token);
   });
@@ -83,7 +118,7 @@ describe('runConcordiaSiteOperation', () => {
   it('fails when the saved state does not match the request', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { hqUrl: SITE.hq_url, siteId: 'other', hasToken: true }));
     const { ctx } = makeCtx();
-    const outcome = await runConcordiaSiteOperation(ctx, concordia, { fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
+    const outcome = await runConcordiaSiteOperation(ctx, concordia, { ...authorizationDeps(), fetch: fetchMock as unknown as typeof fetch, takeToken: () => SITE.token });
     expect(outcome).toMatchObject({ ok: false, error: 'concordia_site_mismatch' });
   });
 
@@ -92,7 +127,7 @@ describe('runConcordiaSiteOperation', () => {
     expect(await runConcordiaSiteOperation(ctx, undefined, { takeToken: () => SITE.token })).toMatchObject({ error: 'concordia_port_unknown' });
     const down = vi.fn(async () => { throw new Error('ECONNREFUSED'); });
     const again = makeCtx();
-    expect(await runConcordiaSiteOperation(again.ctx, concordia, { fetch: down as unknown as typeof fetch, takeToken: () => SITE.token }))
+    expect(await runConcordiaSiteOperation(again.ctx, concordia, { ...authorizationDeps(), fetch: down as unknown as typeof fetch, takeToken: () => SITE.token }))
       .toMatchObject({ error: 'concordia_unreachable' });
   });
 });

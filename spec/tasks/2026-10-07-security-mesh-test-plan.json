@@ -1,0 +1,277 @@
+{
+  "summary": "Lead with \"Input validation at the trust boundary\" (critical), then define and enforce the contract first. 3 test suggestions, 2 fix steps.",
+  "testPlan": {
+    "suggestions": [
+      {
+        "id": "test-001",
+        "title": "Input validation at the trust boundary",
+        "kind": "security",
+        "priority": "critical",
+        "confidence": 0.75,
+        "targetFiles": [
+          "augur.contracts.json",
+          "src/bootstrap/mesh-clone.ts",
+          "src/federation/client.ts",
+          "src/federation/listener.ts",
+          "src/federation/operations/accept.ts",
+          "src/federation/operations/bundle-routes.ts",
+          "src/federation/operations/mesh-source.ts",
+          "src/federation/operations/public-routes.ts",
+          "src/federation/operations/runner.ts",
+          "src/federation/peer-auth.ts",
+          "src/federation/public-router.ts",
+          "src/index.ts",
+          "src/vault/vault-federation.ts",
+          "src/vault/vault-inject.ts"
+        ],
+        "rationale": "Every externally reachable input needs validation tests: type, range, size, and encoding.",
+        "draft": {
+          "framework": "vitest",
+          "description": "Given malformed, oversized, and hostile inputs at the boundary, when they are submitted, then each is rejected with a safe error and no side effects."
+        },
+        "evidenceIds": [
+          "ev-001",
+          "ev-003",
+          "ev-004",
+          "ev-005",
+          "ev-006",
+          "ev-007",
+          "ev-008",
+          "ev-009",
+          "ev-010",
+          "ev-011",
+          "ev-012",
+          "ev-013",
+          "ev-014",
+          "ev-015",
+          "ev-016",
+          "ev-017"
+        ]
+      },
+      {
+        "id": "test-002",
+        "title": "Authorization checks for the affected operations",
+        "kind": "security",
+        "priority": "critical",
+        "confidence": 0.65,
+        "rationale": "Authentication is not authorization; each operation must verify the caller may perform it on that resource.",
+        "draft": {
+          "framework": "vitest",
+          "description": "Given a caller without permission for the target resource, when the operation is attempted, then it is denied and audited."
+        },
+        "evidenceIds": [
+          "ev-001",
+          "ev-003",
+          "ev-004",
+          "ev-005",
+          "ev-006",
+          "ev-007",
+          "ev-008",
+          "ev-009",
+          "ev-010",
+          "ev-011",
+          "ev-012",
+          "ev-013",
+          "ev-014",
+          "ev-015",
+          "ev-016",
+          "ev-017"
+        ]
+      },
+      {
+        "id": "test-003",
+        "title": "Abuse-case scenarios",
+        "kind": "security",
+        "priority": "high",
+        "confidence": 0.55,
+        "rationale": "Beyond single requests: replay, enumeration, and rate abuse are how the surface actually gets attacked.",
+        "draft": {
+          "framework": "vitest",
+          "description": "Given scripted abuse patterns (replay, enumeration, burst rates), when they run against the surface, then limits and protections engage as documented."
+        },
+        "evidenceIds": [
+          "ev-001",
+          "ev-003",
+          "ev-004",
+          "ev-005",
+          "ev-006",
+          "ev-007",
+          "ev-008",
+          "ev-009",
+          "ev-010",
+          "ev-011",
+          "ev-012",
+          "ev-013",
+          "ev-014",
+          "ev-015",
+          "ev-016",
+          "ev-017"
+        ]
+      }
+    ]
+  },
+  "fixPolicy": {
+    "strategy": "contract_first",
+    "steps": [
+      {
+        "id": "fix-001",
+        "title": "Define the validation and authorization contract",
+        "description": "Write down what is accepted, who may do what, and what every rejection looks like — before code.",
+        "evidenceIds": [
+          "ev-001"
+        ]
+      },
+      {
+        "id": "fix-002",
+        "title": "Enforce the contract at the boundary",
+        "description": "Implement validation and authorization exactly where untrusted data enters, with tests per contract clause.",
+        "targetFiles": [
+          "augur.contracts.json",
+          "src/bootstrap/mesh-clone.ts",
+          "src/federation/client.ts",
+          "src/federation/listener.ts",
+          "src/federation/operations/accept.ts",
+          "src/federation/operations/bundle-routes.ts",
+          "src/federation/operations/mesh-source.ts",
+          "src/federation/operations/public-routes.ts",
+          "src/federation/operations/runner.ts",
+          "src/federation/peer-auth.ts",
+          "src/federation/public-router.ts",
+          "src/index.ts",
+          "src/vault/vault-federation.ts",
+          "src/vault/vault-inject.ts"
+        ],
+        "dependsOn": [
+          "fix-001"
+        ],
+        "evidenceIds": [
+          "ev-001",
+          "ev-003",
+          "ev-004",
+          "ev-005",
+          "ev-006",
+          "ev-007",
+          "ev-008",
+          "ev-009",
+          "ev-010",
+          "ev-011",
+          "ev-012",
+          "ev-013",
+          "ev-014",
+          "ev-015",
+          "ev-016",
+          "ev-017"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "id": "risk-001",
+        "severity": "high",
+        "description": "Tightening validation can break existing legitimate callers; stage the rollout and monitor rejections."
+      }
+    ],
+    "rollback": "Relax to log-only enforcement if legitimate traffic is rejected, then re-tighten with corrected rules."
+  },
+  "evidence": [
+    {
+      "id": "ev-001",
+      "type": "objective",
+      "detail": "Caller requested security: Ex workload authorization, exact vault keys, request proof, replay, artifact approval and browser boundary; tests must not run."
+    },
+    {
+      "id": "ev-002",
+      "type": "project_metadata",
+      "detail": "Project context: test runners vitest."
+    },
+    {
+      "id": "ev-003",
+      "type": "diff",
+      "detail": "A code diff was supplied with the request."
+    },
+    {
+      "id": "ev-004",
+      "type": "changed_file",
+      "file": "augur.contracts.json",
+      "detail": "Changed file: augur.contracts.json"
+    },
+    {
+      "id": "ev-005",
+      "type": "changed_file",
+      "file": "src/bootstrap/mesh-clone.ts",
+      "detail": "Changed file: src/bootstrap/mesh-clone.ts"
+    },
+    {
+      "id": "ev-006",
+      "type": "changed_file",
+      "file": "src/federation/client.ts",
+      "detail": "Changed file: src/federation/client.ts"
+    },
+    {
+      "id": "ev-007",
+      "type": "changed_file",
+      "file": "src/federation/listener.ts",
+      "detail": "Changed file: src/federation/listener.ts"
+    },
+    {
+      "id": "ev-008",
+      "type": "changed_file",
+      "file": "src/federation/operations/accept.ts",
+      "detail": "Changed file: src/federation/operations/accept.ts"
+    },
+    {
+      "id": "ev-009",
+      "type": "changed_file",
+      "file": "src/federation/operations/bundle-routes.ts",
+      "detail": "Changed file: src/federation/operations/bundle-routes.ts"
+    },
+    {
+      "id": "ev-010",
+      "type": "changed_file",
+      "file": "src/federation/operations/mesh-source.ts",
+      "detail": "Changed file: src/federation/operations/mesh-source.ts"
+    },
+    {
+      "id": "ev-011",
+      "type": "changed_file",
+      "file": "src/federation/operations/public-routes.ts",
+      "detail": "Changed file: src/federation/operations/public-routes.ts"
+    },
+    {
+      "id": "ev-012",
+      "type": "changed_file",
+      "file": "src/federation/operations/runner.ts",
+      "detail": "Changed file: src/federation/operations/runner.ts"
+    },
+    {
+      "id": "ev-013",
+      "type": "changed_file",
+      "file": "src/federation/peer-auth.ts",
+      "detail": "Changed file: src/federation/peer-auth.ts"
+    },
+    {
+      "id": "ev-014",
+      "type": "changed_file",
+      "file": "src/federation/public-router.ts",
+      "detail": "Changed file: src/federation/public-router.ts"
+    },
+    {
+      "id": "ev-015",
+      "type": "changed_file",
+      "file": "src/index.ts",
+      "detail": "Changed file: src/index.ts"
+    },
+    {
+      "id": "ev-016",
+      "type": "changed_file",
+      "file": "src/vault/vault-federation.ts",
+      "detail": "Changed file: src/vault/vault-federation.ts"
+    },
+    {
+      "id": "ev-017",
+      "type": "changed_file",
+      "file": "src/vault/vault-inject.ts",
+      "detail": "Changed file: src/vault/vault-inject.ts"
+    }
+  ]
+}

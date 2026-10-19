@@ -1,10 +1,8 @@
 /**
  * 他拠点 Excubitor ピアへの HTTP クライアント。
  *
- * ピアの base_url + token を使って相手の federation API (`/api/v1/federation/*`) を叩く。
- * - Authorization: Bearer <peer.token> (相手の agent token。 相手に対する認証)
- * - 署名ヘッダ (request-signature.ts): 自拠点の agent token で要求を署名する。 相手が自拠点を
- *   ピア登録していれば検証でき、 していなければ 403 peer_not_registered で断られる (相互登録)
+ * peer 固定の認証方式を security/client-auth.ts で選ぶ。Cr workload token と
+ * Ed25519 proof が標準で、旧共有鍵は明示した監視専用 peer にのみ使用する。
  * ピアが Cloudflare Access の後ろにある場合は CF-Access Service Token ヘッダも付与する。
  * 失敗 (接続不可 / 認証エラー / タイムアウト) は throw せず {ok:false} を返し、 集約は degrade する。
  */
@@ -13,11 +11,11 @@ import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
-import { getOrCreateAgentToken } from '../secrets/agent-token.js';
 import type { RemotePeer } from './store.js';
-import { localNodeName } from './node-snapshot.js';
-import { signatureHeaders } from './request-signature.js';
+import { meshRequestHeaders } from './security/client-auth.js';
 import type { OperationRequest } from './operations/types.js';
+import { operationScope } from './security/operation-scope.js';
+import { REAUTHORIZE_PATH, reauthorizationRequest, type ReauthorizationScope } from './security/reauthorization.js';
 
 /** @implements SPEC-FEDERATION-MUTUAL-AUTH */
 
@@ -30,21 +28,12 @@ export interface PeerCallResult<T> {
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
-function requestHeaders(peer: RemotePeer, method: string, path: string, body: string): Record<string, string> {
-  return {
-    authorization: `Bearer ${peer.token}`,
-    ...signatureHeaders(getOrCreateAgentToken(), localNodeName(), { method, path, body }),
-    ...(peer.cf_access_id && peer.cf_access_secret
-      ? { 'CF-Access-Client-Id': peer.cf_access_id, 'CF-Access-Client-Secret': peer.cf_access_secret }
-      : {}),
-    ...(body ? { 'content-type': 'application/json' } : {}),
-  };
-}
-
 async function call<T>(
   peer: RemotePeer,
   method: 'GET' | 'POST',
   path: string,
+  action: string,
+  resource: string,
   payload?: unknown,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<PeerCallResult<T>> {
@@ -52,7 +41,8 @@ async function call<T>(
   try {
     const res = await fetch(`${peer.base_url}${path}`, {
       method,
-      headers: requestHeaders(peer, method, path, body),
+      headers: await meshRequestHeaders(peer, method, path, body, action, resource),
+      redirect: 'error',
       body: body || undefined,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -83,7 +73,7 @@ export interface RemoteNodeSnapshot {
 
 /** ピアのノードスナップショット (サマリ + サービス一覧 + host メトリクス) を取得。 */
 export function fetchNode(peer: RemotePeer): Promise<PeerCallResult<RemoteNodeSnapshot>> {
-  return call<RemoteNodeSnapshot>(peer, 'GET', '/api/v1/federation/node');
+  return call<RemoteNodeSnapshot>(peer, 'GET', '/api/v1/federation/node', 'monitor', 'node:self');
 }
 
 /**
@@ -91,22 +81,28 @@ export function fetchNode(peer: RemotePeer): Promise<PeerCallResult<RemoteNodeSn
  * 応答は未検証の JSON のまま返す (検証は呼び出し側が health-types のスキーマで行う)。
  */
 export function fetchHealth(peer: RemotePeer, timeoutMs: number): Promise<PeerCallResult<unknown>> {
-  return call<unknown>(peer, 'GET', '/api/v1/federation/health', undefined, timeoutMs);
+  return call<unknown>(peer, 'GET', '/api/v1/federation/health', 'monitor', 'node:self', undefined, timeoutMs);
 }
 
 /** ピアへ依頼を出す (受け付けられると 202 と依頼の要約が返る)。 */
 export function requestOperation(peer: RemotePeer, request: OperationRequest): Promise<PeerCallResult<unknown>> {
-  return call<unknown>(peer, 'POST', '/api/v1/federation/operations', request, 15_000);
+  const { action, resource } = operationScope(request);
+  return call<unknown>(peer, 'POST', '/api/v1/federation/operations', action, resource, request, 15_000);
+}
+
+/** 受けた依頼が待ち行列で認可期限を過ぎたとき、依頼元へ同じ範囲の実行 token を取り直しに行く。 */
+export function requestReauthorization(peer: RemotePeer, scope: ReauthorizationScope): Promise<PeerCallResult<unknown>> {
+  return call<unknown>(peer, 'POST', REAUTHORIZE_PATH, 'monitor', 'node:self', reauthorizationRequest(scope), 15_000);
 }
 
 /** 本社 (Vault の取得元) からサービスの Vault 値を受け取る。応答は未検証 (vault-inject.ts で検証)。 */
 export function fetchVaultEnv(peer: RemotePeer, service: string): Promise<PeerCallResult<unknown>> {
-  return call<unknown>(peer, 'POST', '/api/v1/federation/vault/env', { service }, 10_000);
+  return call<unknown>(peer, 'POST', '/api/v1/federation/vault/env', 'vault', `service:${service}`, { service }, 10_000);
 }
 
 /** ピアに出した依頼の状態 (手順つき) を取得。 */
 export function fetchOperation(peer: RemotePeer, id: string): Promise<PeerCallResult<unknown>> {
-  return call<unknown>(peer, 'GET', `/api/v1/federation/operations/${encodeURIComponent(id)}`);
+  return call<unknown>(peer, 'GET', `/api/v1/federation/operations/${encodeURIComponent(id)}`, 'monitor', 'node:self');
 }
 
 export interface BundleDownloadResult {
@@ -135,7 +131,8 @@ export async function downloadBundle(
   try {
     const res = await fetch(`${peer.base_url}${path}`, {
       method: 'GET',
-      headers: requestHeaders(peer, 'GET', path, ''),
+      headers: await meshRequestHeaders(peer, 'GET', path, '', 'bundle', `repository:${repo}`),
+      redirect: 'error',
       signal: AbortSignal.timeout(BUNDLE_TIMEOUT_MS),
     });
     if (res.status === 204) return { ok: true, upToDate: true, status: 204, error: null };

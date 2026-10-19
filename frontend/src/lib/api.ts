@@ -1204,6 +1204,17 @@ export interface SelfNode {
   listener: FederationListenerStatus;
   /** 拠点間リスナーの URL。 相手拠点のピア登録 (base_url) に貼る。 */
   mesh_base_urls: string[];
+  /** 拠点間認証の状態 (移行用 legacy-monitor が有効なら warning が入る)。 旧 backend では無い。 */
+  mesh_auth?: MeshAuthStatus;
+}
+
+/** @implements SPEC-SECURITY-MESH-LEGACY-MONITOR */
+export interface MeshAuthStatus {
+  mode: 'cr-v1' | 'legacy-monitor-migration' | 'unconfigured' | 'invalid';
+  legacy_monitor_peers: string[] | null;
+  enabled_at: string | null;
+  reason: string | null;
+  warning: string | null;
 }
 
 /** 本ノードの federation 名 + agent token。 ピアに貼り付けて登録するための導線。 */

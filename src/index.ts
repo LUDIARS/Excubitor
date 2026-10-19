@@ -53,6 +53,10 @@ import { buildLaunchRouter, readProjectView } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { buildVaultRouter } from './vault/vault-router.js';
+import { localBrowserGuard } from './security/local-browser-guard.js';
+import { readBrowserAllowlist } from './security/browser-allowlist-env.js';
+import { describeMeshAuth } from './federation/security/legacy-monitor.js';
+import { readMeshAuthPolicy } from './federation/security/legacy-monitor-store.js';
 import { buildTerminalRouter } from './terminal/router.js';
 import { sharedVault } from './vault/vault.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
@@ -620,6 +624,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     publicRouter: federationPublicRouter,
     catalog: currentCatalog!,
   });
+  const meshAuth = describeMeshAuth(readMeshAuthPolicy);
+  if (meshAuth.warning) logger.warn({ mesh_auth: meshAuth }, meshAuth.warning);
   const parquetHandle = logSafeMode
     ? { stop: logSafeModeNoop }
     : startParquetCompactionLoop(() => currentCatalog!);
@@ -681,6 +687,10 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
+  // 公開 URL / 拠点 IP からの管理画面は管理者が env で明示した origin だけ許可する (既定は loopback のみ)。
+  const browserAllowlist = readBrowserAllowlist();
+  app.use('/api/*', localBrowserGuard({ allowlist: browserAllowlist }));
+  app.use('/mcp', localBrowserGuard({ allowlist: browserAllowlist }));
   installRequestLogging(app);
 
   app.onError((err, c) => {

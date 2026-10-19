@@ -1,5 +1,8 @@
 # federation-mesh — 拠点メッシュ・担保サービス・拠点間ヘルス
 
+認証・Vault 認可・mesh 配布物の承認は [security-mesh-cr-auth](security-mesh-cr-auth.md) が優先する。
+以下の共有 token による相互登録は、明示的な legacy-monitor 移行期間の監視にのみ残す。
+
 複数拠点で動く Excubitor (Ex) 同士をメッシュ状につなぎ、どの拠点がどのサービスを担保しているかと、
 拠点間の死活を、どの拠点からでも確認できるようにする。
 

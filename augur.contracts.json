@@ -1,6 +1,11 @@
 {
   "version": 1,
   "contracts": [
+    {"id":"C-14","criterion":"C-14 validateWorkloadClaims(input): Cr workload の主体・宛先・60秒以内の期限・Ed25519鍵を検査する","symbol":"validateWorkloadClaims","file":"src/federation/security/claims.ts","module":"src/federation/security/claims.contract.ts"},
+    {"id":"C-15","criterion":"C-15 permitsMeshAction(input): 完全一致のaction/resourceだけを許可しlegacyの高権限を拒否する","symbol":"permitsMeshAction","file":"src/federation/security/grants.ts","module":"src/federation/security/grants.contract.ts"},
+    {"id":"C-16","criterion":"C-16 selectVaultKeys(input): 許可された秘密キーだけを配布対象に残す","symbol":"selectVaultKeys","file":"src/federation/security/grants.ts","module":"src/federation/security/vault-keys.contract.ts"},
+    {"id":"C-17","criterion":"C-17 verifyMeshProof(input): 要求・宛先・tokenを束縛したEd25519署名だけを認証する","symbol":"verifyMeshProof","file":"src/federation/security/proof.ts","module":"src/federation/security/proof.contract.ts"},
+    {"id":"C-18","criterion":"C-18 verifyArtifactDigest(input): 管理済みSHA256と一致するbundleだけを受理する","symbol":"verifyArtifactDigest","file":"src/federation/security/artifact.ts","module":"src/federation/security/artifact.contract.ts"},
     {"id":"C-11","criterion":"C-11 resolveRequiresSecretEnv(svc): 消費サービスのVaultで必須キーを満たし、不足時は明示失敗する","symbol":"resolveRequiresSecretEnv","file":"src/process/inject.ts","module":"src/process/vault-required.contract.ts"},
     {"id":"C-12","criterion":"C-12 resolveServiceSecrets(code): Vault binding内だけを返し、未知bindingと許可外キーは失敗する","symbol":"resolveServiceSecrets","file":"src/secrets/resolve.ts","module":"src/secrets/vault-resolve.contract.ts"},
     {"id":"C-13","criterion":"C-13 runPreflight(services): Infisical identityを要求せずVaultと必須envの失敗をreadyへ反映する","symbol":"runPreflight","file":"src/launch/preflight.ts","module":"src/launch/vault-preflight.contract.ts"},

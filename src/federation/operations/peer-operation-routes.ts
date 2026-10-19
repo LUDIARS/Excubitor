@@ -17,6 +17,9 @@ import { getPeer } from '../store.js';
 import type { Catalog } from '../../catalog/loader.js';
 import { BootstrapRepositorySchema } from '../../bootstrap/repository.js';
 import { OperationRequestSchema, type OperationRequest } from './types.js';
+import { operationScope } from '../security/operation-scope.js';
+import { recordOutboundApproval } from './outbound-approvals.js';
+import { requestDigest } from './reauthorize-queued.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
@@ -45,9 +48,18 @@ export function buildPeerOperationRoutes(getCatalog: (() => Catalog) | null = nu
     const parsed = OperationRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     const request = withBootstrapFallback(parsed.data, getCatalog?.() ?? null);
-    let res = await requestOperation(peer, request);
+    let sent = request;
+    let res = await requestOperation(peer, sent);
     // 更新前の拠点は update / deploy に添えた bootstrap 指定を 400 で断る。 そのときは添えずに送り直す。
-    if (request !== parsed.data && !res.ok && res.status === 400) res = await requestOperation(peer, parsed.data);
+    if (request !== parsed.data && !res.ok && res.status === 400) {
+      sent = parsed.data;
+      res = await requestOperation(peer, sent);
+    }
+    // 管理者が出した依頼として控え、相手の待ち行列で認可期限を過ぎたときの再認可に同じ範囲でだけ応じる。
+    const operationId = (res.data as { operation?: { id?: unknown } } | null)?.operation?.id;
+    if (res.ok && typeof operationId === 'string') {
+      recordOutboundApproval(peer.id, { operationId, ...operationScope(sent), requestDigest: requestDigest(JSON.stringify(sent)) });
+    }
     return relay(c, res);
   });
 

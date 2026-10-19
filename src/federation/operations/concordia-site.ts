@@ -14,6 +14,9 @@
 import { z } from 'zod';
 import type { Service } from '../../catalog/loader.js';
 import { failed, succeeded, type ExecutionOutcome, type OperationContext } from './context.js';
+import { readMeshSecurityConfig, requiredCredential, type MeshSecurityConfig } from '../security/config.js';
+import { issueWorkloadToken } from '../security/authority.js';
+import { meshProofHeaders } from '../security/proof.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
@@ -53,6 +56,9 @@ export interface ConcordiaSiteDeps {
   fetch?: typeof fetch;
   takeToken?: (operationId: string) => string | null;
   timeoutMs?: number;
+  config?: () => MeshSecurityConfig;
+  issueToken?: typeof issueWorkloadToken;
+  credential?: typeof requiredCredential;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -82,6 +88,22 @@ export async function runConcordiaSiteOperation(
     return failed('concordia_port_unknown');
   }
   const base = `http://127.0.0.1:${svc.port}/v1/federation/site`;
+  const body = JSON.stringify({ hq_url: meta.data.hq_url, site_id: meta.data.site_id, token });
+  let headers: Record<string, string>;
+  try {
+    const config = (deps.config ?? readMeshSecurityConfig)();
+    const audience = config.concordia?.audience;
+    if (!audience || !audience.endsWith('/concordia')) throw new Error('concordia_workload_not_configured');
+    const accessToken = await (deps.issueToken ?? issueWorkloadToken)(config, audience, 'hq-config', 'service:concordia');
+    headers = meshProofHeaders({
+      privateKey: (deps.credential ?? requiredCredential)(config.local.privateKeyEnv),
+      subject: config.local.subject, audience, token: accessToken, method: 'PUT',
+      path: '/v1/federation/site', body,
+    });
+  } catch {
+    ctx.record({ step: 'authorize', ok: false, detail: 'Concordia workload authorization unavailable' });
+    return failed('concordia_workload_authorization_failed');
+  }
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   ctx.record({ step: 'validate', ok: true, detail: `site_id=${meta.data.site_id} hq_url=${meta.data.hq_url}` });
 
@@ -89,17 +111,18 @@ export async function runConcordiaSiteOperation(
   try {
     res = await doFetch(base, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hq_url: meta.data.hq_url, site_id: meta.data.site_id, token }),
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+      redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch (err) {
-    ctx.record({ step: 'apply', ok: false, detail: `Concordia に繋がりません: ${(err as Error).message}` });
+  } catch {
+    ctx.record({ step: 'apply', ok: false, detail: 'Concordia connection failed' });
     return failed('concordia_unreachable');
   }
   if (!res.ok) {
-    const error = await readError(res);
-    ctx.record({ step: 'apply', ok: false, detail: `Concordia が拒否しました (${res.status}): ${error}` });
+    await res.body?.cancel();
+    ctx.record({ step: 'apply', ok: false, detail: `Concordia が拒否しました (${res.status})` });
     return failed(`concordia_rejected_${res.status}`);
   }
   const applied = (await res.json().catch(() => null)) as SiteStatus | null;
@@ -112,11 +135,4 @@ export async function runConcordiaSiteOperation(
       : '保存後の設定が依頼と一致しません',
   });
   return ok ? succeeded() : failed('concordia_site_mismatch');
-}
-
-/** エラー本文から error フィールドだけを短く取り出す (本文全体は記録しない)。 */
-async function readError(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-  const text = typeof body?.error === 'string' ? body.error : 'unknown';
-  return text.slice(0, 200);
 }

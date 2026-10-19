@@ -12,6 +12,8 @@
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync } from 'node:fs';
 import type { Catalog } from '../catalog/loader.js';
 import type { FederationEnv } from './peer-auth.js';
 import { createNamedLogger } from '../shared/logger.js';
@@ -64,7 +66,8 @@ export function federationPortFromCatalog(catalog: Catalog): number | null {
  * 設定が不正なときは起動せず error を記録する (全インターフェースへの fallback はしない)。
  */
 export function startFederationListener(options: FederationListenerOptions): FederationListenerHandle {
-  const config = parseFederationListenConfig(options.env ?? process.env, federationPortFromCatalog(options.catalog));
+  const env = options.env ?? process.env;
+  const config = parseFederationListenConfig(env, federationPortFromCatalog(options.catalog));
   if (!config.enabled) {
     if (config.error) logger.error({ err: config.error }, 'federation listener not started: invalid configuration');
     const status: FederationListenerStatus = { enabled: false, listening: [], error: config.error };
@@ -72,6 +75,16 @@ export function startFederationListener(options: FederationListenerOptions): Fed
   }
 
   const guard = createSourceGuard(config.allow);
+  // Explicit TLS provisioning only. Never generate/enroll credentials or infer forwarded TLS.
+  let tls: { cert: Buffer; key: Buffer } | undefined;
+  try {
+    const cert = env.EXCUBITOR_FEDERATION_TLS_CERT_FILE;
+    const key = env.EXCUBITOR_FEDERATION_TLS_KEY_FILE;
+    if (Boolean(cert) !== Boolean(key)) throw new Error('both TLS files required');
+    if (cert && key) tls = { cert: readFileSync(cert), key: readFileSync(key) };
+  } catch {
+    return { status: () => ({ enabled: false, listening: [], error: 'invalid federation TLS configuration' }), close: async () => {} };
+  }
   const app = new Hono();
   app.use('*', async (c, next) => {
     const remote = normalizeAddress(getConnInfo(c).remote.address);
@@ -93,7 +106,9 @@ export function startFederationListener(options: FederationListenerOptions): Fed
   const bind = (address: ListenAddress): void => {
     if (closed) return;
     const key = keyOf(address);
-    const server = serve({ fetch: app.fetch, hostname: address.host, port: address.port }) as unknown as ClosableServer;
+    const server = (tls
+      ? serve({ fetch: app.fetch, hostname: address.host, port: address.port, createServer: createHttpsServer, serverOptions: tls })
+      : serve({ fetch: app.fetch, hostname: address.host, port: address.port })) as unknown as ClosableServer;
     server.on('listening', () => {
       servers.set(key, server);
       logger.info({ address: key }, 'federation listener bound');

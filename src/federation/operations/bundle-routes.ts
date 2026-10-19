@@ -11,6 +11,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import type { Catalog } from '../../catalog/loader.js';
 import type { FederationEnv } from '../peer-auth.js';
 import { createMainBundle, findRepoCheckout, isValidHash, isValidRepoName } from './bundle-server.js';
+import { permitsMeshAction } from '../security/grants.js';
 
 /** @implements SPEC-FEDERATION-MESH-SOURCE */
 
@@ -22,11 +23,17 @@ export function buildBundleRoutes(getCatalog: () => Catalog, auth: MiddlewareHan
     const have = c.req.query('have') ?? null;
     if (!isValidRepoName(repo)) return c.json({ error: 'invalid_repo' }, 400);
     if (have !== null && !isValidHash(have)) return c.json({ error: 'invalid_have' }, 400);
+    const caller = c.get('federationCaller');
+    if (!permitsMeshAction({ caller, action: 'bundle', resource: `repository:${repo}` })) return c.json({ error: 'bundle_grant_required' }, 403);
     const dir = await findRepoCheckout(getCatalog(), repo);
     if (!dir) return c.json({ error: 'repo_not_found_on_this_node' }, 404);
     const bundle = await createMainBundle(dir, have);
     if (bundle.kind === 'up_to_date') return c.body(null, 204);
     if (bundle.kind === 'error') return c.json({ error: bundle.error }, bundle.status);
+    if (!permitsMeshAction({ caller, action: 'bundle', resource: `repository:${repo}` })) {
+      await bundle.cleanup();
+      return c.json({ error: 'bundle_grant_expired' }, 403);
+    }
     const stream = createReadStream(bundle.path);
     // 送り終えた (または切断された) ら一時ファイルを消す。
     stream.once('close', () => void bundle.cleanup());

@@ -13,6 +13,8 @@ import { resolveUpdateSource } from './update-source.js';
 import { validateOperationRequest } from './validate.js';
 import { preflightOperation, type PreflightDeps } from './preflight.js';
 import { activeDailyRun } from '../../update/daily/store.js';
+import { holdOperationPermit } from '../security/operation-permits.js';
+import { REQUEST_DIGEST_META } from './reauthorize-queued.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
 
@@ -25,6 +27,9 @@ export interface Requester {
   requestedBy: string;
   /** 本拠点での登録ピア id (自拠点からなら null)。 */
   requesterPeerId: string | null;
+  permit?: { expiresAt: number; authorize: () => Promise<boolean> };
+  /** SHA-256 of the received request body. Kept in meta (not secret) for queued reauthorization. */
+  requestDigest?: string;
 }
 
 export async function acceptOperation(
@@ -45,7 +50,8 @@ export async function acceptOperation(
   const site = checked.request.federation_site;
   // token は記録 (meta) に残さず、 enqueue と同じ同期区間でメモリに預ける (runner が実行時に取り出す)。
   const op = runner.enqueue({
-    ...requester,
+    requestedBy: requester.requestedBy,
+    requesterPeerId: requester.requesterPeerId,
     target: checked.request.target,
     action: checked.request.action,
     source: checked.source,
@@ -53,8 +59,12 @@ export async function acceptOperation(
       bootstrap: checked.request.bootstrap,
       data: checked.request.data,
       ...(site ? { federation_site: publicSiteMeta(site) } : {}),
+      ...(requester.requestDigest ? { [REQUEST_DIGEST_META]: requester.requestDigest } : {}),
     },
-  }, site ? (created) => holdSiteToken(created.id, site.token) : undefined);
+  }, (created) => {
+    if (requester.permit) holdOperationPermit(created.id, requester.permit.expiresAt, requester.permit.authorize);
+    if (site) holdSiteToken(created.id, site.token);
+  });
   if (activeDailyRun()) {
     appendStep(op.id, { step: 'queued', ok: true, detail: '日次更新の実行中のため、完了してから実行します' });
   }

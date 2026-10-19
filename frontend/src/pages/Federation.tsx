@@ -118,6 +118,14 @@ export default function Federation() {
   return (
     <div className="federation">
       {error && <div className="error-banner">エラー: {error}</div>}
+      {self?.mesh_auth?.warning && (
+        <div className="error-banner">
+          拠点間認証: {self.mesh_auth.warning}
+          {self.mesh_auth.reason && ` (理由: ${self.mesh_auth.reason}`}
+          {self.mesh_auth.reason && self.mesh_auth.enabled_at && `、 有効化 ${self.mesh_auth.enabled_at}`}
+          {self.mesh_auth.reason && ')'}
+        </div>
+      )}
 
       <SelfNodePanel self={self} />
 

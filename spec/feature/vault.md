@@ -61,7 +61,7 @@ Vault 内は明示的な共有 binding < プロジェクト binding。同名の�
 1. ローカル binding がある場合は既存 Vault.envFor(code) で解決する。未登録値は起動を止める。
 2. ローカル binding がなければ既存 source_peer_id → getPeer → fetchVaultEnv → 本社の
    vault-federation へ進む。署名・covered service 制限は従来どおり。本社の解決結果だけを
-   cacheEnv で暗号化保存する。到達不能時は取得済み控えを使う。本社 404 は未紐付けとして扱う。
+   cacheEnv で暗号化保存する。一時障害時の控えの扱いは下の「拠点の控えによる起動」に従う。本社 404 は未紐付けとして扱う。
 3. 取得元も binding もないサービスは secret なしとして扱える。ただし旧 infisical.inject=true が
    残るサービスで Vault 解決が空なら、未移行設定として明示失敗する。Infisical 取得には戻らない。
 4. 必須 env は required_env / infisical.required_env / requires_secret を検証する。
@@ -94,7 +94,27 @@ preflight はサービスごとに注入 env を一度解決し、Vault エラ�
 injectedKeys は topology 等を含む解決済み注入 env 全体の件数。
 
 secret-agent も同じ resolveVaultEnv を使う。値返却は既存のトークン認証済み専用 API に限定する。
-詳細は [secret-agent](secret-agent.md)。拠点の控えの失効・同期方針は今回変更しない。
+詳細は [secret-agent](secret-agent.md)。
+
+### 拠点の控えによる起動 {#SPEC-VAULT-CACHE-FALLBACK}
+
+参照: actio:b4c5bde3-fcda-47da-b528-6f9c0857ebb7 (拠点 mesh Cr 認可移行で監視・Vault・運用を止めない)
+
+拠点が本社から取得するときの失敗を、判断の純関数 `src/vault/vault-fallback.ts` で 4 つに分類する。
+
+| 分類 | 条件 | 扱い |
+|---|---|---|
+| 一時障害 (transient) | 応答なし・timeout・5xx・408/429、送信側の Cr token 発行失敗、mesh 認証の未配備 (移行中の legacy-monitor を含む) | 最後に正常取得した控えで起動する。ログ (warn) と Discord 通知 (設定時) を出す |
+| 失効・拒否 (revoked) | 401 / 403、管理者がこの peer の mesh policy を外した (`peer_auth_not_configured`) | 控えを使わず、控えも破棄して起動を止める。ログと通知を出す |
+| 未紐付け (unbound) | 404 | Vault を使わないサービスとして空で起動する (従来どおり) |
+| 想定外 (rejected) | その他の 4xx、応答本文の形式不正 | 控えを使わずに起動を止める。控えは消さない |
+
+- 控えが無い、または復号できない一時障害は起動を止める (部分的な値で起動しない)。
+- 秘匿性の高いサービスは catalog の `vault_cache_fallback: false` で控えによる起動を禁止できる。この場合は
+  正常取得時にも控えを保存せず、既存の控えを消し、一時障害で起動を止めて通知する。省略時は true。
+- 控えの使用・破棄はどちらも新規の解決だけに効く。すでに動いているプロセスの env は回収しない。
+- 通知文には値も鍵名も載せない (サービスコード・事象・控えの取得時刻のみ)。
+- 判断は純関数、控えの読み書きは `vault-inject.ts`、ログと通知は `vault-fallback-notify.ts` に分ける。
 
 ## API
 

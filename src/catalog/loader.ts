@@ -255,6 +255,12 @@ const ServiceSchema = z.object({
    */
   uses_corpus: z.boolean().optional(),
   /**
+   * 拠点で本社 Vault に一時的に届かないとき、最後に正常取得した控えで起動してよいか。
+   * 省略時は true。秘匿性の高いサービスは false にすると、控えを保存せず、一時障害でも起動を止める。
+   * spec/feature/vault.md#SPEC-VAULT-CACHE-FALLBACK
+   */
+  vault_cache_fallback: z.boolean().optional(),
+  /**
    * Ergo のパッケージ更新監視 (`ergo_pkg watch`) の対象にするか。 cwd を含む checkout の root を
    * `--host` に並べる。 `{ private: true }` は非公開ホストで、 出来事を非公開用 webhook にだけ送る。
    * 詳細 spec/feature/ergo-watch-delivery.md。

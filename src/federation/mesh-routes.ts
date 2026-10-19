@@ -23,6 +23,8 @@ import { getPeerState, pendingPeerState, type PeerPollState } from './peer-cache
 import { federationSettings } from './settings.js';
 import { setCoveragePref } from './coverage-prefs.js';
 import type { FederationListenerStatus } from './listener.js';
+import { describeMeshAuth } from './security/legacy-monitor.js';
+import { readMeshAuthPolicy } from './security/legacy-monitor-store.js';
 
 /** @implements SPEC-FEDERATION-COVERAGE */
 
@@ -79,6 +81,8 @@ export function buildSelfRoutes(getListenerStatus: () => FederationListenerStatu
       token: getOrCreateAgentToken(),
       listener,
       mesh_base_urls: listener.listening.map((address) => `http://${address}`),
+      // 移行用 legacy-monitor などの拠点間認証の状態。 警告は画面上部に出す。
+      mesh_auth: describeMeshAuth(readMeshAuthPolicy),
     });
   });
   return app;

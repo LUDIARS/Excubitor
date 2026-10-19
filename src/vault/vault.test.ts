@@ -72,6 +72,8 @@ describe('Vault', () => {
 
 describe('resolveVaultEnv', () => {
   const peer = { id: 'hq', name: 'hq', enabled: true } as RemotePeer;
+  const notify = vi.fn();
+  beforeEach(() => notify.mockClear());
 
   it('uses local values on the headquarters and stops on missing ones', async () => {
     await vault.setEntry('TOKEN', 'local');
@@ -91,14 +93,58 @@ describe('resolveVaultEnv', () => {
     expect(await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch })).toEqual({ TOKEN: 'from-hq' });
     expect(readFileSync(join(dir, 'vault.json'), 'utf8')).not.toContain('from-hq');
 
-    const offline = vi.fn(async () => ({ ok: false, status: null, data: null, error: 'ECONNREFUSED' }));
-    expect(await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: offline })).toEqual({ TOKEN: 'from-hq' });
   });
 
-  it('starts without Vault values when the headquarters is unreachable and nothing is cached', async () => {
+  it('starts from the last good cache on a transient outage and reports it', async () => {
+    vault.setSourcePeer('hq');
+    const ok = vi.fn(async () => ({ ok: true, status: 200, data: { env: { TOKEN: 'from-hq' }, missing: [] }, error: null }));
+    await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: ok, notify });
+    for (const failure of [
+      { ok: false, status: null, data: null, error: 'ECONNREFUSED' },
+      { ok: false, status: null, data: null, error: 'The operation was aborted due to timeout' },
+      { ok: false, status: 503, data: { error: 'mesh_security_unavailable' }, error: 'HTTP 503' },
+    ]) {
+      notify.mockClear();
+      expect(await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: async () => failure, notify })).toEqual({ TOKEN: 'from-hq' });
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'cache-used', code: 'svc', fetchedAt: 1_000 }));
+    }
+  });
+
+  it('does not use and discards the cache when HQ revokes or refuses', async () => {
+    vault.setSourcePeer('hq');
+    const ok = vi.fn(async () => ({ ok: true, status: 200, data: { env: { TOKEN: 'from-hq' }, missing: [] }, error: null }));
+    for (const refusal of [
+      { ok: false, status: 403, data: { error: 'vault_grant_required' }, error: 'HTTP 403' },
+      { ok: false, status: 401, data: { error: 'workload_authentication_failed' }, error: 'HTTP 401' },
+      { ok: false, status: null, data: null, error: 'peer_auth_not_configured' },
+    ]) {
+      await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: ok, notify });
+      await expect(resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: async () => refusal, notify }))
+        .rejects.toThrow('vault_authorization_revoked');
+      expect(await vault.cachedEnv('svc')).toBeNull();
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'cache-discarded' }));
+      // The discarded cache is not used by a later transient outage either.
+      const offline = vi.fn(async () => ({ ok: false, status: null, data: null, error: 'ECONNREFUSED' }));
+      await expect(resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: offline, notify })).rejects.toThrow('vault_authorization_unavailable');
+    }
+  });
+
+  it('fails the start of a service that forbids cache fallback, without keeping a cache', async () => {
+    vault.setSourcePeer('hq');
+    const ok = vi.fn(async () => ({ ok: true, status: 200, data: { env: { TOKEN: 'from-hq' }, missing: [] }, error: null }));
+    await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: ok, notify });
+    const strict = { vault, getPeer: () => peer, notify, cacheFallbackAllowed: () => false };
+    expect(await resolveVaultEnv('svc', { ...strict, fetch: ok })).toEqual({ TOKEN: 'from-hq' });
+    expect(await vault.cachedEnv('svc')).toBeNull();
+    const offline = vi.fn(async () => ({ ok: false, status: null, data: null, error: 'ECONNREFUSED' }));
+    await expect(resolveVaultEnv('svc', { ...strict, fetch: offline })).rejects.toThrow('vault_cache_fallback_disabled');
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'fallback-disabled' }));
+  });
+
+  it('refuses new secret resolution when current authorization is unavailable', async () => {
     vault.setSourcePeer('hq');
     const offline = vi.fn(async () => ({ ok: false, status: null, data: null, error: 'timeout' }));
-    expect(await resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: offline })).toEqual({});
+    await expect(resolveVaultEnv('svc', { vault, getPeer: () => peer, fetch: offline, notify })).rejects.toThrow('vault_authorization_unavailable');
   });
 
   it('treats a service without bindings on the headquarters as not using the Vault', async () => {
@@ -145,6 +191,14 @@ describe('resolveVaultEnv site overrides', () => {
     expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: notBound })).toEqual({ DATABASE_URL: 'postgres://site' });
   });
 
+  it('does not let site overrides bypass a headquarters authorization refusal', async () => {
+    const notify = vi.fn();
+    await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: hq({ DATABASE_URL: 'postgres://hq' }), notify });
+    const refused = async () => ({ ok: false, status: 403, data: null, error: 'HTTP 403' });
+    await expect(resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch: refused, notify })).rejects.toThrow('vault_authorization_revoked');
+    expect(await vault.cachedEnv('cernere')).toBeNull();
+  });
+
   it('does not stop on a headquarters-missing name that the site overrides', async () => {
     const fetch = hq({ OAUTH_SECRET: 'o' }, ['DATABASE_URL']);
     expect(await resolveVaultEnv('cernere', { vault, getPeer: () => peer, fetch })).toEqual({ DATABASE_URL: 'postgres://site', OAUTH_SECRET: 'o' });
@@ -174,15 +228,18 @@ describe('resolveVaultEnv site overrides', () => {
 });
 
 describe('vault federation route', () => {
-  const pass = async (c: { set: (k: 'federationCaller', v: unknown) => void }, next: () => Promise<void>) => {
-    c.set('federationCaller', { peerId: 'branch', peerName: 'kaoimac', claimedNode: null });
-    await next();
-  };
-
-  async function request(covers: boolean, service = 'svc') {
+  async function request(granted: boolean, service = 'svc') {
+    const pass = async (c: { set: (k: 'federationCaller', v: unknown) => void }, next: () => Promise<void>) => {
+      c.set('federationCaller', { peerId: 'branch', peerName: 'kaoimac', claimedNode: null,
+        authMode: 'cr-v1', expiresAt: Date.now() + 60_000,
+        grants: granted ? [{ action: 'vault', resource: `service:${service}`, keys: ['TOKEN'] }] : [],
+      });
+      await next();
+    };
     await vault.setEntry('TOKEN', 'shared');
-    vault.setBindings('svc', ['TOKEN']);
-    const app = buildVaultPublicRoutes({ auth: pass as never, vault: () => vault, covers: () => covers });
+    await vault.setEntry('ADMIN_SECRET', 'never-delivered');
+    vault.setBindings('svc', ['TOKEN', 'ADMIN_SECRET', 'MISSING_SECRET']);
+    const app = buildVaultPublicRoutes({ auth: pass as never, vault: () => vault });
     return app.request('/api/v1/federation/vault/env', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -190,13 +247,13 @@ describe('vault federation route', () => {
     });
   }
 
-  it('delivers values for a service the branch covers', async () => {
+  it('delivers only explicitly granted keys and hides other missing keys', async () => {
     const response = await request(true);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ env: { TOKEN: 'shared' }, missing: [] });
   });
 
-  it('refuses services the branch does not cover', async () => {
+  it('refuses a service without a Cr grant', async () => {
     expect((await request(false)).status).toBe(403);
   });
 

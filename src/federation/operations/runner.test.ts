@@ -5,10 +5,12 @@ import type { Catalog } from '../../catalog/loader.js';
 import { createOperationRunner, type OperationExecutor } from './runner.js';
 import { createOperation, getOperation, listRecentOperations, markRestarting, markRunning } from './store.js';
 import { beginDailyRun, saveDailyRun } from '../../update/daily/store.js';
+import * as permits from '../security/operation-permits.js';
 
 const catalog = { services: [] } as unknown as Catalog;
 
 beforeEach(() => {
+  vi.spyOn(permits, 'consumeOperationPermit').mockResolvedValue({ ok: true });
   resetDbClientForTests();
   closeDb();
   resetDbClientForTests();
@@ -16,6 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   closeDb();
   resetDbClientForTests();
 });
@@ -29,6 +32,30 @@ const serviceRestart = {
 };
 
 describe('operation runner', () => {
+  it('does not execute a remote operation after expiry, revocation or restart without its permit', async () => {
+    vi.mocked(permits.consumeOperationPermit).mockResolvedValue({ ok: false, reason: 'requester_refused: HTTP 404 approval_not_found' });
+    const execute = vi.fn<OperationExecutor>();
+    const runner = createOperationRunner({ getCatalog: () => catalog, execute });
+    const op = runner.enqueue(serviceRestart);
+    await runner.idle();
+    expect(execute).not.toHaveBeenCalled();
+    // Not dropped silently: the reason is in the result and in the steps.
+    expect(getOperation(op.id)).toMatchObject({
+      status: 'failed', error: 'remote_operation_unauthorized: requester_refused: HTTP 404 approval_not_found',
+      steps: [expect.objectContaining({ step: 'authorize', ok: false, detail: 'requester_refused: HTTP 404 approval_not_found' })],
+    });
+  });
+  it('reauthorizes a remote operation that waited past its permit before executing it', async () => {
+    vi.mocked(permits.consumeOperationPermit).mockRestore();
+    const reauthorize = vi.fn(async () => ({ ok: true as const }));
+    const execute = vi.fn<OperationExecutor>(async () => ({ kind: 'finished', ok: true, error: null }));
+    const runner = createOperationRunner({ getCatalog: () => catalog, execute, reauthorize, now: () => Date.now() + 10 * 60_000 });
+    const op = runner.enqueue(serviceRestart);
+    await runner.idle();
+    expect(reauthorize).toHaveBeenCalledWith(expect.objectContaining({ id: op.id }));
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(getOperation(op.id)).toMatchObject({ status: 'succeeded' });
+  });
   it('runs queued operations one at a time, in order, and records steps and results', async () => {
     const order: string[] = [];
     let active = 0;

@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { request as nodeHttpRequest } from 'node:http';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
 import { serve } from '@hono/node-server';
 import { sql } from 'drizzle-orm';
@@ -12,6 +13,8 @@ import { db, resetDbClientForTests } from './db/client.js';
 import type { BootObservabilityOptions } from './index.js';
 import type { DowntimeSummary } from './scanner/downtime.js';
 import { signatureHeaders } from './federation/request-signature.js';
+import type { MeshSecurityConfig } from './federation/security/config.js';
+import { securityConfig } from './federation/security/test-fixtures.js';
 
 type AnyCatalog = {
   project_versions: Record<string, { major: number; minor: number }>;
@@ -66,8 +69,9 @@ const emptyCfTunnelStatus = vi.hoisted(() => () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  reviewRoot: 'E:\\tmp\\excubitor-api-review-root',
-  logsRoot: 'E:\\tmp\\excubitor-api-logs',
+  meshSecurity: null as MeshSecurityConfig | null,
+  reviewRoot: `${process.cwd()}/.test-tmp/api-review-${process.pid}`,
+  logsRoot: `${process.cwd()}/.test-tmp/api-logs-${process.pid}`,
   catalog: null as AnyCatalog | null,
   serviceMap: {} as Record<string, Record<string, unknown>>,
   domainRoot: '.example.test',
@@ -453,9 +457,17 @@ vi.mock('./federation/client.js', () => ({
   fetchHealth: mocks.fetchHealth,
   requestOperation: mocks.requestOperation,
   fetchOperation: mocks.fetchOperation,
+  requestReauthorization: vi.fn(),
   downloadBundle: vi.fn(),
 }));
 vi.mock('./federation/peer-poller.js', () => ({ startPeerPoller: mocks.startPeerPoller }));
+vi.mock('./federation/security/config.js', async importOriginal => ({
+  ...await importOriginal<typeof import('./federation/security/config.js')>(),
+  readMeshSecurityConfig: () => {
+    if (!mocks.meshSecurity) throw new Error('mesh_security_not_configured');
+    return mocks.meshSecurity;
+  },
+}));
 
 vi.mock('./memory/loop.js', () => ({ startMemoryLoop: mocks.startMemoryLoop }));
 
@@ -645,6 +657,9 @@ describe('Excubitor HTTP APIs', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.meshSecurity = null;
+    // Never read this machine's real migration switch: unconfigured must stay fail-closed here.
+    process.env.EXCUBITOR_MESH_LEGACY_MONITOR_FILE = join(tmpdir(), `excubitor-no-legacy-monitor-${process.pid}.json`);
     mocks.catalog = makeCatalog();
     mocks.serviceMap = {};
     mocks.domainRoot = '.example.test';
@@ -1248,7 +1263,28 @@ describe('Excubitor HTTP APIs', () => {
     expect(build.data).toMatchObject({ ok: true, archive: 'demo.zip' });
   });
 
-  it('protects and mutates federation APIs', async () => {
+  it('blocks hostile MCP browser requests before transport or tool execution', async () => {
+    const hostileHeaders: Record<string, string>[] = [
+      { host: 'attacker.invalid' }, { origin: 'https://attacker.invalid' },
+      { origin: 'null' }, { 'sec-fetch-site': 'cross-site' },
+    ];
+    for (const headers of hostileHeaders) {
+      const response = await router.request('http://localhost/mcp', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}',
+      });
+      expect(response.status).toBe(403);
+    }
+    expect((await router.request('http://localhost/mcp', {
+      method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}',
+    })).status).toBe(415);
+    for (const method of ['GET', 'DELETE']) {
+      expect((await router.request('http://localhost/mcp', { method })).status).toBe(405);
+    }
+    expect(mocks.controlService).not.toHaveBeenCalled();
+    expect(mocks.requestOperation).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy federation read-only with explicit administrator policy', async () => {
     // 呼び出し側 (remote-a) の agent token。 本拠点が remote-a をこの token で登録して初めて署名を検証できる。
     const callerToken = 'remote-token';
     const signed = (method: string, path: string, body = '') => ({
@@ -1257,7 +1293,10 @@ describe('Excubitor HTTP APIs', () => {
     });
 
     const unauthorized = await requestJson(router, 'GET', '/api/v1/federation/node');
-    expect(unauthorized.res.status).toBe(401);
+    expect(unauthorized.res.status).toBe(503);
+    expect(unauthorized.data).toMatchObject({ error: 'mesh_security_unavailable' });
+    mocks.meshSecurity = securityConfig();
+    mocks.meshSecurity.peers = {};
     // token は正しいが署名が無い → 401。
     const unsigned = await requestJson(router, 'GET', '/api/v1/federation/health', undefined, { authorization: 'Bearer good' });
     expect(unsigned.res.status).toBe(401);
@@ -1277,6 +1316,7 @@ describe('Excubitor HTTP APIs', () => {
     });
     expect(created.res.status).toBe(201);
     const peerId = created.data.peer.id;
+    mocks.meshSecurity.peers[peerId] = { mode: 'legacy-monitor' };
 
     const node = await requestJson(router, 'GET', '/api/v1/federation/node', undefined, signed('GET', '/api/v1/federation/node'));
     expect(node.res.status).toBe(200);
@@ -1302,51 +1342,19 @@ describe('Excubitor HTTP APIs', () => {
     expect(coverage.res.status).toBe(200);
     expect(coverage.data).toHaveProperty('services');
 
-    // 他拠点からの依頼: 受け付けて 202、 状態は依頼 id で引ける。
+    // Explicit legacy-monitor policy never authorizes remote side effects.
     const opRequest = { target: { kind: 'service', code: 'svc-a' }, action: 'restart' };
     const opBody = JSON.stringify(opRequest);
-    const accepted = await requestJson<{ operation: { id: string; status: string; requested_by: string } }>(
+    const rejected = await requestJson(
       router, 'POST', '/api/v1/federation/operations', opRequest,
       signed('POST', '/api/v1/federation/operations', opBody),
     );
-    expect(accepted.res.status).toBe(202);
-    expect(accepted.data.operation).toMatchObject({ status: 'queued', requested_by: 'remote-a' });
-    const opId = accepted.data.operation.id;
-    const opPath = `/api/v1/federation/operations/${opId}`;
-    const detail = await requestJson<{ operation: { id: string; steps: unknown[] } }>(router, 'GET', opPath, undefined, signed('GET', opPath));
-    expect(detail.res.status).toBe(200);
-    expect(detail.data.operation.id).toBe(opId);
-
-    // 本文を改ざんすると署名が合わない (= どの登録ピアとも一致しない)。
-    const tampered = await requestJson(
-      router, 'POST', '/api/v1/federation/operations',
-      { target: { kind: 'service', code: 'svc-a' }, action: 'stop' },
-      signed('POST', '/api/v1/federation/operations', opBody),
-    );
-    expect(tampered.res.status).toBe(403);
-
-    // Excubitor 自身に stop は頼めない / 知らないサービスは 404 / 担保しないサービスは 409。
-    const selfStop = { target: { kind: 'excubitor' }, action: 'stop' };
-    const selfStopRes = await requestJson(
-      router, 'POST', '/api/v1/federation/operations', selfStop,
-      signed('POST', '/api/v1/federation/operations', JSON.stringify(selfStop)),
-    );
-    expect(selfStopRes.res.status).toBe(400);
-    const unknown = { target: { kind: 'service', code: 'nope' }, action: 'restart' };
-    const unknownRes = await requestJson(
-      router, 'POST', '/api/v1/federation/operations', unknown,
-      signed('POST', '/api/v1/federation/operations', JSON.stringify(unknown)),
-    );
-    expect(unknownRes.res.status).toBe(404);
-    const override = await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: false });
-    expect(override.res.status).toBe(200);
-    const notCovered = await requestJson(
-      router, 'POST', '/api/v1/federation/operations', opRequest,
-      signed('POST', '/api/v1/federation/operations', opBody),
-    );
-    expect(notCovered.res.status).toBe(409);
-    await requestJson(router, 'PUT', '/api/v1/federation/coverage/svc-a', { covered: null });
-
+    expect(rejected.res.status).toBe(403);
+    expect(rejected.data).toMatchObject({ error: 'legacy_monitor_only' });
+    const detail = await requestJson(router, 'GET', '/api/v1/federation/operations/unknown', undefined,
+      signed('GET', '/api/v1/federation/operations/unknown'));
+    expect(detail.res.status).toBe(403);
+    expect(detail.data).toMatchObject({ error: 'legacy_monitor_only' });
     // 自拠点への依頼 (loopback の管理面)。
     const local = await requestJson<{ operation: { id: string; requested_by: string } }>(
       router, 'POST', '/api/v1/operations', opRequest,
@@ -1354,7 +1362,7 @@ describe('Excubitor HTTP APIs', () => {
     expect(local.res.status).toBe(202);
     expect(local.data.operation.requested_by).toBe('local');
     const localList = await requestJson<{ operations: Array<{ id: string }> }>(router, 'GET', '/api/v1/operations');
-    expect(localList.data.operations.map((o) => o.id)).toEqual(expect.arrayContaining([opId, local.data.operation.id]));
+    expect(localList.data.operations.map((o) => o.id)).toEqual(expect.arrayContaining([local.data.operation.id]));
 
     const patched = await requestJson(router, 'PATCH', `/api/v1/peers/${peerId}`, { name: 'Remote B' });
     expect(patched.res.status).toBe(200);

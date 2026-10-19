@@ -5,6 +5,7 @@ import { downloadBundle, type BundleDownloadResult } from '../federation/client.
 import type { RemotePeer } from '../federation/store.js';
 import { execCapture } from '../shared/exec.js';
 import type { CheckoutCloner } from './checkout.js';
+import { requireApprovedBundle } from '../federation/security/artifact.js';
 
 /**
  * 外部に出られない拠点 (取得元 mesh) の bootstrap: 依頼元拠点から main の bundle を丸ごと受け取って clone する。
@@ -17,6 +18,7 @@ const GIT_TIMEOUT_MS = 5 * 60 * 1000;
 export interface MeshCloneDeps {
   download?: (peer: RemotePeer, repo: string, have: string | null, dest: string) => Promise<BundleDownloadResult>;
   exec?: typeof execCapture;
+  approve?: typeof requireApprovedBundle;
 }
 
 export function meshCloner(peer: RemotePeer, deps: MeshCloneDeps = {}): CheckoutCloner {
@@ -28,6 +30,7 @@ export function meshCloner(peer: RemotePeer, deps: MeshCloneDeps = {}): Checkout
     try {
       const got = await download(peer, repository, null, file);
       if (!got.ok || got.upToDate) throw new Error('bundle from ' + peer.name + ' failed: ' + (got.error ?? 'no bundle'));
+      await (deps.approve ?? requireApprovedBundle)(repository, file);
       const verify = await exec('git', ['bundle', 'list-heads', file], root, GIT_TIMEOUT_MS);
       if (!verify.ok || !/\srefs\/heads\/main$/m.test(verify.stdout)) throw new Error('bundle from ' + peer.name + ' has no main');
       const cloned = await exec('git', ['clone', '--branch', 'main', '--single-branch', '--', file, target], root, GIT_TIMEOUT_MS);

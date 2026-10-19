@@ -76,23 +76,36 @@ describe('mesh update source', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
 
   it('fast-forwards the target to the requester main through a bundle', async () => {
     const newest = commit(source, 'b.txt', 'three');
-    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', { download: downloadFrom(source) });
+    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', { download: downloadFrom(source), approve: async () => {} });
     expect(steps.map((s) => [s.step, s.ok])).toEqual([
       ['mesh_fetch', true], ['mesh_verify', true], ['mesh_import', true], ['pull', true],
     ]);
     expect(git(target, 'rev-parse', 'HEAD')).toBe(newest);
   });
 
-  it('reports up to date without touching the checkout', async () => {
+  it('records the digest and main commit of an unapproved bundle without importing it', async () => {
+    const head = git(source, 'rev-parse', 'HEAD');
+    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', {
+      download: downloadFrom(source),
+      approve: async () => { throw new Error('mesh_artifact_not_approved'); },
+    });
+    expect(steps.at(-1)).toMatchObject({ step: 'mesh_approval', ok: false });
+    expect(steps.at(-1)?.detail).toMatch(new RegExp(`^bundle is not approved by the local administrator \\(sha256=[a-f0-9]{64}, main=${head}\\)$`));
+    expect(git(target, 'rev-parse', 'HEAD')).toBe(firstCommit);
+  });
+
+  it('rejects an up-to-date response without approved bundle evidence', async () => {
     const head = git(source, 'rev-parse', 'HEAD');
     git(target, 'reset', '-q', '--hard', head);
-    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', { download: downloadFrom(source) });
-    expect(steps).toEqual([{ step: 'mesh_fetch', ok: true, detail: 'already up to date with origin-site' }]);
+    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', {
+      download: async () => ({ ok: true, upToDate: true, status: 204, error: null }),
+    });
+    expect(steps).toEqual([{ step: 'mesh_approval', ok: false, detail: 'approved full bundle required' }]);
   });
 
   it('refuses a diverged checkout instead of merging', async () => {
     commit(target, 'local.txt', 'local change');
-    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', { download: downloadFrom(source) });
+    const steps = await fastForwardFromMesh(peer, 'LUDIARS/Demo', target, 'main', { download: downloadFrom(source), approve: async () => {} });
     expect(steps.at(-1)).toMatchObject({ step: 'pull', ok: false });
   });
 

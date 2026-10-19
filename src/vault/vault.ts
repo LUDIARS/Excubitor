@@ -264,6 +264,12 @@ export class Vault {
     };
   }
 
+  /** 拠点: 控えを破棄する (失効・拒否時、または fallback 禁止サービス)。 */
+  dropCachedEnv(code: string): void {
+    if (!(code in this.read().cache)) return;
+    this.update((doc) => { delete doc.cache[code]; });
+  }
+
   private key(): Promise<Buffer> {
     this.dek ??= loadOrCreateDek(this.keyStore).catch((error: unknown) => {
       this.dek = null;

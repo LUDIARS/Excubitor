@@ -315,6 +315,8 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS service_deployments (service_code TEXT PRIMARY KEY, git_hash TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   // federation: 他拠点 Excubitor ピア (base_url + token)。
   `CREATE TABLE IF NOT EXISTS remote_peers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_ok_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
+  `CREATE TABLE IF NOT EXISTS mesh_request_nonces (subject TEXT NOT NULL, nonce TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(subject, nonce))`,
+  `CREATE INDEX IF NOT EXISTS mesh_request_nonces_expiry ON mesh_request_nonces(expires_at)`,
   // federation: 拠点ごとの担保上書き (行が無い code は catalog の既定に従う)。
   `CREATE TABLE IF NOT EXISTS federation_coverage_prefs (code TEXT PRIMARY KEY, covered INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000))`,
   // federation: 受けた依頼の履歴と状態 (1 件ずつ実行、 自己再起動をまたいで結果を確定する)。

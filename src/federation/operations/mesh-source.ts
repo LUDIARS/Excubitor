@@ -13,6 +13,7 @@ import { execCapture } from '../../shared/exec.js';
 import { syncSubmodules, tail, type StepResult } from '../../update/steps.js';
 import { downloadBundle, type BundleDownloadResult } from '../client.js';
 import type { RemotePeer } from '../store.js';
+import { fileSha256, requireApprovedBundle } from '../security/artifact.js';
 
 /** @implements SPEC-FEDERATION-MESH-SOURCE */
 
@@ -22,6 +23,7 @@ export const MESH_REMOTE_REF = 'refs/remotes/mesh/main';
 export interface MeshSourceDeps {
   download?: (peer: RemotePeer, repo: string, have: string | null, dest: string) => Promise<BundleDownloadResult>;
   exec?: typeof execCapture;
+  approve?: typeof requireApprovedBundle;
 }
 
 export async function fastForwardFromMesh(
@@ -37,19 +39,30 @@ export async function fastForwardFromMesh(
     return [{ step: 'mesh_branch', ok: false, detail: `依頼元から受け取れるのは main だけです (この checkout は ${branch})` }];
   }
 
-  const head = await exec('git', ['rev-parse', 'HEAD'], repoDir, GIT_TIMEOUT_MS);
-  const have = head.ok ? head.stdout.trim() : null;
   const dir = await mkdtemp(join(tmpdir(), 'excubitor-mesh-'));
   const file = join(dir, 'main.bundle');
   const steps: StepResult[] = [];
   try {
-    const got = await download(peer, repo, have, file);
+    const got = await download(peer, repo, null, file);
     steps.push({
       step: 'mesh_fetch',
       ok: got.ok,
       detail: got.ok ? (got.upToDate ? `already up to date with ${peer.name}` : `bundle from ${peer.name}`) : (got.error ?? 'download failed'),
     });
-    if (!got.ok || got.upToDate) return steps;
+    if (!got.ok) return steps;
+    if (got.upToDate) return [{ step: 'mesh_approval', ok: false, detail: 'approved full bundle required' }];
+    try {
+      await (deps.approve ?? requireApprovedBundle)(repo, file);
+    } catch {
+      // 承認手順 (spec SPEC-SECURITY-MESH-BUNDLE-APPROVAL) のため、管理者が照合する digest と main の commit を残す。
+      // ここでは bundle を取り込まない (list-heads は bundle のヘッダを読むだけ)。
+      const digest = await fileSha256(file).catch(() => 'unknown');
+      const heads = await exec('git', ['bundle', 'list-heads', file, 'refs/heads/main'], repoDir, GIT_TIMEOUT_MS);
+      const head = heads.ok ? heads.stdout.trim().split(/\s+/)[0] ?? 'unknown' : 'unknown';
+      steps.push({ step: 'mesh_approval', ok: false,
+        detail: `bundle is not approved by the local administrator (sha256=${digest}, main=${head})` });
+      return steps;
+    }
 
     const verify = await exec('git', ['bundle', 'verify', file], repoDir, GIT_TIMEOUT_MS);
     steps.push({ step: 'mesh_verify', ok: verify.ok, detail: tail(verify.ok ? verify.stdout : verify.stderr) });

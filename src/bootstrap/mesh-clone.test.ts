@@ -13,7 +13,9 @@ describe('meshCloner', () => {
       calls.push(args);
       return args[1] === 'list-heads' ? ok('abc123 refs/heads/main\n') : ok();
     });
-    await meshCloner(peer, { download, exec: exec as never })('LUDIARS/Example', '/ars/Example', '/ars');
+    const approve = vi.fn(async () => {});
+    await meshCloner(peer, { download, exec: exec as never, approve })('LUDIARS/Example', '/ars/Example', '/ars');
+    expect(approve).toHaveBeenCalledWith('LUDIARS/Example', expect.stringContaining('main.bundle'));
     expect(download).toHaveBeenCalledWith(peer, 'LUDIARS/Example', null, expect.stringContaining('main.bundle'));
     expect(calls.map((a) => a.slice(0, 2).join(' '))).toEqual(['bundle list-heads', 'clone --branch', 'remote set-url']);
     expect(calls[2]).toEqual(['remote', 'set-url', 'origin', 'https://github.com/LUDIARS/Example.git']);
@@ -24,7 +26,15 @@ describe('meshCloner', () => {
     const failing = vi.fn(async () => ({ ok: false, upToDate: false, status: 404, error: 'repo_not_found_on_this_node' }));
     await expect(meshCloner(peer, { download: failing, exec: exec as never })('LUDIARS/Example', '/t', '/r')).rejects.toThrow(/repo_not_found/);
     const download = vi.fn(async () => ({ ok: true, upToDate: false, status: 200, error: null }));
-    await expect(meshCloner(peer, { download, exec: exec as never })('LUDIARS/Example', '/t', '/r')).rejects.toThrow(/no main/);
+    await expect(meshCloner(peer, { download, exec: exec as never, approve: async () => {} })('LUDIARS/Example', '/t', '/r')).rejects.toThrow(/no main/);
     expect(exec.mock.calls.some((call) => call[1][0] === 'clone')).toBe(false);
+  });
+  it('does not execute git commands for an unapproved bundle', async () => {
+    const exec = vi.fn();
+    const download = async () => ({ ok: true, upToDate: false, status: 200, error: null });
+    await expect(meshCloner(peer, { download, exec: exec as never,
+      approve: async () => { throw new Error('digest mismatch'); },
+    })('LUDIARS/Example', '/t', '/r')).rejects.toThrow('digest mismatch');
+    expect(exec).not.toHaveBeenCalled();
   });
 });

@@ -1,87 +1,84 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
-import { requireMutualPeer, type FederationEnv } from './peer-auth.js';
+import { requireMutualPeer, type FederationEnv, type PeerAuthDeps } from './peer-auth.js';
 import { signatureHeaders } from './request-signature.js';
+import { meshProofHeaders } from './security/proof.js';
+import { keys, NOW, securityConfig, workloadClaims } from './security/test-fixtures.js';
 
-const NOW = 1_700_000_000_000;
-
-function app(peers: Array<{ id: string; name: string; token: string; enabled: boolean }>) {
-  const hono = new Hono<FederationEnv>();
-  hono.post('/api/v1/federation/operations', requireMutualPeer({
-    now: () => NOW,
-    verifyBearer: (h) => h === 'Bearer local-token',
-    peers: () => peers,
-  }), (c) => c.json({ caller: c.get('federationCaller') }));
-  return hono;
+const path = '/api/v1/federation/operations';
+const body = '{"action":"deploy"}';
+function headers(overrides: Partial<Parameters<typeof meshProofHeaders>[0]> = {}): Record<string, string> {
+  return meshProofHeaders({ privateKey: keys.privateKey, subject: 'branch/excubitor', audience: 'hq/excubitor',
+    token: 'opaque-token', method: 'POST', path, body, now: NOW, ...overrides });
+}
+function application(overrides: PeerAuthDeps = {}): Hono<FederationEnv> {
+  const seen = new Set<string>();
+  const app = new Hono<FederationEnv>();
+  app.use('*', requireMutualPeer({ now: () => NOW, config: securityConfig,
+    peers: () => [{ id: 'branch', name: 'Branch', enabled: true, token: 'old-shared-token' }],
+    introspect: async () => workloadClaims(), verifyBearer: header => header === 'Bearer local-token',
+    remember: (subject, nonce) => { const key = subject + nonce; if (seen.has(key)) return false; seen.add(key); return true; },
+    ...overrides,
+  }));
+  app.all('*', c => c.json({ caller: c.get('federationCaller') }));
+  return app;
+}
+async function post(app: Hono<FederationEnv>, auth = headers(), payload = body): Promise<Response> {
+  return app.request(`https://hq.invalid${path}`, { method: 'POST', headers: auth, body: payload });
 }
 
-function post(hono: Hono<FederationEnv>, headers: Record<string, string>, body = '{"x":1}') {
-  return hono.request('/api/v1/federation/operations', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
-}
-
-const registered = [
-  { id: 'p-mac', name: 'Mac', token: 'mac-token', enabled: true },
-  { id: 'p-off', name: 'Old', token: 'old-token', enabled: false },
-];
-
-function signedBy(token: string, overrides: { now?: number; body?: string; nonce?: string } = {}) {
-  return {
-    authorization: 'Bearer local-token',
-    ...signatureHeaders(token, 'kaoimac', {
-      method: 'POST',
-      path: '/api/v1/federation/operations',
-      body: overrides.body ?? '{"x":1}',
-    }, overrides.now ?? NOW, overrides.nonce),
-  };
-}
-
-describe('requireMutualPeer', () => {
-  it('lets a registered peer through and tells the handler who called', async () => {
-    const res = await post(app(registered), signedBy('mac-token'));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ caller: { peerId: 'p-mac', peerName: 'Mac', claimedNode: 'kaoimac' } });
+describe('Cr workload authentication', () => {
+  it('binds the authenticated caller to the registered site/workload', async () => {
+    const response = await post(application());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ caller: { peerId: 'branch', subject: 'branch/excubitor', authMode: 'cr-v1' } });
   });
-
-  it('refuses a caller this node has not registered (mutual registration required)', async () => {
-    const res = await post(app(registered), signedBy('stranger-token'));
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: 'peer_not_registered' });
+  it.each(['sub', 'aud', 'kind'] as const)('rejects an invalid %s claim', async field => {
+    expect((await post(application({ introspect: async () => ({ ...workloadClaims(), [field]: 'other/value' }) }))).status).toBe(401);
   });
-
-  it('refuses a disabled peer the same way', async () => {
-    const res = await post(app(registered), signedBy('old-token'));
-    expect(res.status).toBe(403);
+  it('rejects invalid body, audience, token and stale proof', async () => {
+    expect((await post(application(), headers(), '{}')).status).toBe(401);
+    expect((await post(application(), headers({ audience: 'other/excubitor' }))).status).toBe(403);
+    expect((await post(application(), { ...headers(), authorization: 'Bearer stolen-other-token' })).status).toBe(401);
+    expect((await post(application(), headers({ now: NOW - 31_000 }))).status).toBe(401);
   });
-
-  it('checks the bearer token first', async () => {
-    const res = await post(app(registered), { ...signedBy('mac-token'), authorization: 'Bearer wrong' });
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'unauthorized' });
+  it('does not let a peer holding legacy shared tokens impersonate a migrated workload', async () => {
+    const old = { authorization: 'Bearer local-token', ...signatureHeaders('old-shared-token', 'Branch', { method: 'POST', path, body }, NOW) };
+    expect((await post(application(), old)).status).toBe(403);
+    expect((await post(application(), { ...old, 'x-excubitor-auth': 'cr-v1', 'x-excubitor-workload': 'branch/excubitor', 'x-excubitor-audience': 'hq/excubitor' })).status).toBe(401);
   });
-
-  it('requires the signature headers', async () => {
-    const res = await post(app(registered), { authorization: 'Bearer local-token' });
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'signature_required' });
+  it('rejects replay using the durable-store decision', async () => {
+    const app = application();
+    const proof = headers();
+    expect((await post(app, proof)).status).toBe(200);
+    expect((await post(app, proof)).status).toBe(401);
+    expect((await post(application({ remember: () => false }))).status).toBe(401);
   });
-
-  it('rejects requests outside the clock window', async () => {
-    const res = await post(app(registered), signedBy('mac-token', { now: NOW - 10 * 60 * 1000 }));
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'stale_request' });
+  it('fails closed for Cr outage, invalid configuration, disabled peer and nonce store failure', async () => {
+    expect((await post(application({ introspect: async () => { throw new Error('offline'); } }))).status).toBe(401);
+    expect((await post(application({ config: () => { throw new Error('missing'); } }))).status).toBe(503);
+    expect((await post(application({ peers: () => [] }))).status).toBe(403);
+    expect((await post(application({ remember: () => { throw new Error('db failed'); } }))).status).toBe(503);
   });
-
-  it('rejects a replayed request', async () => {
-    const hono = app(registered);
-    const headers = signedBy('mac-token', { nonce: 'same' });
-    expect((await post(hono, headers)).status).toBe(200);
-    const again = await post(hono, headers);
-    expect(again.status).toBe(401);
-    expect(await again.json()).toEqual({ error: 'replayed_request' });
+  it('requires TLS without trusting forwarded proto', async () => {
+    const response = await application().request(`http://hq.invalid${path}`, {
+      method: 'POST', headers: { ...headers(), 'x-forwarded-proto': 'https' }, body,
+    });
+    expect(response.status).toBe(403);
   });
-
-  it('rejects a body that was changed after signing', async () => {
-    const res = await post(app(registered), signedBy('mac-token'), '{"x":2}');
-    expect(res.status).toBe(403);
+  it('requires fresh introspection for every request, including after revocation', async () => {
+    const introspect = vi.fn().mockResolvedValueOnce(workloadClaims()).mockRejectedValueOnce(new Error('revoked'));
+    const app = application({ introspect });
+    expect((await post(app)).status).toBe(200);
+    expect((await post(app)).status).toBe(401);
+    expect(introspect).toHaveBeenCalledTimes(2);
+  });
+  it('requires an explicit legacy-monitor mapping for old health requests', async () => {
+    const health = '/api/v1/federation/health';
+    const auth = { authorization: 'Bearer local-token', ...signatureHeaders('old-shared-token', 'Branch', { method: 'GET', path: health, body: '' }, NOW) };
+    const config = securityConfig();
+    expect((await application().request(health, { headers: auth })).status).toBe(403);
+    config.peers.branch = { mode: 'legacy-monitor' };
+    expect((await application({ config: () => config }).request(health, { headers: auth })).status).toBe(200);
   });
 });

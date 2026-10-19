@@ -16,8 +16,11 @@ import type { Catalog } from '../../catalog/loader.js';
 import { createNamedLogger } from '../../shared/logger.js';
 import type { StepResult } from '../../update/steps.js';
 import { getPeer, type RemotePeer } from '../store.js';
+import { consumeOperationPermit, clearOperationPermits } from '../security/operation-permits.js';
 import type { ExecutionOutcome, OperationContext } from './context.js';
-import { CONCORDIA_SITE_ACTION, runConcordiaSiteOperation } from './concordia-site.js';
+import type { PermitCheck } from '../security/reauthorization.js';
+import { reauthorizeQueuedOperation } from './reauthorize-queued.js';
+import { CONCORDIA_SITE_ACTION, runConcordiaSiteOperation, takeSiteToken } from './concordia-site.js';
 import { recoverSelfService } from './self-recovery.js';
 import { runSelfOperation, selfRepoOf } from './self-operation.js';
 import { runServiceOperation } from './service-operation.js';
@@ -58,6 +61,8 @@ export interface OperationRunnerDeps {
   /** 日次更新の実行中に順番が来た依頼を、 待ち行列に残したまま再試行するまでの間隔 (ms)。 */
   dailyRetryMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /** 待ち行列で認可期限を過ぎた他拠点の依頼を、実行直前に同じ範囲で再認可する。 */
+  reauthorize?: (op: OperationRecord) => Promise<PermitCheck>;
 }
 
 /** 日次更新の実行中は依頼を失敗にせず、 待ち行列に残して後で再試行する (2026-10-06 neco)。 */
@@ -79,6 +84,7 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
   const execute = deps.execute ?? executeOperation;
   const findPeer = deps.findPeer ?? getPeer;
   const dailyRetryMs = deps.dailyRetryMs ?? DEFAULT_DAILY_RETRY_MS;
+  const reauthorize = deps.reauthorize ?? ((op: OperationRecord) => reauthorizeQueuedOperation(op));
   const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms).unref());
   let active: Promise<void> | null = null;
   let stopped = false;
@@ -94,10 +100,19 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
       record: (step: StepResult) => appendStep(op.id, step),
     };
     try {
+      if (op.requester_peer_id) {
+        const permit = await consumeOperationPermit(op.id, () => reauthorize(op), now());
+        if (!permit.ok) {
+          // 黙って捨てない: 理由を手順と結果に残して失敗にする。
+          appendStep(op.id, { step: 'authorize', ok: false, detail: permit.reason });
+          return { kind: 'finished', ok: false, error: `remote_operation_unauthorized: ${permit.reason}` };
+        }
+      }
       return await execute(op, ctx, deps.getCatalog());
     } catch (err) {
       return { kind: 'finished', ok: false, error: `unexpected: ${(err as Error).message}` };
     } finally {
+      takeSiteToken(op.id); // Release an HQ secret even when execution authorization was denied.
       endManualUpdate(op.id);
     }
   };
@@ -180,6 +195,7 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
     },
     stop: () => {
       stopped = true;
+      clearOperationPermits();
     },
   };
 }
