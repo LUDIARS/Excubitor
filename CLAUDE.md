@@ -107,7 +107,7 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
 
 ## 注意
 
-- 通常起動・secret-agent は Vault-only。Infisical は移行 import のみに残し、通常取得の fallback にしない。
+- 通常起動・secret-agent は Vault-only。Infisical の接続・移行 import・設定画面は廃止。
   共有／プロジェクト binding と source peer の詳細は spec/feature/vault.md を参照。
 - 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。

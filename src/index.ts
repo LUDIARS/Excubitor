@@ -60,7 +60,6 @@ import { readMeshAuthPolicy } from './federation/security/legacy-monitor-store.j
 import { buildTerminalRouter } from './terminal/router.js';
 import { sharedVault } from './vault/vault.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
-import { applyInfisicalToEnv, getServiceMap, resolveServiceInfisical, type ServiceInfisical } from './secrets/config-store.js';
 import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode, detectLogSafeMode, setLogSafeMode, isLogSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
@@ -162,15 +161,6 @@ let buildVersionPending: Promise<void> | null = null;
 
 function findService(code: string): Service | undefined {
   return currentCatalog?.services.find((s) => s.code === code);
-}
-
-/** Infisical マッピングを持つサービス (Excubitor 設定優先 / catalog fallback)。Vault への一括移行が使う。 */
-function listInfisicalServices(): Array<{ code: string; mapping: ServiceInfisical }> {
-  const codes = new Set([...Object.keys(getServiceMap()), ...(currentCatalog?.services ?? []).filter((s) => s.infisical).map((s) => s.code)]);
-  return [...codes].flatMap((code) => {
-    const mapping = resolveServiceInfisical(code, findService(code)?.infisical);
-    return mapping ? [{ code, mapping }] : [];
-  });
 }
 
 function serviceFunctionMetricBaseUrl(svc: Service): string | null {
@@ -510,14 +500,6 @@ const logSafeModeAsyncNoop = async (): Promise<void> => { /* log safe mode: noth
 
 /** @implements SPEC-SERVICE-RUNTIME-VERSION */
 export async function bootObservability(options: BootObservabilityOptions = {}): Promise<ObservabilityHandle> {
-  // 設定ファイルに Infisical identity があれば process.env に注入 (relay の前提)。
-  // 無ければ未設定のまま → UI が入力を促す。
-  if (applyInfisicalToEnv()) {
-    logger.info('Infisical identity loaded from config file');
-  } else {
-    logger.warn('Infisical identity not configured — secret relay は UI 設定待ち');
-  }
-
   // secret-agent: 常駐 resolve エンドポイント用のローカルトークンを用意 (無ければ生成)。
   // 各サービスは同じトークン (env or token ファイル) で /api/v1/secrets/resolve を叩く。
   getOrCreateAgentToken();
@@ -823,7 +805,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     (reason) => reloadCatalog(reason),
   ));
 
-  // 設定 API (/api/v1/config/* — Infisical identity + サービスマッピング)
+  // 設定 API (/api/v1/config/*)
   app.route('/', buildConfigRouter({ onDomainRootChanged: () => reloadCatalog('domain root change') }));
   app.route('/', buildTerminalRouter());
 
@@ -833,8 +815,6 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // Vault (/api/v1/vault/* — 暗号化した環境変数と「使用する環境変数」。値は返さない)
   app.route('/', buildVaultRouter({
     vault: sharedVault,
-    getCatalogInfisical: (code) => findService(code)?.infisical,
-    listInfisicalServices: listInfisicalServices,
   }));
 
   // アップデート確認・配信 (/api/v1/updates, /api/v1/services/:code/update)

@@ -61,7 +61,7 @@ describe('project and shared Vaults', () => {
   });
 
   it('retains shared data while editing and deleting project entries via the API', async () => {
-    const app = buildVaultRouter({ vault: () => vault, getCatalogInfisical: () => undefined });
+    const app = buildVaultRouter({ vault: () => vault });
     await vault.setEntry('TOKEN', 'shared');
     const put = (project: string) => app.request(`/api/v1/vault/entries/TOKEN?project=${project}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: 'private' }),

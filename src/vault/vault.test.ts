@@ -263,8 +263,8 @@ describe('vault federation route', () => {
 });
 
 describe('vault admin API', () => {
-  function app(resolveInfisical?: never) {
-    return buildVaultRouter({ vault: () => vault, getCatalogInfisical: () => undefined, peerExists: (id) => id === 'hq', resolveInfisical });
+  function app() {
+    return buildVaultRouter({ vault: () => vault, peerExists: (id) => id === 'hq' });
   }
 
   it('never returns values', async () => {
@@ -299,26 +299,16 @@ describe('vault admin API', () => {
     expect((await put('cernere', ['bad-name'])).status).toBe(400);
   });
 
-  it('moves Infisical values into the Vault and binds them to the service', async () => {
+  it('rejects retired import routes without changing Vault entries or bindings', async () => {
     await vault.setEntry('EXISTING', 'keep');
     vault.setBindings('svc', ['EXISTING']);
-    const resolveInfisical = vi.fn(async () => ({ ok: true as const, secrets: { API_KEY: 'k', DB_URL: 'u' }, projectId: 'p', environment: 'dev' }));
-    const response = await app(resolveInfisical as never).request('/api/v1/vault/import/infisical/svc', { method: 'POST' });
-    expect(await response.json()).toEqual({ ok: true, imported: ['API_KEY', 'DB_URL'], unchanged: [], conflicts: [], invalid: [] });
-    expect((await vault.envFor('svc'))?.env).toEqual({ API_KEY: 'k', DB_URL: 'u', EXISTING: 'keep' });
+    for (const path of ['/api/v1/vault/import/infisical', '/api/v1/vault/import/infisical/svc']) {
+      expect((await app().request(path, { method: 'POST' })).status).toBe(404);
+    }
+    expect((await vault.envFor('svc'))?.env).toEqual({ EXISTING: 'keep' });
+    expect(vault.bindingsFor('svc')).toEqual(['EXISTING']);
   });
 
-  it('keeps shared values and imports a different same-named project value', async () => {
-    await vault.setEntry('DATABASE_URL', 'cernere-db');
-    await vault.setEntry('SHARED', 'same');
-    vault.setBindings('cernere', ['DATABASE_URL']);
-    const resolveInfisical = vi.fn(async () => ({ ok: true as const, secrets: { DATABASE_URL: 'other-db', SHARED: 'same', NEW_KEY: 'n' }, projectId: 'p2', environment: 'dev' }));
-    const response = await app(resolveInfisical as never).request('/api/v1/vault/import/infisical/other', { method: 'POST' });
-    expect(await response.json()).toEqual({ ok: true, imported: ['DATABASE_URL', 'NEW_KEY', 'SHARED'], unchanged: [], conflicts: [], invalid: [] });
-    expect((await vault.envFor('cernere'))?.env).toEqual({ DATABASE_URL: 'cernere-db' });
-    expect(vault.forProject('p2').bindingsFor('other')).toEqual(['DATABASE_URL', 'NEW_KEY', 'SHARED']);
-    expect((await vault.envFor('other'))?.env.DATABASE_URL).toBe('other-db');
-  });
 });
 
 describe('DPAPI key store', () => {

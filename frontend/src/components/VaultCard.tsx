@@ -3,7 +3,6 @@ import { fetchPeers, type PeerView } from '../lib/api';
 import {
   deleteVaultEntry,
   fetchVaultStatus,
-  importVaultFromInfisical,
   saveVaultBindings,
   saveVaultEntry,
   saveVaultOverrides,
@@ -23,7 +22,6 @@ export function VaultCard() {
   const [value, setValue] = useState('');
   const [bindCode, setBindCode] = useState('');
   const [bindNames, setBindNames] = useState('');
-  const [importCode, setImportCode] = useState('');
   const [overrideCode, setOverrideCode] = useState('');
   const [overrideNames, setOverrideNames] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -202,23 +200,6 @@ export function VaultCard() {
             return `${bindCode.trim()} の紐付けを保存しました`;
           })}
         >紐付けを保存</button>
-      </div>
-
-      <h3>Infisical から移す</h3>
-      <p className="muted">サービスのInfisical設定に対応するプロジェクトVaultへ保存します。</p>
-      <div className="config-row">
-        <input placeholder="サービスコード" value={importCode} onChange={(event) => setImportCode(event.target.value)} />
-        <button
-          disabled={busy || !importCode.trim()}
-          title="そのサービスの Infisical マッピングで取れる値を Vault に保存し、紐付けに足す"
-          onClick={() => void run(async () => {
-            const result = await importVaultFromInfisical(importCode.trim());
-            const conflicts = result.conflicts.length > 0
-              ? ` / 値の異なる同名があり取り込まなかった: ${result.conflicts.join(', ')}`
-              : '';
-            return `新規 ${result.imported.length} 件・同じ値 ${result.unchanged.length} 件を紐付けました${conflicts}`;
-          })}
-        >取り込む</button>
       </div>
 
       {message && <p className={message.ok ? 'ok' : 'error'}>{message.text}</p>}

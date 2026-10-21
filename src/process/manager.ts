@@ -754,14 +754,8 @@ async function autoRestartService(
 /**
  * 子へ継承させない supervisor 固有の credential。
  *
- * supervisor は起動時に `applyInfisicalToEnv()` で **Excubitor 自身の** machine identity を
- * `process.env` へ載せる (service-runner-infisical.ts)。 この identity は Excubitor が
- * アクセスできる全 Infisical project を読める鍵なので、 素通しで継承させると relay が
- * `inject` / `requires_secret` で project・key 単位に絞っている意味が無くなる
- * (子は自分に配られた secret 以外も自力で fetch できてしまう)。 Cernere の issuer
- * credential を prepareSpawnEnv が削除するのと同じ扱いにする。
- *
- * SITE_URL / ENVIRONMENT は機密でなく、 自前 fetch するサービスの接続先として有用なので残す。
+ * Legacy provider credentials may remain in the parent environment. Keep stripping
+ * privileged values instead of leaking them to managed service children.
  */
 const NON_INHERITABLE_ENV_KEYS = ['INFISICAL_CLIENT_ID', 'INFISICAL_CLIENT_SECRET'];
 

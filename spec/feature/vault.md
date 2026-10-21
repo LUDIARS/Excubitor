@@ -129,8 +129,6 @@ secret-agent も同じ resolveVaultEnv を使う。値返却は既存のトー�
 | PUT | `/api/v1/vault/bindings/:code` | `{ names }` 使用する環境変数 (空で外す) |
 | PUT | `/api/v1/vault/overrides/:code` | `{ names }` 拠点の上書き (空で外す)。共有Vaultのみ。`GET /api/v1/vault` の `overrides` に名前と登録有無を返す |
 | PUT | `/api/v1/vault/source` | `{ peer_id }` 拠点の取得元 (null で本社) |
-| POST | `/api/v1/vault/import/infisical/:code` | Infisicalのproject IDに対応するVaultへ移して紐付けに足す。同一プロジェクト内の同名異値は `conflicts` とし上書きしない |
-| POST | `/api/v1/vault/import/infisical` | `{ dry_run?, environment? }` Infisical の全 project を一括で移す (下記)。名前と件数だけ返し、値は返さない |
 
 公開面 (拠点間、相互登録の署名が必須): `POST /api/v1/federation/vault/env` `{ service }` → `{ env, missing }`。
 渡した記録 (拠点・サービス・変数名) をログに残す。値は残さない。
@@ -140,27 +138,6 @@ WebUI: 「環境変数」タブ。
 entries の PUT / DELETE と bindings の PUT は `?project=<id>` で登録済みプロジェクトを指定する。
 未指定は共有。未知のIDは拒否する。WebUIは共有・プロジェクトの選択、登録、値の保存、紐付けに対応する。
 
-### Infisical からの一括移行
+### 廃止済みの外部サービス連携
 
-Infisical は使わなくなるため、Excubitor の machine identity で参照できる全 project の値を Vault へ移す。
-
-1. Infisical マッピングを持つサービス (Excubitor 設定優先 / catalog fallback) は、そのマッピング
-   (project / environment / prefix / include / exclude) で取り込み、サービスの「使用する環境変数」に紐付ける。
-2. どのサービスにも紐付かない project (`GET /api/v1/projects?type=secret-manager`) は値だけ取り込み、紐付けない
-   (例: CF Tunnel ブローカーが読む `CF_API_TOKEN` / `CF_ACCOUNT_ID`)。environment は `environment` (既定 `dev`)。
-   project に無く environment が 1 つだけならそれを使い、それ以外は skip して理由を返す。
-3. 同一プロジェクト内の既存同名が別の値なら上書きせず `conflicts`。変数名に使えない名前は `invalid` として取り込まない。空文字は保持する。
-   1 件の失敗は `error` に入れて残りを続ける。`dry_run` は分類だけ返して Vault を変更しない。
-
-実行 (本社の Excubitor で、人が実行する):
-
-```bash
-node scripts/vault-import-infisical.mjs --url http://127.0.0.1:17332/ --dry-run   # 何が入るかだけ見る
-node scripts/vault-import-infisical.mjs --url http://127.0.0.1:17332/             # 登録する
-```
-
-スクリプトは loopback の Excubitor だけを呼び、資格情報を持たず値も表示しない。POST は再送しない。
-
-2026-10-01: 本社で Infisical の値を取り込み済み (cernere 47 / ostiarius 5 / volputas 6 / discutere 2、いずれも同じ project・環境で同名は同値)。
-ostiarius / volputas には requires_secret で借りていた `EXCUBITOR_CERNERE_CLIENT_ID` / `_SECRET` も紐付けた。
-ludellus-web は Infisical 設定がコメントアウト、volputas-haster は disabled のため対象外。
+Infisical の取得・移行 API とスクリプトは撤去した。環境変数タブで共有またはプロジェクトの Vault を選択し、値と使用サービスの紐付けを管理する。既存の Vault 値と紐付けは変更しない。旧 catalog/config の必須条件は読み取り専用で保持し、Vault 未移行を匿名・設定なしとして起動しない。

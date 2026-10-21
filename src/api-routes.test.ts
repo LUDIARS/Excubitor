@@ -405,7 +405,6 @@ vi.mock('./secrets/config-store.js', () => ({
   getCfTunnelStatus: () => emptyCfTunnelStatus(),
   saveCfTunnelSettings: () => emptyCfTunnelStatus(),
 }));
-vi.mock('./secrets/infisical.js', () => ({ verifyIdentity: mocks.verifyIdentity }));
 vi.mock('./secrets/agent-token.js', () => ({
   getOrCreateAgentToken: mocks.getOrCreateAgentToken,
   agentTokenPath: mocks.agentTokenPath,
@@ -697,9 +696,8 @@ describe('Excubitor HTTP APIs', () => {
     { name: 'serves auto-fix runs', path: '/api/v1/auto-fix/runs', key: 'runs' },
     { name: 'serves error rules', path: '/api/v1/error-rules', key: 'rules' },
     { name: 'serves launch plan', path: '/api/v1/launch/plan', key: 'projects' },
-    { name: 'serves service env config', path: '/api/v1/services/svc-a/env-config', key: 'status' },
     { name: 'serves projects view', path: '/api/v1/projects', key: 'projects' },
-    { name: 'serves Infisical config', path: '/api/v1/config/infisical', key: 'identity' },
+    { name: 'serves operational config', path: '/api/v1/config', key: 'domain_root' },
     { name: 'serves domain root config', path: '/api/v1/config/domain-root', key: 'domain_root' },
     { name: 'serves updates list', path: '/api/v1/updates?fetch=1', key: 'updates' },
     { name: 'serves service commits', path: '/api/v1/services/svc-a/commits', key: 'commits' },
@@ -903,8 +901,6 @@ describe('Excubitor HTTP APIs', () => {
     const update = await requestJson(router, 'GET', '/api/v1/services/missing/update');
     expect(update.res.status).toBe(404);
 
-    const envConfig = await requestJson(router, 'GET', '/api/v1/services/missing/env-config');
-    expect(envConfig.res.status).toBe(404);
   });
 
   it('proxies function metrics from a service local port', async () => {
@@ -1175,15 +1171,6 @@ describe('Excubitor HTTP APIs', () => {
     expect(corpus.res.status).toBe(200);
     expect(corpus.data).toMatchObject({ ok: true, uses_corpus: true });
 
-    const env = await requestJson(router, 'PUT', '/api/v1/services/svc-a/env-config', {
-      project_id: 'override-proj',
-      environment: 'dev',
-      inject: true,
-      required_env: ['REQUIRED_ONE'],
-    });
-    expect(env.res.status).toBe(200);
-    expect(env.data).toMatchObject({ ok: true, code: 'svc-a' });
-
     const catalogInfo = await requestJson(router, 'PUT', '/api/v1/services/svc-a/catalog-info', {
       project_code: 'proj-a',
       subdomain: 'svc-a',
@@ -1198,40 +1185,6 @@ describe('Excubitor HTTP APIs', () => {
     expect(domain.res.status).toBe(200);
     expect(domain.data).toHaveProperty('domain_root');
 
-    const identity = await requestJson(router, 'PUT', '/api/v1/config/infisical/identity', {
-      siteUrl: 'https://infisical.local',
-      environment: 'dev',
-      clientId: 'cid',
-      clientSecret: 'secret',
-    });
-    expect(identity.res.status).toBe(200);
-    expect(identity.data).toHaveProperty('identity');
-
-    const test = await requestJson(router, 'POST', '/api/v1/config/infisical/test', {});
-    expect(test.res.status).toBe(200);
-    expect(test.data).toMatchObject({ ok: true });
-
-    const services = await requestJson(router, 'PUT', '/api/v1/config/infisical/services', {
-      services: {
-        'svc-a': { project_id: 'proj', environment: 'dev', inject: true, prefix: '' },
-      },
-    });
-    expect(services.res.status).toBe(200);
-    expect(services.data).toHaveProperty('services');
-
-    // A single-service write keeps the other rows and rejects a malformed code.
-    const single = await requestJson(router, 'PUT', '/api/v1/config/infisical/services/svc-b', {
-      project_id: 'proj-b', environment: 'dev', include: ['ONLY_THIS'],
-    });
-    expect(single.res.status).toBe(200);
-    expect(single.data).toMatchObject({ ok: true, code: 'svc-b', service: { project_id: 'proj-b', include: ['ONLY_THIS'] } });
-    expect(mocks.serviceMap).toHaveProperty('svc-a');
-    expect(mocks.serviceMap).toHaveProperty('svc-b');
-    const badCode = await requestJson(router, 'PUT', '/api/v1/config/infisical/services/Bad_Code', {
-      project_id: 'proj-b', environment: 'dev',
-    });
-    expect(badCode.res.status).toBe(400);
-
     const unauthorized = await requestJson(router, 'POST', '/api/v1/secrets/resolve', { service: 'svc-a' });
     expect(unauthorized.res.status).toBe(401);
 
@@ -1244,6 +1197,22 @@ describe('Excubitor HTTP APIs', () => {
     );
     expect(resolved.res.status).toBe(200);
     expect(resolved.data).toHaveProperty('secrets');
+  });
+
+  it('rejects retired identity and mapping endpoints', async () => {
+    for (const [method, path] of [
+      ['GET', '/api/v1/config/infisical'],
+      ['PUT', '/api/v1/config/infisical/identity'],
+      ['POST', '/api/v1/config/infisical/test'],
+      ['PUT', '/api/v1/config/infisical/services'],
+      ['PUT', '/api/v1/config/infisical/services/svc-a'],
+      ['GET', '/api/v1/services/svc-a/env-config'],
+      ['PUT', '/api/v1/services/svc-a/env-config'],
+    ] as const) {
+      const result = await router.request(path, { method, headers: jsonHeaders(), ...(method === 'GET' ? {} : { body: '{}' }) });
+      expect(result.status).toBe(404);
+    }
+    expect(mocks.verifyIdentity).not.toHaveBeenCalled();
   });
 
   it('mutates update and release APIs', async () => {

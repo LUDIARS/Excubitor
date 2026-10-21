@@ -2,14 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import type {
   Project, Component, ControlAction, PortReport, ServicePortStatus,
   LaunchPlan, MemoryCard, UpdateStatus, DiscoveryResult, LivenessSeries,
-  CommitInfo, RecentLogLine, ServiceEnvConfig,
+  CommitInfo, RecentLogLine,
 } from '../lib/api';
 import {
   fetchProjects, controlService, fetchPorts, setCorpusPref, applyUpdate,
   fetchLaunchPlan, saveLaunchProfile, launchStart, launchStop,
   fetchMemorySummary, fetchUpdates, fetchDiscovery, fetchLiveness,
   fetchCommits, fetchRecentLogs, emergencyService, saveCatalogInfo,
-  fetchServiceEnvConfig, saveServiceEnvConfig,
 } from '../lib/api';
 import LogsDrawer from '../components/LogsDrawer';
 import MetricGraph from '../components/MetricGraph';
@@ -371,7 +370,6 @@ function ServiceDetailOverlay({
 }) {
   const [busy, setBusy] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [envOpen, setEnvOpen] = useState(false);
   const [live, setLive] = useState<LivenessSeries | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [logs, setLogs] = useState<RecentLogLine[]>([]);
@@ -445,7 +443,7 @@ function ServiceDetailOverlay({
               {isControllable && !running && <button className="start" disabled={busy} onClick={() => void act('start')}>Start</button>}
               {isControllable && running && <button disabled={busy} onClick={() => void act('stop')}>Stop</button>}
               {isControllable && <button disabled={busy} onClick={() => void act('restart')}>Restart</button>}
-              <button disabled={busy} onClick={() => setEnvOpen(true)}>ENV</button>
+              <a href="#env">環境変数</a>
               <button disabled={busy} onClick={() => void update_()}>Update</button>
               <button onClick={onShowLogs}>Live logs</button>
             </div>
@@ -520,142 +518,7 @@ function ServiceDetailOverlay({
           }}
         />
       )}
-      {envOpen && (
-        <EnvConfigWindow
-          c={c}
-          onClose={() => setEnvOpen(false)}
-          onSaved={async () => {
-            setEnvOpen(false);
-            await onChanged();
-          }}
-        />
-      )}
     </>
-  );
-}
-
-function EnvConfigWindow({
-  c, onClose, onSaved,
-}: {
-  c: Component;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const [cfg, setCfg] = useState<ServiceEnvConfig | null>(null);
-  const [projectId, setProjectId] = useState('');
-  const [environment, setEnvironment] = useState('dev');
-  const [inject, setInject] = useState(true);
-  const [prefix, setPrefix] = useState('');
-  const [include, setInclude] = useState('');
-  const [exclude, setExclude] = useState('');
-  const [requiredEnv, setRequiredEnv] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = async () => {
-    setError(null);
-    const next = await fetchServiceEnvConfig(c.code);
-    const source = next.override ?? next.effective;
-    setCfg(next);
-    setProjectId(source?.project_id ?? '');
-    setEnvironment(source?.environment ?? 'dev');
-    setInject(source?.inject ?? true);
-    setPrefix(source?.prefix ?? '');
-    setInclude(joinList(source?.include));
-    setExclude(joinList(source?.exclude));
-    setRequiredEnv(joinList(source?.required_env ?? next.required_env));
-  };
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError((e as Error).message));
-  }, [c.code]);
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveServiceEnvConfig(c.code, {
-        project_id: projectId,
-        environment,
-        inject,
-        prefix,
-        include: splitList(include),
-        exclude: splitList(exclude),
-        required_env: splitList(requiredEnv),
-      });
-      await onSaved();
-    } catch (e: unknown) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="catalog-window-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <form
-        className="catalog-window env-window"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        <header className="catalog-window-head">
-          <div>
-            <h3>Infisical ENV</h3>
-            <div className="detail-sub">{c.code}</div>
-          </div>
-          <button type="button" className="close" onClick={onClose}>Close</button>
-        </header>
-        {error && <div className="error-banner">Error: {error}</div>}
-        {cfg && (
-          <div className={`env-status ${cfg.status.ready ? 'ok' : 'fail'}`}>
-            {cfg.status.ready ? 'ready' : 'missing'} | required {cfg.status.required.length} | resolved {cfg.status.resolvedKeys ?? '-'}
-            {cfg.status.missing.length > 0 && <span> | {cfg.status.missing.join(', ')}</span>}
-            {cfg.status.error && <span> | {cfg.status.error}</span>}
-          </div>
-        )}
-        <label>
-          Project ID
-          <input value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="Infisical project UUID" />
-        </label>
-        <div className="env-window-grid">
-          <label>
-            Environment
-            <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-          </label>
-          <label>
-            Prefix
-            <input value={prefix} onChange={(e) => setPrefix(e.target.value)} />
-          </label>
-        </div>
-        <label className="catalog-checkbox">
-          <input type="checkbox" checked={inject} onChange={(e) => setInject(e.target.checked)} />
-          Inject into service process
-        </label>
-        <label>
-          Required env
-          <textarea value={requiredEnv} onChange={(e) => setRequiredEnv(e.target.value)} placeholder="ONE_KEY, ANOTHER_KEY" />
-        </label>
-        <div className="env-window-grid">
-          <label>
-            Include
-            <textarea value={include} onChange={(e) => setInclude(e.target.value)} />
-          </label>
-          <label>
-            Exclude
-            <textarea value={exclude} onChange={(e) => setExclude(e.target.value)} />
-          </label>
-        </div>
-        <div className="catalog-window-actions">
-          <button type="submit" className="primary" disabled={busy || (inject && !projectId.trim())}>
-            {busy ? 'Saving...' : 'Save ENV'}
-          </button>
-          <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-        </div>
-      </form>
-    </div>
   );
 }
 

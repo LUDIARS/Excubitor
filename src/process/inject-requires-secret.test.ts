@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   mapping: vi.fn(), config: vi.fn(), fetch: vi.fn(), identity: vi.fn(),
 }));
 vi.mock('../vault/vault-inject.js', () => ({ resolveVaultEnv: mocks.vault }));
-vi.mock('../secrets/infisical.js', () => ({ readIdentity: mocks.identity, fetchProjectSecrets: mocks.fetch }));
 vi.mock('../secrets/config-store.js', () => ({
   getServiceRuntimeConfig: mocks.config, resolveServiceInfisical: mocks.mapping,
 }));
@@ -34,8 +33,6 @@ describe('Vault-only requirements', () => {
     expect(await resolveRequiresSecretEnv(requiring())).toEqual({ A: 'a', B: 'b' });
     expect(mocks.vault).toHaveBeenCalledTimes(1);
     expect(mocks.vault).toHaveBeenCalledWith('consumer');
-    expect(mocks.identity).not.toHaveBeenCalled();
-    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it('reuses a resolved snapshot', async () => {
     expect(await resolveRequiresSecretEnv(requiring(), { A: 'a', B: 'b' })).toEqual({ A: 'a', B: 'b' });
@@ -44,7 +41,6 @@ describe('Vault-only requirements', () => {
   it.each([{}, { A: 'a' }, { A: 'a', B: '' }, { A: 'a', B: '  ' }])('rejects missing or blank keys without fallback: %j', async (env) => {
     mocks.vault.mockResolvedValue(env as Record<string, string>);
     await expect(resolveRequiresSecretEnv(requiring())).rejects.toThrow(/missing required Vault bindings or values/);
-    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it('does not read Vault when there are no requirements', async () => {
     expect(await resolveRequiresSecretEnv(service())).toEqual({});
@@ -57,8 +53,6 @@ describe('Vault-only spawn environment', () => {
     mocks.mapping.mockReturnValue({ inject: true, project_id: 'old', environment: 'dev' });
     mocks.vault.mockResolvedValue({ SAME: 'vault' });
     expect((await resolveInjectEnv(service({ env: { SAME: 'catalog' } }))).SAME).toBe('vault');
-    expect(mocks.identity).not.toHaveBeenCalled();
-    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it('fails an unmigrated inject service explicitly', async () => {
     mocks.mapping.mockReturnValue({ inject: true });

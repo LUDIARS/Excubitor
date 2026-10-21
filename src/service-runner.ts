@@ -14,13 +14,9 @@ if (argumentsValid) {
   const [
     { createLocalControlSupervisor },
     { createNamedLogger },
-    { applyInfisicalToEnv: loadInfisicalIdentity },
-    { startSupervisorWithInfisicalIdentity },
   ] = await Promise.all([
     import('./local-control/supervisor.js'),
     import('./shared/logger.js'),
-    import('./secrets/config-store.js'),
-    import('./service-runner-infisical.js'),
   ]);
   const logger = createNamedLogger('excubitor.supervisor');
   const supervisor = createLocalControlSupervisor({ rootDir: process.cwd() });
@@ -42,8 +38,7 @@ if (argumentsValid) {
   process.once('SIGTERM', () => { void stop('SIGTERM'); });
 
   try {
-    // backend と supervisor は別プロセスのため、backend 側での env 注入はここへ継承されない。
-    await startSupervisorWithInfisicalIdentity(loadInfisicalIdentity, logger, supervisor);
+    await supervisor.start();
     logger.info('local-control supervisor listening');
   } catch (error) {
     logger.error({ err: error instanceof Error ? error.message : String(error) }, 'supervisor start failed');

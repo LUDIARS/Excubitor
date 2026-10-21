@@ -187,7 +187,7 @@ Excubitor/
 ├── src/                       # backend サーバ実装
 │   ├── service-runner.ts      # persistent local supervisor entrypoint
 │   ├── local-control/         # IPC / CLI / supervisor / state
-│   └── catalog/ scanner/ control/ process/ log/ infisical/ db/
+│   └── catalog/ scanner/ control/ process/ log/ vault/ secrets/ db/
 └── frontend/
     ├── config.ts              # ← サービス起動者が編集する設定 (domain 等)
     ├── vite.config.ts

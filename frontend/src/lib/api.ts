@@ -256,52 +256,7 @@ export interface LaunchResult {
   results: LaunchItemResult[];
 }
 
-// ─────────────── Config (Infisical 設定) ───────────────
-export interface IdentityStatus {
-  configured: boolean;
-  siteUrl: string | null;
-  environment: string | null;
-  clientIdHint: string | null;
-  storePath: string;
-}
-
-export interface ServiceInfisical {
-  project_id: string;
-  environment: string;
-  inject: boolean;
-  prefix: string;
-  include?: string[];
-  exclude?: string[];
-  required_env?: string[];
-}
-
-export interface ServiceEnvStatus {
-  ready: boolean;
-  required: string[];
-  missing: string[];
-  resolvedKeys: number | null;
-  error: string | null;
-}
-
-export interface ServiceEnvConfig {
-  code: string;
-  catalog: ServiceInfisical | null;
-  override: ServiceInfisical | null;
-  effective: ServiceInfisical | null;
-  required_env: string[];
-  status: ServiceEnvStatus;
-}
-
-export interface ServiceEnvConfigInput {
-  project_id?: string | null;
-  environment?: string;
-  inject?: boolean;
-  prefix?: string;
-  include?: string[];
-  exclude?: string[];
-  required_env?: string[];
-}
-
+// ─────────────── Config ───────────────
 export interface DomainRootStatus {
   value: string;
   source: 'env' | 'config' | 'unset';
@@ -323,9 +278,7 @@ export interface CfTunnelStatus {
   storePath: string;
 }
 
-export interface ConfigInfisical {
-  identity: IdentityStatus;
-  services: Record<string, ServiceInfisical>;
+export interface OperationalConfig {
   domain_root: DomainRootStatus;
   cf_tunnel: CfTunnelStatus;
 }
@@ -355,13 +308,6 @@ export interface NotificationStatus {
 export interface ServiceRuntimeConfigStatus {
   configured: boolean;
   keys: string[];
-}
-
-export interface IdentityInput {
-  siteUrl: string;
-  environment?: string;
-  clientId: string;
-  clientSecret: string;
 }
 
 // ─────────────── API helpers ───────────────
@@ -635,58 +581,8 @@ export function launchStop(codes?: string[]): Promise<{ results: LaunchItemResul
   return postJSON<{ results: LaunchItemResult[] }>('/api/v1/launch/stop', codes ? { codes } : {});
 }
 
-export function fetchConfig(): Promise<ConfigInfisical> {
-  return getJSON<ConfigInfisical>('/api/v1/config/infisical');
-}
-
-export function saveIdentity(input: IdentityInput) {
-  return putJSON<{ ok: boolean; identity: IdentityStatus }>('/api/v1/config/infisical/identity', input);
-}
-
-export function testIdentity() {
-  return postJSON<{ ok: boolean; message: string }>('/api/v1/config/infisical/test', {});
-}
-
-export function saveServices(services: Record<string, ServiceInfisical>) {
-  return putJSON<{ ok: boolean; services: Record<string, ServiceInfisical> }>(
-    '/api/v1/config/infisical/services',
-    { services },
-  );
-}
-
-export function fetchServiceEnvConfig(code: string): Promise<ServiceEnvConfig> {
-  return getJSON<ServiceEnvConfig>(`/api/v1/services/${encodeURIComponent(code)}/env-config`);
-}
-
-export function saveServiceEnvConfig(code: string, input: ServiceEnvConfigInput) {
-  return putJSON<ServiceEnvConfig & { ok: boolean }>(
-    `/api/v1/services/${encodeURIComponent(code)}/env-config`,
-    input,
-  );
-}
-
-export function saveCfTunnel(input: {
-  allowed_hostnames?: string[];
-}) {
-  return putJSON<{ ok: boolean; cf_tunnel: CfTunnelStatus }>('/api/v1/config/cf-tunnel', input);
-}
-
-/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
-export function fetchServiceRuntimeConfig(code: string): Promise<ServiceRuntimeConfigStatus> {
-  return getJSON<{ code: string; runtime_config: ServiceRuntimeConfigStatus }>(
-    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
-  ).then((response) => response.runtime_config);
-}
-
-/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
-export function saveServiceRuntimeConfig(
-  code: string,
-  config: Record<string, unknown> | null,
-): Promise<ServiceRuntimeConfigStatus> {
-  return putJSON<{ ok: boolean; code: string; runtime_config: ServiceRuntimeConfigStatus }>(
-    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
-    { config },
-  ).then((response) => response.runtime_config);
+export function fetchConfig(): Promise<OperationalConfig> {
+  return getJSON<OperationalConfig>('/api/v1/config');
 }
 
 export function saveDomainRoot(domainRoot: string) {
@@ -1272,4 +1168,34 @@ export function removeCfAccessApp(input: { hostname: string; service?: string })
 
 export function removeCfTunnel(input: { tunnel: string; confirm: string }) {
   return postJSON<{ ok: boolean; removed: boolean; tunnel: { id: string; name: string } }>('/api/v1/cf-tunnel/tunnels/remove', input);
+}
+
+
+
+export function saveCfTunnel(input: {
+  allowed_hostnames?: string[];
+}) {
+  return putJSON<{ ok: boolean; cf_tunnel: CfTunnelStatus }>('/api/v1/config/cf-tunnel', input);
+}
+
+
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export function fetchServiceRuntimeConfig(code: string): Promise<ServiceRuntimeConfigStatus> {
+  return getJSON<{ code: string; runtime_config: ServiceRuntimeConfigStatus }>(
+    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
+  ).then((response) => response.runtime_config);
+}
+
+
+
+/** @implements SPEC-SERVICE-RUNTIME-CONFIG-API */
+export function saveServiceRuntimeConfig(
+  code: string,
+  config: Record<string, unknown> | null,
+): Promise<ServiceRuntimeConfigStatus> {
+  return putJSON<{ ok: boolean; code: string; runtime_config: ServiceRuntimeConfigStatus }>(
+    `/api/v1/config/services/${encodeURIComponent(code)}/runtime-config`,
+    { config },
+  ).then((response) => response.runtime_config);
 }

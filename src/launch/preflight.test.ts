@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({ env: vi.fn(), identity: vi.fn(), fetch: vi.fn(
 vi.mock('../process/inject.js', () => ({ resolveInjectEnv: mocks.env }));
 vi.mock('../scanner/ports.js', () => ({ listListeners: async () => [] }));
 vi.mock('../secrets/config-store.js', () => ({ resolveServiceInfisical: () => undefined }));
-vi.mock('../secrets/infisical.js', () => ({ readIdentity: mocks.identity, fetchProjectSecrets: mocks.fetch }));
 import { runPreflight } from './preflight.js';
 const svc = { code: 'svc', name: 'Svc', runtime: 'node', cwd: process.cwd(), required_env: ['TOKEN'] } as Service;
 beforeEach(() => vi.resetAllMocks());
@@ -16,8 +15,6 @@ describe('Vault-only preflight', () => {
     expect(result.needsIdentity).toBe(false);
     expect(result.identityPresent).toBe(false);
     expect(mocks.env).toHaveBeenCalledTimes(1);
-    expect(mocks.identity).not.toHaveBeenCalled();
-    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it.each([{}, { TOKEN: '' }])('fails missing or blank required env', async (env) => {
     mocks.env.mockResolvedValue(env);

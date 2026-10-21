@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ vault: vi.fn(), identity: vi.fn(), fetch: vi.fn() }));
 vi.mock('../vault/vault-inject.js', () => ({ resolveVaultEnv: mocks.vault }));
-vi.mock('./infisical.js', () => ({ readIdentity: mocks.identity, fetchProjectSecrets: mocks.fetch }));
 vi.mock('./agent-token.js', () => ({ verifyAgentToken: (value: string) => value === 'Bearer test-token' }));
 import { resolveServiceSecrets } from './resolve.js';
 import { buildSecretAgentRouter } from './agent-router.js';
@@ -10,8 +9,6 @@ describe('Vault secret-agent', () => {
   it('returns only service-bound requested keys without Infisical metadata', async () => {
     expect(await resolveServiceSecrets('svc', undefined, ['A'])).toEqual({ ok: true, secrets: { A: 'a' }, projectId: null, environment: null });
     expect(mocks.vault).toHaveBeenCalledWith('svc');
-    expect(mocks.identity).not.toHaveBeenCalled();
-    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it('rejects a request containing any unbound key atomically', async () => {
     expect(await resolveServiceSecrets('svc', undefined, ['A', 'OTHER_PROJECT'])).toMatchObject({ ok: false, code: 'keys_not_bound' });

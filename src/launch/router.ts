@@ -23,15 +23,6 @@ import { expandWithDependencies } from './order.js';
 import { usesCorpusByCode, setCorpusPref } from './corpus-prefs.js';
 import { setAutostartPref } from './autostart-prefs.js';
 import type { DowntimeSummaryReader } from '../scanner/downtime-reader.js';
-import {
-  getServiceMap,
-  setServiceMap,
-  resolveServiceInfisical,
-  type ServiceInfisical,
-} from '../secrets/config-store.js';
-import { resolveInjectEnv } from '../process/inject.js';
-import { requiredEnvKeysForService, validateStartupEnv } from '../process/startup-env.js';
-
 const SaveProfileSchema = z.object({
   selection: z.array(z.string()),
   auto_launch: z.boolean().optional(),
@@ -45,16 +36,6 @@ const CatalogInfoSchema = z.object({
   project_code: z.string().trim().min(1).max(80).nullable().optional(),
   subdomain: z.string().trim().max(120).nullable().optional(),
   frontend_url: z.string().trim().max(300).nullable().optional(),
-});
-
-const ServiceEnvConfigSchema = z.object({
-  project_id: z.string().trim().max(200).nullable().optional(),
-  environment: z.string().trim().max(80).default('dev'),
-  inject: z.boolean().default(true),
-  prefix: z.string().trim().max(120).default(''),
-  include: z.array(z.string().trim().min(1)).optional(),
-  exclude: z.array(z.string().trim().min(1)).optional(),
-  required_env: z.array(z.string().trim().min(1)).optional(),
 });
 
 const logger = createNamedLogger('excubitor.launch.router');
@@ -191,57 +172,6 @@ export function buildLaunchRouter(
 
   // 既存 Catalog 画面用 (project 別グルーピング)。frontend api.ts fetchProjects が叩く。
   // git / version / last_seen は service_instances から補完してカードに詳細を出す (req6)。
-  app.get('/api/v1/services/:code/env-config', async (c) => {
-    const code = c.req.param('code');
-    const svc = getCatalog().services.find((s) => s.code === code);
-    if (!svc) return c.json({ error: 'not_found' }, 404);
-    const services = getServiceMap();
-    const override = services[code] ?? null;
-    return c.json({
-      code,
-      catalog: svc.infisical ?? null,
-      override,
-      effective: resolveServiceInfisical(code, svc.infisical) ?? null,
-      required_env: requiredEnvKeysForService(svc),
-      status: await serviceEnvStatus(svc),
-    });
-  });
-
-  app.put('/api/v1/services/:code/env-config', async (c) => {
-    const code = c.req.param('code');
-    const svc = getCatalog().services.find((s) => s.code === code);
-    if (!svc) return c.json({ error: 'not_found' }, 404);
-    const body = await c.req.json().catch(() => ({}));
-    const parsed = ServiceEnvConfigSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
-
-    const services = getServiceMap();
-    const projectId = parsed.data.project_id?.trim() ?? '';
-    if (!projectId) {
-      delete services[code];
-    } else {
-      services[code] = normalizeServiceInfisical({
-        project_id: projectId,
-        environment: parsed.data.environment || 'dev',
-        inject: parsed.data.inject,
-        prefix: parsed.data.prefix ?? '',
-        include: parsed.data.include,
-        exclude: parsed.data.exclude,
-        required_env: parsed.data.required_env,
-      });
-    }
-    setServiceMap(services);
-
-    return c.json({
-      ok: true,
-      code,
-      override: services[code] ?? null,
-      effective: resolveServiceInfisical(code, svc.infisical) ?? null,
-      required_env: requiredEnvKeysForService(svc),
-      status: await serviceEnvStatus(svc),
-    });
-  });
-
   app.get('/api/v1/projects', async (c) =>
     c.json({ projects: await readProjectView(getCatalog(), readDowntimeSummaries) }));
   app.put('/api/v1/services/:code/catalog-info', async (c) => {
@@ -359,60 +289,6 @@ export async function readProjectView(
     }));
   view.sort(compareProjectViews);
   return view;
-}
-
-function normalizeList(input: string[] | undefined): string[] | undefined {
-  if (!input) return undefined;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of input) {
-    const value = raw.trim();
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-function normalizeServiceInfisical(input: ServiceInfisical): ServiceInfisical {
-  return {
-    project_id: input.project_id.trim(),
-    environment: input.environment.trim() || 'dev',
-    inject: input.inject,
-    prefix: input.prefix?.trim() ?? '',
-    include: normalizeList(input.include),
-    exclude: normalizeList(input.exclude),
-    required_env: normalizeList(input.required_env),
-  };
-}
-
-async function serviceEnvStatus(svc: Catalog['services'][number]): Promise<{
-  ready: boolean;
-  required: string[];
-  missing: string[];
-  resolvedKeys: number | null;
-  error: string | null;
-}> {
-  const required = requiredEnvKeysForService(svc);
-  try {
-    const env = await resolveInjectEnv(svc);
-    const validation = validateStartupEnv(svc, env);
-    return {
-      ready: validation.ready,
-      required: validation.required,
-      missing: validation.missing,
-      resolvedKeys: Object.keys(env).length,
-      error: null,
-    };
-  } catch (err) {
-    return {
-      ready: false,
-      required,
-      missing: required,
-      resolvedKeys: null,
-      error: (err as Error).message,
-    };
-  }
 }
 
 function cleanSubdomain(input: string | null | undefined): string | null {

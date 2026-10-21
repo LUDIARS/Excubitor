@@ -1,20 +1,12 @@
 /**
  * Excubitor 設定 API (`/api/v1/config/*`)。
  *
- * Infisical の machine identity と各サービスのマッピングを Excubitor 設定ファイルに
- * 保存する。identity の clientId/clientSecret は salt 付き暗号化で保存され、平文は返さない。
+ * Domain, notification, runtime and Cloudflare settings. Secrets are managed by Vault.
  */
 
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  saveInfisicalIdentity,
-  getInfisicalIdentity,
-  getIdentityStatus,
-  applyInfisicalToEnv,
-  getServiceMap,
-  setServiceMap,
-  setServiceInfisical,
   getDomainRootStatus,
   setDomainRootOverride,
   getDiscordNotificationConfig,
@@ -32,32 +24,8 @@ import {
   getCfTunnelStatus,
   saveCfTunnelSettings,
 } from './config-store.js';
-import { verifyIdentity } from './infisical.js';
 import { RuntimeConfigElementUpdateError, updateRuntimeConfigElements } from './runtime-config-element-update.js';
 import { sendDiscordWebhook } from '../notify/discord-webhook.js';
-
-const IdentitySchema = z.object({
-  siteUrl: z.string().min(1),
-  environment: z.string().optional(),
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
-});
-
-const ServiceInfisicalSchema = z.object({
-  project_id: z.string(),
-  environment: z.string().default('dev'),
-  inject: z.boolean().default(true),
-  prefix: z.string().default(''),
-  include: z.array(z.string()).optional(),
-  exclude: z.array(z.string()).optional(),
-  required_env: z.array(z.string()).optional(),
-});
-
-const SERVICE_CODE_PATTERN = /^[a-z][a-z0-9-]*$/;
-
-const ServicesSchema = z.object({
-  services: z.record(z.string(), ServiceInfisicalSchema),
-});
 
 const DomainRootSchema = z.object({
   domain_root: z.string().min(1),
@@ -109,11 +77,9 @@ export interface ConfigRouterDeps {
 export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
   const app = new Hono();
 
-  // identity の状態 (configured / siteUrl / clientId ヒント) + サービスマッピング。
-  app.get('/api/v1/config/infisical', (c) =>
+  // Non-secret operational settings.
+  app.get('/api/v1/config', (c) =>
     c.json({
-      identity: getIdentityStatus(),
-      services: getServiceMap(),
       domain_root: getDomainRootStatus(),
       cf_tunnel: getCfTunnelStatus(),
     }),
@@ -293,49 +259,6 @@ export function buildConfigRouter(deps: ConfigRouterDeps = {}): Hono {
     } catch (err) {
       return c.json({ error: 'invalid_domain_root', message: (err as Error).message }, 400);
     }
-  });
-
-  // identity を保存 (暗号化) し、 即 process.env に反映。
-  app.put('/api/v1/config/infisical/identity', async (c) => {
-    const body = await c.req.json().catch(() => ({}));
-    const parsed = IdentitySchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
-    saveInfisicalIdentity(parsed.data);
-    applyInfisicalToEnv();
-    return c.json({ ok: true, identity: getIdentityStatus() });
-  });
-
-  // 保存済 identity で Infisical に login できるか接続テストする (値は返さない)。
-  app.post('/api/v1/config/infisical/test', async (c) => {
-    const id = getInfisicalIdentity();
-    if (!id) return c.json({ ok: false, message: 'identity 未設定です' }, 400);
-    try {
-      await verifyIdentity({ siteUrl: id.siteUrl, clientId: id.clientId, clientSecret: id.clientSecret });
-      return c.json({ ok: true, message: '接続成功 (login OK)' });
-    } catch (err) {
-      return c.json({ ok: false, message: (err as Error).message });
-    }
-  });
-
-  // 各サービスの Infisical マッピングを一括保存。
-  // 1 サービス分だけを登録する口。サービス自身の初回設定が自分のマッピングを置くときに使い、
-  // 他サービスの行には触れない (全体置換は下の UI 用 API に限る)。
-  app.put('/api/v1/config/infisical/services/:code', async (c) => {
-    const code = c.req.param('code');
-    if (!SERVICE_CODE_PATTERN.test(code)) return c.json({ error: 'invalid_service_code' }, 400);
-    const body = await c.req.json().catch(() => ({}));
-    const parsed = ServiceInfisicalSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
-    const services = setServiceInfisical(code, parsed.data);
-    return c.json({ ok: true, code, service: services[code] });
-  });
-
-  app.put('/api/v1/config/infisical/services', async (c) => {
-    const body = await c.req.json().catch(() => ({}));
-    const parsed = ServicesSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
-    setServiceMap(parsed.data.services);
-    return c.json({ ok: true, services: getServiceMap() });
   });
 
   return app;
