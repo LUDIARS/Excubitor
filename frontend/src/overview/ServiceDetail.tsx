@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { OverviewSite, OverviewService } from '../../../src/overview/model';
 import { controlService, type ControlAction } from '../lib/api';
 import ServiceSettings from './ServiceSettings';
+import SecurityReport from './SecurityReport';
 export const stateLabel = { up: '稼働', partial: '一部稼働', down: 'ダウン' };
 /** @implements SPEC-EX-SERVICE-OVERVIEW */
 export default function ServiceDetail({ site, service }: { site: OverviewSite; service: OverviewService }) {
@@ -26,6 +27,7 @@ export default function ServiceDetail({ site, service }: { site: OverviewSite; s
       {component && <><div className="ex-detail-heading"><div><h3>{component.name}</h3><code>{component.code}</code></div>{site.local && <div className="ex-actions">{(['start','restart','stop'] as const).map((a,i) => <button key={a} disabled={busy || (component.disabled && a !== 'stop')} onClick={() => void control(a)}>{['起動','再起動','停止'][i]}</button>)}</div>}</div>
       {message && <p className="ex-message" role="status">{message}</p>}
       {site.local ? <ServiceSettings key={component.code} component={component} /> : <p>他拠点の操作は <a href="#federation">Federation</a> から、設定編集は対象 PC の Excubitor で行ってください。</p>}
+      {site.local && <SecurityReport key={component.code} code={component.code} />}
       </>}
     </section></div>
   </>;

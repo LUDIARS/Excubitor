@@ -6,15 +6,15 @@ import { db } from '../db/client.js';
 let cachedHostId: string | null = null;
 
 /**
- * Excubitor 縺悟虚縺・※縺・ｋ繝槭す繝ｳ縺ｮ host 繝ｬ繧ｳ繝ｼ繝峨ｒ upsert 縺励※ id 繧定ｿ斐☆縲・
- * v0.1 縺ｧ縺ｯ蜷悟ｱ・agent (server 閾ｪ霄ｫ) 繧・1 縺､縺ｮ host 縺ｨ縺励※謇ｱ縺・・
+ * Upsert the host record for this machine and return its id.
+ * The local server is represented by one host record.
  */
 export async function getOrCreateLocalHost(): Promise<string> {
   if (cachedHostId) return cachedHostId;
 
   const hostname = os.hostname();
-  // PG 縺ｮ data-modifying CTE (INSERT/UPDATE in WITH) 縺ｯ SQLite 縺縺ｨ邏逶ｴ縺ｫ譖ｸ縺代↑縺・・縺ｧ縲・
-  // 莠梧ｮｵ髫弱↓蛻・ｧ｣縺吶ｋ: 蜈医↓ SELECT縲・辟｡縺代ｌ縺ｰ INSERT縲・縺ゅｌ縺ｰ UPDATE縲・
+  // SQLite uses separate statements instead of a data-modifying CTE.
+  // Select first; update an existing host or insert a new one.
   const existing = db().get(sql`SELECT id FROM hosts WHERE hostname = ${hostname}`) as { id: string } | undefined;
   if (existing) {
     db().run(sql`

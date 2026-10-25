@@ -1,8 +1,8 @@
 /**
- * auto-fix 繧ｨ繝ｳ繧ｸ繝ｳ蜷代￠縺ｮ襍ｷ蜍戊・ｨｭ螳壹・
+ * Startup configuration for the auto-fix engine.
  *
- * Excubitor 縺ｯ LUDIARS 襍ｷ蜍輔メ繧ｧ繝ｼ繝ｳ縺ｮ蜈磯ｭ縺ｫ縺・ｋ縺ｮ縺ｧ縲・LLM CLI 縺ｮ繝代せ繧・bash 繝代せ繧・
- * Infisical 縺九ｉ蜿悶ｉ縺壹・譛ｬ繝輔ぃ繧､繝ｫ縺ｧ繧ｵ繝ｼ繝薙せ襍ｷ蜍戊・′險ｭ螳壹☆繧区Φ螳壹・
+ * Excubitor starts before other services; CLI and bash paths must be available locally.
+ * Resolve them from startup environment and local defaults.
  */
 
 import { existsSync } from 'node:fs';
@@ -12,7 +12,7 @@ function resolveBashPath(): string {
   if (process.env.CLAUDE_CODE_GIT_BASH_PATH) return process.env.CLAUDE_CODE_GIT_BASH_PATH;
   if (process.platform !== 'win32') return '/bin/bash';
 
-  // Windows 繝ｦ繝ｼ繧ｶ縺ｮ蜈ｸ蝙狗噪縺ｪ bash 螳滉ｽ薙ｒ鬆・↓隧ｦ縺吶・
+  // Try common Windows bash installation paths.
   // SourceTree 蜷梧｢ｱ / Git for Windows / WSL / msys2 遲峨・
   const home = os.homedir();
   const oneDrive = process.env.OneDrive ?? '';
@@ -31,35 +31,35 @@ function resolveBashPath(): string {
       if (existsSync(c)) return c;
     } catch { /* ignore */ }
   }
-  // fallback: 蜿､縺・里螳・(蟄伜惠縺励↑縺上※繧よ枚蟄怜・縺ｨ縺励※霑斐☆縲・襍ｷ蜍墓凾縺ｫ螟ｱ謨励Ο繧ｰ縺悟・繧・
+  // Return the default path even if absent; startup will report the failure.
   return 'C:\\Program Files\\Git\\bin\\bash.exe';
 }
 
 export const autoFixConfig = {
   /**
-   * Claude Code CLI 縺ｮ繝輔Ν繝代せ縲・繧ゅ＠縺上・ PATH 荳翫・繧ｳ繝槭Φ繝牙錐縲・
+   * Full Claude Code CLI path or command name on PATH.
    */
   claudeCli: process.env.CLAUDE_CLI_PATH ?? 'claude',
 
   /**
-   * Claude Code 縺・child process spawn 縺ｧ蠢・ｦ√→縺吶ｋ git-bash 縺ｮ path (Windows)縲・
-   * 迺ｰ蠅・､画焚 CLAUDE_CODE_GIT_BASH_PATH 蜆ｪ蜈医・譛ｪ險ｭ螳壹↑繧牙・蝙狗噪縺ｪ繝代せ繧・auto-detect縲・
-   * feedback_claude_cli_windows_bash.md / feedback_concordia_bash_path.md 蜿ら・縲・
+   * Git-bash path used by Claude Code child processes on Windows.
+   * Prefer CLAUDE_CODE_GIT_BASH_PATH; otherwise detect common paths.
+   * See the Windows bash path feedback documents.
    */
   claudeBashPath: resolveBashPath(),
 
   /**
-   * Claude Code 縺ｫ貂｡縺吶・繝ｭ繝ｳ繝励ヨ縺ｮ譛螟ｧ髟ｷ (縺薙ｌ繧定ｶ・∴縺溘ｉ log_excerpt 繧呈忰蟆ｾ蛻・ｊ)縲・
+   * Maximum prompt length; callers trim log excerpts to fit.
    */
   promptMaxChars: 16_000,
 
   /**
-   * Claude Code 蟄舌・繝ｭ繧ｻ繧ｹ縺ｮ timeout (ms)縲・縺薙ｌ繧定ｶ・∴縺溘ｉ kill縲・
+   * Claude Code child process timeout in milliseconds.
    */
   cliTimeoutMs: 10 * 60 * 1000,  // 10 min
 
   /**
-   * Claude Code 邨ゆｺ・ｾ後・verify 逕ｨ縺ｫ繧ｵ繝ｼ繝薙せ繧・restart 縺励※ health probe 繧貞ｾ・▽繧ｿ繧､繝繧｢繧ｦ繝医・
+   * Timeout for post-fix service restart and health verification.
    */
   verifyTimeoutMs: 90 * 1000,    // 90 sec
 } as const;

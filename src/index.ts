@@ -53,6 +53,7 @@ import { buildLaunchRouter, readProjectView } from './launch/router.js';
 import { buildConfigRouter } from './secrets/router.js';
 import { buildSecretAgentRouter } from './secrets/agent-router.js';
 import { buildVaultRouter } from './vault/vault-router.js';
+import { buildSecurityReportsRouter } from './security-reports/router.js';
 import { localBrowserGuard } from './security/local-browser-guard.js';
 import { readBrowserAllowlist } from './security/browser-allowlist-env.js';
 import { describeMeshAuth } from './federation/security/legacy-monitor.js';
@@ -790,6 +791,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   app.route('/', overviewCache.router);
   app.route('/', buildReviewsRouter());
+  app.route('/', buildSecurityReportsRouter(code => Boolean(findService(code))));
 
   // Corpus multi-hub backend (/api/hub/*)
   app.route('/', buildHubRouter());

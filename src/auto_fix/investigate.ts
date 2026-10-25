@@ -1,16 +1,16 @@
 /**
- * Investigation runner  E「修正、E(runAutoFix) と並ぶ手動アクションのぁE��、E
- * **解析�Eみで何も修正しなぁE* タイプ、EClaude Code CLI に read-only な刁E��めE
- * 依頼して、E結果めEauto_fix_runs チE�Eブルに action_type='investigate' で
+ * Manual read-only investigation runner, alongside runAutoFix.
+ * Ask Claude Code CLI to analyze the failure without modifying files.
+ * Store the result in auto_fix_runs with action_type='investigate'.
  * 書き込む、E
  *
  * 流れ:
- *   1. auto_fix_runs に行を作�E (action_type='investigate', state='running')
+ *   1. Create an auto_fix_runs row with state='running'.
  *   2. claude CLI めEspawn  Eprompt は 「files を読んで原因と修正案を書け、E
- *      ただし一刁E��ァイル / git / shell 修正はするな、E
+ *      Do not modify files, git state or shell state.
  *   3. stdout を取って解析テキストとして保孁E(stdout_tail に書き込む)
  *   4. safeguard: 走った後に git diff を確認、Eもし claude が誤って書ぁE
- *      換えてぁE��ら�E動で revert (= 解析モードであることの保険)
+ *      Record a warning on changes; never automatically revert user work.
  *
  * error_tasks 側は state を変更しなぁE(= triage めEresolve は別のボタン)、E
  * verify_result / branch / commit_hash / pr_url は使わなぁE(NULL のまま)、E
@@ -46,8 +46,8 @@ export async function runInvestigation(ctx: InvestigateContext): Promise<{ runId
   inFlight.add(code);
 
   const af = ctx.service.auto_fix;
-  // auto_fix.enabled は「auto-fix を許可するか、Eの flag だが、E投賁E��ートとしては
-  // 共有してよい (= 「触らせる気が無ぁE��ービス、Eは調査もしなぁE、E
+  // Investigation uses the same opt-in flag as auto-fix.
+  // Services not opted in must not be investigated through this runner.
   if (!af || !af.enabled) {
     inFlight.delete(code);
     throw new Error(`auto_fix not enabled for ${code} (= investigation gated by same flag)`);
@@ -71,13 +71,13 @@ export async function runInvestigation(ctx: InvestigateContext): Promise<{ runId
     const prompt = buildInvestigatePrompt(ctx);
     db().run(sql`UPDATE auto_fix_runs SET prompt = ${prompt} WHERE id = ${runId}`);
 
-    // 保険として呼び出し前の HEAD と worktree を覚えておき、E丁E��書き換えが
+    // Remember HEAD so the safeguard can detect unexpected changes.
     // あったら revert する、E
     const headBefore = await execCapture('git', ['rev-parse', 'HEAD'], workingDir).catch(() => null);
 
     const cli = await runClaudeCli(workingDir, prompt);
 
-    // safeguard: 解析モード�EつもりぁEclaude が書き換えてぁE��ら巻き戻す、E
+    // Record a warning if the read-only invocation changed the worktree.
     await revertIfDirty(workingDir, headBefore?.stdout.trim() ?? null, runId);
 
     db().run(sql`
@@ -199,8 +199,8 @@ async function execCapture(
   });
 }
 
-// claude ぁEread-only 持E��を無視して書き換えてぁE��ら、Estderr_tail に警告を
-// 残す (= ユーザに「投賁E�E結果触られてぁE��す、Eと見せめE、E自勁Erevert は
+// Warn in stderr_tail when the read-only contract is violated.
+// Do not automatically revert: existing user commits and WIP must be preserved.
 // しなぁE Eユーザの作業中 commit / WIP まで巻き込んで壊すリスクがあるため、E
 async function revertIfDirty(cwd: string, expectedHead: string | null, runId: string): Promise<void> {
   try {

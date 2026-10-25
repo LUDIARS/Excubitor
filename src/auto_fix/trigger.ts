@@ -1,5 +1,5 @@
 /**
- * error_task が新要E/ 復活した時�E auto-fix 自勁Etrigger 判定、E
+ * Decide whether a new or recurring error task triggers auto-fix.
  *
  * - service の catalog.auto_fix.enabled でなければ skip
  * - error_task の auto_fix_attempts >= max_auto_attempts なめE**人間判断へ** (state='awaiting_human')
@@ -32,7 +32,7 @@ export async function maybeTriggerAutoFix(args: {
   const attempts = (rows as unknown as Array<{ auto_fix_attempts: number }>)[0]?.auto_fix_attempts ?? 0;
 
   if (attempts > af.max_auto_attempts) {
-    // 上限趁E��  E自勁Etrigger せず人間判断へ
+    // At the attempt limit, defer to a human instead of starting auto-fix.
     db().run(sql`
       UPDATE error_tasks
       SET auto_fix_state = 'awaiting_human', updated_at = unixepoch() * 1000

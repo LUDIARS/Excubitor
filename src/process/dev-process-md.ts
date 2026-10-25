@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
  *   ```bash
  *   <command>
  *   ```
- * 縺ｮ譛蛻昴・ bash code block 縺ｮ荳ｭ霄ｫ繧貞叙繧雁・縺吶・
+ * Extract the contents of the first bash/sh fenced code block.
  *
  * 萓・
  *   ## Server
@@ -31,7 +31,7 @@ export async function resolveDevProcessCommand(cwd: string): Promise<string> {
   if (lines.length === 0) {
     throw new Error(`dev-process.md in ${cwd} bash block has no command`);
   }
-  // 隍・焚陦後・縺ｨ繧翫≠縺医★譛蛻昴・ non-comment 陦後ｒ謗｡逕ｨ (v0.1 limitation)
+  // Use the first non-comment line (v0.1 limitation).
   return lines[0]!;
 }
 

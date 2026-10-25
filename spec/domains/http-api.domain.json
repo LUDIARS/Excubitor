@@ -24,12 +24,16 @@
     },
     {
       "namePattern": "hono"
+    },
+    {
+      "pathPattern": "(^|/)src/security-reports/"
     }
   ],
   "cardTemplate": "Summarise the \"http-api\" domain: The Hono backend entrypoint, observability bootstrap, and HTTP routes that proxy local-control IPC and expose all subsystems.",
   "specRefs": [
     "構成 / src/server.ts",
-    "技術スタック"
+    "技術スタック",
+    "spec/feature/security-reports.md — SPEC-EX-SECURITY-REPORTS"
   ],
   "rationale": "The backend entrypoint and shared HTTP layer wire the subsystems into a loopback API surface."
 }

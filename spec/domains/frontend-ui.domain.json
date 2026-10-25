@@ -24,6 +24,9 @@
     },
     {
       "pathPattern": "(^|/)frontend/src/components/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/overview/SecurityReport\\.tsx$"
     }
   ],
   "cardTemplate": "Summarise the \"frontend-ui\" domain: Vite + React Monitor / Catalog / Errors web UI served from the backend, plus the operator-edited config.ts.",
@@ -31,7 +34,8 @@
     "構成 / frontend/",
     "README.md 起動者が編集する設定",
     "spec/feature/service-overview.md#SPEC-EX-SERVICE-OVERVIEW",
-    "spec/feature/service-overview.md#SPEC-EX-SERVICE-SETTINGS"
+    "spec/feature/service-overview.md#SPEC-EX-SERVICE-SETTINGS",
+    "spec/feature/security-reports.md — SPEC-EX-SECURITY-REPORTS"
   ],
   "rationale": "frontend/ (pages + components) is the presentation domain, distinct from the backend subsystems it visualizes."
 }
