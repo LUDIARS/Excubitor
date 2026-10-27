@@ -4,10 +4,12 @@ import type { IntrusionConfig } from './config.js';
 import type { AccessEvidence } from './detection.js';
 import type { IntrusionMonitor } from './monitor.js';
 import { proxyHttp, proxyUpgrade } from './proxy.js';
+import { userAccessMetadata, type UserAccessMetadata } from './user-access-metadata.js';
 
 /** A separate loopback listener; it never mounts the management router. */
 export async function startIntrusionGateway(config: IntrusionConfig, port: number,
-  monitor: Pick<IntrusionMonitor, 'inspect' | 'response'> & { readonly rejectionStatus?: number }, now: () => number = Date.now): Promise<{ closeConnections(): void; close(): Promise<void> }> {
+  monitor: Pick<IntrusionMonitor, 'inspect' | 'response'> & { readonly rejectionStatus?: number }, now: () => number = Date.now,
+  recordUserAccess?: (event: AccessEvidence, metadata: UserAccessMetadata) => void): Promise<{ closeConnections(): void; close(): Promise<void> }> {
   const sockets = new Set<Socket>();
   const routes = new Map(config.routes.map(route => [route.routeKey ?? route.hostname, route]));
   const resolve = (request: IncomingMessage): { origin: string; evidence: AccessEvidence } | null => {
@@ -23,6 +25,7 @@ export async function startIntrusionGateway(config: IntrusionConfig, port: numbe
     const evidence: AccessEvidence = { service: route.service, hostname: route.hostname,
       clientIp: typeof ip === 'string' ? ip : '', country: typeof country === 'string' ? country : '',
       path: raw.split('?')[0] ?? '/', method: request.method ?? 'GET', at: now() };
+    recordUserAccess?.(evidence, userAccessMetadata(request.headers));
     if (!monitor.inspect(evidence)) return null;
     // Restore the reviewed origin Host; the internal selector must never reach the service.
     request.headers.host = route.forwardHost ?? route.hostname;

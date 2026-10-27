@@ -37,20 +37,24 @@ describe('loopback gateway', () => {
       contain: vi.fn().mockResolvedValue(undefined), notify: vi.fn().mockResolvedValue(undefined),
       closePublicConnections: () => gateway?.closeConnections(), now: Date.now, warn: vi.fn() });
     const openSockets: ReturnType<typeof connect>[] = [];
+    const userAccess = vi.fn();
     try {
-      gateway = await startIntrusionGateway(localConfig, port, monitor);
+      gateway = await startIntrusionGateway(localConfig, port, monitor, Date.now, userAccess);
       const response = await new Promise<string>((resolve, reject) => {
         const req = request(`http://127.0.0.1:${port}`, { headers: { host: 'r-test.intrusion.invalid', 'cf-ipcountry': 'JP', 'cf-connecting-ip': '203.0.113.1' } }, res => {
           let body = ''; res.on('data', chunk => { body += String(chunk); }); res.on('end', () => resolve(body));
         }); req.on('error', reject); req.end();
       });
       expect(response).toBe('original.internal');
+      expect(userAccess).toHaveBeenCalledTimes(1);
+      expect(userAccess.mock.calls[0]![0].service).toBe(localConfig.routes[0]!.service);
       const socket = connect(port, '127.0.0.1');
       openSockets.push(socket);
       socket.on('error', () => socket.destroy());
       const upgraded = new Promise<void>(resolve => socket.once('data', () => resolve()));
       socket.write('GET /ws HTTP/1.1\r\nHost: r-test.intrusion.invalid\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCF-IPCountry: JP\r\nCF-Connecting-IP: 203.0.113.1\r\n\r\n');
       await upgraded;
+      expect(userAccess).toHaveBeenCalledTimes(2);
       expect(upgradeHost).toBe('original.internal');
       const closed = new Promise<void>(resolve => socket.once('close', () => resolve()));
       monitor.trip({ service: 'app', at: Date.now() }, 'foreign_country');

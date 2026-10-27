@@ -10,6 +10,7 @@
   ],
   "cardTemplate": "Summarise the intrusion domain: trusted Cloudflare ingress, deterministic local detection, immediate connection cutoff, durable incident state, remote tunnel containment, and explicit recovery.",
   "specRefs": [
+    "spec/feature/user-access-log.md",
     "spec/feature/intrusion-request-filter.md",
     "spec/feature/intrusion-monitor.md",
     "spec/feature/intrusion-rollout.md",

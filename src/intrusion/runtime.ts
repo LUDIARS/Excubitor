@@ -12,6 +12,8 @@ import { IntrusionStore } from './store.js';
 import { IntrusionMonitor } from './monitor.js';
 import { RequestFilter } from './request-filter.js';
 import { accessEvidenceWriter } from './evidence-log.js';
+import { UserAccessLog } from './user-access-log.js';
+import { userAccessWriter } from './user-access-writer.js';
 import { containTunnels } from './containment.js';
 import { reportIncident, reportRequestDenial } from './discord.js';
 import { startIntrusionGateway } from './gateway.js';
@@ -52,6 +54,7 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
   try {
     const unclean = store.wasRunning();
     const writeEvidence = accessEvidenceWriter(sharedLogsRoot());
+    const userAccess = new UserAccessLog(userAccessWriter(sharedLogsRoot()), message => logger.warn(message));
     monitor = requestFiltering ? new RequestFilter(config, {
       evidence: writeEvidence,
       notifyDenied: (event, reason) => reportRequestDenial(webhook, config.site, event, reason),
@@ -70,7 +73,8 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
     store.markRunning(true);
     if (unclean && monitor instanceof IntrusionMonitor) monitor.trip({ service: 'excubitor', at: Date.now() }, 'unclean_restart');
     if (unclean && requestFiltering) logger.warn('unclean restart recorded; request filtering remains active without site cutoff');
-    gateway = await startIntrusionGateway(config, port, monitor);
+    gateway = await startIntrusionGateway(config, port, monitor, Date.now,
+      (event, metadata) => userAccess.record(event, metadata));
     monitor.start();
     const activeMonitor = monitor;
     const activeGateway = gateway;
@@ -78,6 +82,7 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
       `http://127.0.0.1:${port}`, () => activeMonitor.status().state === 'blocked');
     router.get('/api/v1/intrusion', c => c.json({ ...activeMonitor.status(), site: config.site,
       enforcement: config.enforcement ?? 'site-cutoff',
+      userAccessLogging: userAccess.status(),
       previousIncident: requestFiltering ? store.read() : undefined,
       coverage: 'unverified', configuredHostnames: config.routes.map(route => route.hostname) }));
     router.post('/api/v1/intrusion/verify', async c => {
