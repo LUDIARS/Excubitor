@@ -16,7 +16,9 @@ import { reportIncident } from './discord.js';
 import { startIntrusionGateway } from './gateway.js';
 import { verifyCoverage } from './coverage.js';
 import { installIntrusionRouteGuard } from './route-guard.js';
-import { privateHttpOriginPort } from './origin.js';
+import { validateOriginTargets } from './origin-policy.js';
+import { verifyExistingOrigins } from './origin-adoption.js';
+import { OriginApprovals } from './origin-approvals.js';
 
 const logger = createNamedLogger('excubitor.intrusion');
 export interface IntrusionRuntime { router: Hono; stop(): Promise<void> }
@@ -32,21 +34,15 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
   const self = catalog.services.find(service => service.code === 'excubitor');
   const port = self?.ports?.find(entry => entry.role === 'public-ingress')?.port;
   if (!port) throw new Error('public-ingress port is missing from Excubitor catalog');
-  const forbiddenPorts = new Set([self?.port, ...self?.ports?.map(entry => entry.port) ?? []]);
-  for (const route of config.routes) {
-    const originPort = privateHttpOriginPort(route.origin);
-    if (originPort === null) throw new Error('invalid private HTTP origin');
-    if (forbiddenPorts.has(originPort)) throw new Error('management/self origin is forbidden');
-    const service = catalog.services.find(entry => entry.code === route.service);
-    const declared = [service?.port, ...service?.ports?.map(entry => entry.port) ?? []];
-    if (!service || !declared.includes(originPort)) throw new Error('origin must match its catalog service');
-  }
+  const managementKeys = validateOriginTargets(catalog, config, port);
   const allowed = currentAllowlist();
   if (config.routes.some(route => !allowed.includes(route.hostname))) throw new Error('intrusion hostname outside CF allowlist');
   // Credentials stay inside Ex; no request path, status API, spec or log receives them.
   const creds = await resolveCfCredentials();
   const values = await sharedVault().valuesOf(['EXCUBITOR_SECURITY_DISCORD_WEBHOOK']);
   const webhook = normalizeDiscordWebhookUrl(values.EXCUBITOR_SECURITY_DISCORD_WEBHOOK ?? '');
+  await verifyExistingOrigins(new CloudflareTunnelApi(creds, AbortSignal.timeout(30_000)), config, port,
+    new OriginApprovals('data/intrusion-origin-approvals.json'), managementKeys);
   const store = new IntrusionStore('data/intrusion.sqlite');
   let monitor: IntrusionMonitor | null = null;
   let gateway: Awaited<ReturnType<typeof startIntrusionGateway>> | null = null;
@@ -77,7 +73,9 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
       coverage: 'unverified', configuredHostnames: config.routes.map(route => route.hostname) }));
     router.post('/api/v1/intrusion/verify', async c => {
       try {
-        return c.json(await verifyCoverage(new CloudflareTunnelApi(creds, AbortSignal.timeout(15_000)), config, port));
+        const api = new CloudflareTunnelApi(creds, AbortSignal.timeout(30_000));
+        await verifyExistingOrigins(api, config, port, new OriginApprovals('data/intrusion-origin-approvals.json'), managementKeys, false);
+        return c.json(await verifyCoverage(api, config, port));
       } catch { return c.json({ state: 'unverified', error: 'coverage_verification_failed' }, 502); }
     });
     return { router, stop: async () => {

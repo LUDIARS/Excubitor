@@ -19,3 +19,8 @@ export function privateHttpOriginPort(value: string): number | null {
 export function isPrivateHttpOrigin(value: string): boolean {
   return privateHttpOriginPort(value) !== null;
 }
+
+/** Narrow existing public HTTPS target, never a request-controlled URL. */
+export function isCloudfrontHttpsOrigin(value: string): boolean {
+  return /^https:\/\/[a-z0-9-]+\.cloudfront\.net(?::443)?\/?$/.test(value);
+}

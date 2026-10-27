@@ -9,7 +9,10 @@ domain protects the service-operation domain.
 
 An explicitly configured loopback HTTP gateway sits between cloudflared and all
 public HTTP/WebSocket origins. Host-to-origin mappings are operator-owned,
-never request-controlled. Management, federation, SSH and outbound Discord are
+never request-controlled. No management router is mounted on this listener.
+An already-public Ex management origin can only be proxied through explicit,
+persisted adoption of its existing Access-protected rule (see
+`intrusion-origin-adoption.md`). Federation, SSH and outbound Discord remain
 outside this listener. Direct public origins, alternate tunnels and non-HTTP
 ingress must be inventoried and closed separately before claiming site coverage.
 The gateway cannot see traffic rejected or served from cache at Cloudflare.

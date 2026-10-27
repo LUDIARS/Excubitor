@@ -11,7 +11,8 @@
   "cardTemplate": "Summarise the intrusion domain: trusted Cloudflare ingress, deterministic local detection, immediate connection cutoff, durable incident state, remote tunnel containment, and explicit recovery.",
   "specRefs": [
     "spec/feature/intrusion-monitor.md",
-    "spec/feature/intrusion-rollout.md"
+    "spec/feature/intrusion-rollout.md",
+    "spec/feature/intrusion-origin-adoption.md"
   ],
   "rationale": "Intrusion protection coordinates the local public gateway and Cloudflare containment across several infrastructure boundaries, while keeping its fail-closed policy and recovery lifecycle independently owned. Tests also belong to the cross-cutting test-environment domain."
 }

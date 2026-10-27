@@ -7,6 +7,9 @@ instructions, not evidence that either production site has been activated.
 
 Store a UTF-8 JSON config outside version control and point
 `EXCUBITOR_INTRUSION_CONFIG` to its absolute path in the Ex supervisor environment.
+Alternatively, explicitly create `data/intrusion-config.json` in the main checkout;
+this avoids changing the OS supervisor environment. Missing default file is inert;
+invalid/unreadable configuration is never treated as missing.
 The listener port belongs to the `excubitor` service's `public-ingress` catalog
 entry. Do not copy a port into this config or point any tunnel at the management
 port. The same implementation runs on Windows headquarters and Linux AWS.
@@ -40,9 +43,12 @@ proxying. It does not evaluate Cloudflare regular expressions in JavaScript.
 and preserves rule ordering, paths, Access options and fallback. Compare the whole
 saved configuration with a fresh read before applying a reviewed plan; do not
 overwrite concurrent edits. `verifyCoverage` checks exact path/key correspondence.
-HTTPS-only origins, wildcard hosts, non-HTTP tunnels and direct AWS listeners
-require a separately reviewed migration; do not silently skip them.
-Ex management/federation/the gateway itself cannot be upstream targets.
+Exact CloudFront HTTPS origins and existing legacy/private origins can be adopted
+only with original-rule proof as described in `intrusion-origin-adoption.md`.
+Ex management additionally requires the original cloudflared Access validation.
+Federation/the gateway itself cannot be upstream targets. Other HTTPS origins,
+wildcard hosts, non-HTTP tunnels and direct AWS listeners still require separate
+coverage; do not silently skip them.
 All hostname entries must be in the existing Cloudflare broker allowlist.
 
 Use Ex Vault for `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and
@@ -65,6 +71,12 @@ Vault and Cloudflare clients, not custom cryptography.
 3. Obtain review/test evidence. Deploy via Ex from the main checkout to each site.
    Start with configuration absent; GET `/api/v1/intrusion` must say unconfigured.
 4. Set the validated config and Vault entries; restart through the supervisor.
+   For every adopted route, set `adoptExisting: {tunnelId, sourceHash}` and a unique
+   route key. Generate `sourceHash` with `publicRuleHash` over the original rule
+   and tunnel configuration. First startup must still see the original CF rule;
+   it writes only local approval receipts and does not change CF. Keep
+   `data/intrusion-origin-approvals.json` across incident recovery. Copy it only
+   with the matching site's reviewed config; missing/stale proof fails closed.
    `armed` only means the gateway is listening, not that every public route is
    covered. The status deliberately continues to say coverage unverified.
 5. Preserve original tunnel configuration in an access-controlled recovery record.
@@ -110,8 +122,9 @@ guarantee is claimed; stable incident IDs identify possible delivery duplicates.
   existing Ex management exposure and an external HTTPS origin, which the gateway
   deliberately cannot proxy. These need an explicit deployment disposition; partial
   routing must not be reported as whole-site coverage.
-- The existing Ex notification webhook is configured; its suitability as a private
-  security destination remains unverified.
+- Private security Discord delivery was verified independently from headquarters
+  and AWS on 2026-10-27; the security webhook is in each site's Ex Vault. This does
+  not certify incident-triggered delivery or containment, which remain live tests.
 - Activation and verification were authorized on 2026-10-27. Authorization does
   not constitute successful deployment or live verification of either site.
 

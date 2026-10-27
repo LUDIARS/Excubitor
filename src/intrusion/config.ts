@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { isPrivateHttpOrigin } from './origin.js';
+import { isPrivateHttpOrigin, isCloudfrontHttpsOrigin } from './origin.js';
 
 const hostname = z.string().regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/);
 export const intrusionConfigSchema = z.object({
@@ -15,7 +15,8 @@ export const intrusionConfigSchema = z.object({
     path: z.string().min(1).max(2048).optional(),
     forwardHost: z.string().regex(/^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/).max(259).optional(),
     service: z.string().regex(/^[a-z0-9_-]{1,64}$/),
-    origin: z.string().url().refine(isPrivateHttpOrigin, 'origin must be an explicit private IPv4 HTTP port'),
+    origin: z.string().url().refine(value => isPrivateHttpOrigin(value) || isCloudfrontHttpsOrigin(value), 'unsupported origin'),
+    adoptExisting: z.object({ tunnelId: z.string().uuid(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   }).strict()).min(1).max(200),
   tunnels: z.array(z.object({
     id: z.string().uuid(), hostnames: z.array(hostname).min(1).max(200),
@@ -30,6 +31,15 @@ export const intrusionConfigSchema = z.object({
   if (config.routes.some(r => r.path && !r.routeKey)) {
     ctx.addIssue({ code: 'custom', message: 'path-restricted routes require an internal route key' });
   }
+  for (const route of config.routes) {
+    if (isCloudfrontHttpsOrigin(route.origin) && !route.adoptExisting) {
+      ctx.addIssue({ code: 'custom', message: 'HTTPS origin requires existing-route adoption' });
+    }
+    if (route.adoptExisting && (!route.routeKey || !config.tunnels.some(t =>
+      t.id === route.adoptExisting?.tunnelId && t.hostnames.includes(route.hostname)))) {
+      ctx.addIssue({ code: 'custom', message: 'adoption requires a route key and owning tunnel' });
+    }
+  }
   if (new Set(config.tunnels.map(t => t.id)).size !== config.tunnels.length) {
     ctx.addIssue({ code: 'custom', message: 'duplicate tunnel ID' });
   }
@@ -40,8 +50,13 @@ export const intrusionConfigSchema = z.object({
 });
 export type IntrusionConfig = z.infer<typeof intrusionConfigSchema>;
 
-export function readIntrusionConfig(env: NodeJS.ProcessEnv = process.env): IntrusionConfig | null {
-  const file = env.EXCUBITOR_INTRUSION_CONFIG?.trim();
-  if (!file) return null;
-  return intrusionConfigSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
+export function readIntrusionConfig(env: NodeJS.ProcessEnv = process.env, defaultFile = 'data/intrusion-config.json'): IntrusionConfig | null {
+  const explicit = env.EXCUBITOR_INTRUSION_CONFIG?.trim();
+  let text: string;
+  try { text = readFileSync(explicit || defaultFile, 'utf8'); }
+  catch (error) {
+    if (!explicit && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  return intrusionConfigSchema.parse(JSON.parse(text));
 }

@@ -1,10 +1,12 @@
 import { request, type IncomingMessage, type ServerResponse } from 'node:http';
+import { request as requestHttps } from 'node:https';
 import type { Duplex } from 'node:stream';
 
 /** Preserve streaming/backpressure; target is an operator-validated private origin. */
 export function proxyHttp(incoming: IncomingMessage, response: ServerResponse, origin: string,
   onStatus: (status: number) => void): void {
-  const upstream = request(origin, { method: incoming.method, path: incoming.url,
+  const upstream = (origin.startsWith('https:') ? requestHttps : request)(origin, { method: incoming.method, path: incoming.url,
+    ...(origin.startsWith('https:') ? { servername: new URL(origin).hostname } : {}),
     headers: { ...incoming.headers, connection: 'close' } });
   const close = (): void => { upstream.destroy(); };
   response.once('close', close);
@@ -27,7 +29,8 @@ export function proxyHttp(incoming: IncomingMessage, response: ServerResponse, o
 
 export function proxyUpgrade(incoming: IncomingMessage, socket: Duplex, head: Buffer, origin: string,
   onStatus: (status: number) => void): void {
-  const upstream = request(origin, { method: 'GET', path: incoming.url, headers: incoming.headers });
+  const upstream = (origin.startsWith('https:') ? requestHttps : request)(origin, { method: 'GET', path: incoming.url,
+    ...(origin.startsWith('https:') ? { servername: new URL(origin).hostname } : {}), headers: incoming.headers });
   let peer: Duplex | null = null;
   const close = (): void => { upstream.destroy(); peer?.destroy(); socket.destroy(); };
   socket.once('error', close);
