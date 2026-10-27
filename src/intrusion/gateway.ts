@@ -7,7 +7,7 @@ import { proxyHttp, proxyUpgrade } from './proxy.js';
 
 /** A separate loopback listener; it never mounts the management router. */
 export async function startIntrusionGateway(config: IntrusionConfig, port: number,
-  monitor: IntrusionMonitor, now: () => number = Date.now): Promise<{ closeConnections(): void; close(): Promise<void> }> {
+  monitor: Pick<IntrusionMonitor, 'inspect' | 'response'> & { readonly rejectionStatus?: number }, now: () => number = Date.now): Promise<{ closeConnections(): void; close(): Promise<void> }> {
   const sockets = new Set<Socket>();
   const routes = new Map(config.routes.map(route => [route.routeKey ?? route.hostname, route]));
   const resolve = (request: IncomingMessage): { origin: string; evidence: AccessEvidence } | null => {
@@ -30,7 +30,7 @@ export async function startIntrusionGateway(config: IntrusionConfig, port: numbe
   };
   const server = createServer((request, response) => {
     const target = resolve(request);
-    if (!target) { response.writeHead(503, { 'cache-control': 'no-store', connection: 'close' }); response.end(); return; }
+    if (!target) { response.writeHead(monitor.rejectionStatus ?? 503, { 'cache-control': 'no-store', connection: 'close' }); response.end(); return; }
     proxyHttp(request, response, target.origin, status => monitor.response(target.evidence, status));
   });
   server.on('upgrade', (request, socket, head) => {

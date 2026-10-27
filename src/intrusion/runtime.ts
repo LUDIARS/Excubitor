@@ -10,9 +10,10 @@ import { sharedLogsRoot } from '../log/logs-root.js';
 import { readIntrusionConfig } from './config.js';
 import { IntrusionStore } from './store.js';
 import { IntrusionMonitor } from './monitor.js';
+import { RequestFilter } from './request-filter.js';
 import { accessEvidenceWriter } from './evidence-log.js';
 import { containTunnels } from './containment.js';
-import { reportIncident } from './discord.js';
+import { reportIncident, reportRequestDenial } from './discord.js';
 import { startIntrusionGateway } from './gateway.js';
 import { verifyCoverage } from './coverage.js';
 import { installIntrusionRouteGuard } from './route-guard.js';
@@ -44,13 +45,18 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
   await verifyExistingOrigins(new CloudflareTunnelApi(creds, AbortSignal.timeout(30_000)), config, port,
     new OriginApprovals('data/intrusion-origin-approvals.json'), managementKeys);
   const store = new IntrusionStore('data/intrusion.sqlite');
-  let monitor: IntrusionMonitor | null = null;
+  const requestFiltering = config.enforcement === 'request-filter';
+  let monitor: IntrusionMonitor | RequestFilter | null = null;
   let gateway: Awaited<ReturnType<typeof startIntrusionGateway>> | null = null;
   let releaseRouteGuard: (() => void) | null = null;
   try {
     const unclean = store.wasRunning();
     const writeEvidence = accessEvidenceWriter(sharedLogsRoot());
-    monitor = new IntrusionMonitor(config, {
+    monitor = requestFiltering ? new RequestFilter(config, {
+      evidence: writeEvidence,
+      notifyDenied: (event, reason) => reportRequestDenial(webhook, config.site, event, reason),
+      warn: message => logger.warn(message), now: Date.now,
+    }) : new IntrusionMonitor(config, {
       load: () => store.read(), save: incident => store.save(incident),
       evidence: writeEvidence,
       contain: () => containTunnels(new CloudflareTunnelApi(creds, AbortSignal.timeout(15_000)), config, currentAllowlist(),
@@ -59,10 +65,11 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
       closePublicConnections: () => gateway?.closeConnections(),
       warn: message => logger.warn(message), now: Date.now,
     });
-    // Persist a crash marker before the first public request. On unclean restart,
-    // even a prior failed incident write cannot silently reopen the public routes.
+    // Keep lifecycle evidence in both policies. Only legacy site-cutoff converts
+    // an unclean restart into a global latch; request-filter never rewrites CF.
     store.markRunning(true);
-    if (unclean) monitor.trip({ service: 'excubitor', at: Date.now() }, 'unclean_restart');
+    if (unclean && monitor instanceof IntrusionMonitor) monitor.trip({ service: 'excubitor', at: Date.now() }, 'unclean_restart');
+    if (unclean && requestFiltering) logger.warn('unclean restart recorded; request filtering remains active without site cutoff');
     gateway = await startIntrusionGateway(config, port, monitor);
     monitor.start();
     const activeMonitor = monitor;
@@ -70,6 +77,8 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
     releaseRouteGuard = installIntrusionRouteGuard(config.routes.map(route => route.hostname),
       `http://127.0.0.1:${port}`, () => activeMonitor.status().state === 'blocked');
     router.get('/api/v1/intrusion', c => c.json({ ...activeMonitor.status(), site: config.site,
+      enforcement: config.enforcement ?? 'site-cutoff',
+      previousIncident: requestFiltering ? store.read() : undefined,
       coverage: 'unverified', configuredHostnames: config.routes.map(route => route.hostname) }));
     router.post('/api/v1/intrusion/verify', async c => {
       try {

@@ -1,5 +1,10 @@
 # Public ingress intrusion monitoring {SPEC-EX-INTRUSION-MONITOR}
 
+2026-10-28 policy amendment: explicit `enforcement: request-filter` keeps normal JP
+access available and logs access while rejecting individual suspicious requests.
+See `intrusion-request-filter.md`; the global cutoff lifecycle below applies only
+to the legacy/default `site-cutoff` policy. Switching policy does not reopen CF routes.
+
 Ex owns the monitoring and containment at headquarters and AWS. Each site runs
 its own guard; loss of federation must not disable local protection. Vg remains
 the access-evidence format, not the decision maker. The supporting intrusion

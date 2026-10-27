@@ -1,5 +1,12 @@
 import { sendDiscordWebhook } from '../notify/discord-webhook.js';
 import type { Incident } from './store.js';
+import type { AccessEvidence, DetectionReason } from './detection.js';
+
+export async function reportRequestDenial(webhook: string, site: string, event: AccessEvidence, reason: DetectionReason): Promise<void> {
+  await sendDiscordWebhook(webhook, ['不正アクセス監視: 不審な通信を検知しました（入口全体の遮断なし）',
+    `拠点: ${site}`, `対象サービス: ${event.service}`, `検知: ${reason}`,
+    `時刻: ${new Date(event.at).toISOString()}`, '許可国の通常アクセスを継続します。詳細はアクセスログを確認してください。'].join('\n'));
+}
 
 export function incidentMessage(incident: Incident): string {
   // All labels are configured/schema-controlled. Never put incoming URL/IP in Discord.

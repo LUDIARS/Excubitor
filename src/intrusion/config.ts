@@ -6,6 +6,7 @@ const hostname = z.string().regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])
 export const intrusionConfigSchema = z.object({
   site: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   allowedCountries: z.array(z.string().regex(/^[A-Z]{2}$/).refine(c => c !== 'XX')).min(1).default(['JP']),
+  enforcement: z.enum(['site-cutoff', 'request-filter']).optional(),
   requestsPerMinute: z.number().int().min(10).max(100000).default(600),
   authFailuresPerMinute: z.number().int().min(2).max(1000).default(20),
   routes: z.array(z.object({
