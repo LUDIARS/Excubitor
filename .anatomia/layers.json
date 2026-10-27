@@ -16,6 +16,7 @@
     { "glob": "src/discovery/**", "layer": "application" },
     { "glob": "src/federation/**", "layer": "application" },
     { "glob": "src/hub/**", "layer": "application" },
+    { "glob": "src/intrusion/**", "layer": "application" },
     { "glob": "src/local-control/**", "layer": "application" },
     { "glob": "src/notify/**", "layer": "application" },
     { "glob": "src/ops/**", "layer": "application" },

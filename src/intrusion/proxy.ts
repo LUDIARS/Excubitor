@@ -1,7 +1,7 @@
 import { request, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-/** Preserve streaming/backpressure; target is an operator-validated loopback origin. */
+/** Preserve streaming/backpressure; target is an operator-validated private origin. */
 export function proxyHttp(incoming: IncomingMessage, response: ServerResponse, origin: string,
   onStatus: (status: number) => void): void {
   const upstream = request(origin, { method: incoming.method, path: incoming.url,

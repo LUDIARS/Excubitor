@@ -9,7 +9,7 @@ import { proxyHttp, proxyUpgrade } from './proxy.js';
 export async function startIntrusionGateway(config: IntrusionConfig, port: number,
   monitor: IntrusionMonitor, now: () => number = Date.now): Promise<{ closeConnections(): void; close(): Promise<void> }> {
   const sockets = new Set<Socket>();
-  const routes = new Map(config.routes.map(route => [route.hostname, route]));
+  const routes = new Map(config.routes.map(route => [route.routeKey ?? route.hostname, route]));
   const resolve = (request: IncomingMessage): { origin: string; evidence: AccessEvidence } | null => {
     // Host identity is exact. Absolute-form URLs and duplicate/ambiguous authority are rejected.
     const host = request.headers.host?.toLowerCase();
@@ -23,7 +23,10 @@ export async function startIntrusionGateway(config: IntrusionConfig, port: numbe
     const evidence: AccessEvidence = { service: route.service, hostname: route.hostname,
       clientIp: typeof ip === 'string' ? ip : '', country: typeof country === 'string' ? country : '',
       path: raw.split('?')[0] ?? '/', method: request.method ?? 'GET', at: now() };
-    return monitor.inspect(evidence) ? { origin: route.origin, evidence } : null;
+    if (!monitor.inspect(evidence)) return null;
+    // Restore the reviewed origin Host; the internal selector must never reach the service.
+    request.headers.host = route.forwardHost ?? route.hostname;
+    return { origin: route.origin, evidence };
   };
   const server = createServer((request, response) => {
     const target = resolve(request);

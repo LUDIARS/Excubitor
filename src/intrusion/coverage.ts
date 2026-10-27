@@ -1,5 +1,6 @@
 import type { IntrusionConfig } from './config.js';
 import type { TunnelControl } from './containment.js';
+import { matchesPublicRule, originOptions } from './route-plan.js';
 
 /** Explicit read-only preflight; does not repoint production routes or claim other tunnels. */
 export async function verifyCoverage(api: TunnelControl, config: IntrusionConfig, gatewayPort: number): Promise<{
@@ -10,9 +11,17 @@ export async function verifyCoverage(api: TunnelControl, config: IntrusionConfig
   for (const tunnel of config.tunnels) {
     const current = await api.getConfiguration(tunnel.id);
     const ingress = current.ingress ?? [];
+    const inherited = originOptions({ service: '', originRequest: current.originRequest });
     for (const host of tunnel.hostnames) {
       const rules = ingress.filter(rule => rule.hostname?.toLowerCase() === host);
-      if (!rules.some(rule => !rule.path) || rules.some(rule => rule.service.replace(/\/$/, '') !== expected)) {
+      const routes = config.routes.filter(route => route.hostname === host);
+      const invalid = rules.some(rule => {
+        const route = routes.find(entry => matchesPublicRule(rule, entry));
+        if (!route || rule.service.replace(/\/$/, '') !== expected) return true;
+        const header = originOptions(rule).httpHostHeader ?? inherited.httpHostHeader ?? host;
+        return header !== (route.routeKey ?? route.hostname);
+      });
+      if (invalid || routes.some(route => rules.filter(rule => matchesPublicRule(rule, route)).length !== 1)) {
         gaps.push(`gateway_not_exclusive:${host}`);
       }
     }

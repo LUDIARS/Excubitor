@@ -16,6 +16,7 @@ import { reportIncident } from './discord.js';
 import { startIntrusionGateway } from './gateway.js';
 import { verifyCoverage } from './coverage.js';
 import { installIntrusionRouteGuard } from './route-guard.js';
+import { privateHttpOriginPort } from './origin.js';
 
 const logger = createNamedLogger('excubitor.intrusion');
 export interface IntrusionRuntime { router: Hono; stop(): Promise<void> }
@@ -33,10 +34,12 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
   if (!port) throw new Error('public-ingress port is missing from Excubitor catalog');
   const forbiddenPorts = new Set([self?.port, ...self?.ports?.map(entry => entry.port) ?? []]);
   for (const route of config.routes) {
-    if (forbiddenPorts.has(Number(new URL(route.origin).port))) throw new Error('management/self origin is forbidden');
+    const originPort = privateHttpOriginPort(route.origin);
+    if (originPort === null) throw new Error('invalid private HTTP origin');
+    if (forbiddenPorts.has(originPort)) throw new Error('management/self origin is forbidden');
     const service = catalog.services.find(entry => entry.code === route.service);
     const declared = [service?.port, ...service?.ports?.map(entry => entry.port) ?? []];
-    if (!service || !declared.includes(Number(new URL(route.origin).port))) throw new Error('origin must match its catalog service');
+    if (!service || !declared.includes(originPort)) throw new Error('origin must match its catalog service');
   }
   const allowed = currentAllowlist();
   if (config.routes.some(route => !allowed.includes(route.hostname))) throw new Error('intrusion hostname outside CF allowlist');

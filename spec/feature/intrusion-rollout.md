@@ -28,10 +28,20 @@ Example (replace all example values; these are not deployed settings):
 }
 ```
 
-Origins must be exact loopback HTTP ports declared by their catalog service.
-The configuration supports one origin per hostname (all paths). Existing
-path-based splits, HTTPS-only origins, wildcard hosts, non-HTTP tunnels and direct
-AWS listeners require a separately reviewed migration; do not silently skip them.
+Origins must be exact private IPv4 HTTP ports declared by their catalog service:
+loopback, RFC1918 or Tailscale's 100.64.0.0/10 range. DNS names and public/metadata
+addresses are rejected; configuration is operator-owned, never client-derived.
+For path-based rules, configure the original `path` and a unique `routeKey`
+(`r-<identifier>.intrusion.invalid`). Cloudflared retains its original path match,
+then forwards to the gateway with `originRequest.httpHostHeader` set to that key.
+The gateway restores `forwardHost` (or the public hostname) before HTTP/WebSocket
+proxying. It does not evaluate Cloudflare regular expressions in JavaScript.
+`planGatewayRoutes` produces a pure migration plan, checks the original origin/Host,
+and preserves rule ordering, paths, Access options and fallback. Compare the whole
+saved configuration with a fresh read before applying a reviewed plan; do not
+overwrite concurrent edits. `verifyCoverage` checks exact path/key correspondence.
+HTTPS-only origins, wildcard hosts, non-HTTP tunnels and direct AWS listeners
+require a separately reviewed migration; do not silently skip them.
 Ex management/federation/the gateway itself cannot be upstream targets.
 All hostname entries must be in the existing Cloudflare broker allowlist.
 
@@ -73,7 +83,7 @@ Cloudflare and Discord communication occurs only for explicit coverage verificat
 or incident handling (including a persisted incident/unclean restart at startup).
 CF receives configured tunnel IDs/configuration and its Bearer token. Discord
 receives only the redacted incident summary using the Vault webhook. The gateway
-forwards client requests only to configured local origins; it runs no shell,
+forwards client requests only to configured private origins; it runs no shell,
 dynamic code or child process. Configuration absence disables these new paths.
 
 ## Recovery
@@ -96,7 +106,21 @@ guarantee is claimed; stable incident IDs identify possible delivery duplicates.
 ## Current deployment blockers
 
 - AWS peer observed as `mesh_security_not_configured` on 2026-10-27.
-- Actual site-to-tunnel/hostname inventory and private security Discord destination
-  are not yet established for this change.
-- Session has not run unit/integration/live tests; explicit test authorization is
-  required under the session rules. Source/type checks are separate evidence.
+- The AWS/LOCAL Cloudflare configurations have been inventoried. They include
+  existing Ex management exposure and an external HTTPS origin, which the gateway
+  deliberately cannot proxy. These need an explicit deployment disposition; partial
+  routing must not be reported as whole-site coverage.
+- The existing Ex notification webhook is configured; its suitability as a private
+  security destination remains unverified.
+- Activation and verification were authorized on 2026-10-27. Authorization does
+  not constitute successful deployment or live verification of either site.
+
+## Compatibility correction review
+
+The path/Host migration and private IPv4 validation use Node standard libraries
+and the existing Zod dependency. No dependency, install hook, authentication or
+cryptographic implementation is added. The planner is pure and performs no
+startup/network communication. Existing opt-in runtime behavior is unchanged:
+client headers/body stream to the configured origin; CF configuration and bearer
+credentials go only to CF's existing client; redacted incident summaries go only
+to the configured Vault webhook. Unconfigured startup opens no intrusion listener.
