@@ -47,6 +47,10 @@ services:
     ports:
       - role: federation
         port: 17335
+      # Only opened when EXCUBITOR_INTRUSION_CONFIG is explicitly configured.
+      # cloudflared -> loopback gateway -> catalog-declared service origins.
+      - role: public-ingress
+        port: 17336
     autostart: false
     restart_policy: "no"
     health:

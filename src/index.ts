@@ -101,6 +101,7 @@ import { createOperationRunner } from './federation/operations/runner.js';
 import { selfRepoOf } from './federation/operations/self-operation.js';
 import { captureSelfVersion } from './federation/self-version.js';
 import { buildCfTunnelRouter } from './cf-tunnel/router.js';
+import { startIntrusionRuntime } from './intrusion/runtime.js';
 import { buildCfAccessRouter } from './cf-tunnel/access-router.js';
 import { buildCfAccessPolicyRouter } from './cf-tunnel/access-policy-router.js';
 import { buildCfRemovalRouter } from './cf-tunnel/removal-router.js';
@@ -1267,6 +1268,9 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     return c.json(payload, 502);
   });
 
+  const intrusionRuntime = await startIntrusionRuntime(currentCatalog);
+  app.route('/', intrusionRuntime.router);
+
   // ─── built Web UI (frontend/dist) 配信 ─────────────────────
   // vite dev サーバ常駐 (~130MB) を不要にする。 API ルートに一致しなかった GET だけが
   // ここに落ちる。 dist 未ビルドなら従来どおり 404 (API には影響しない)。
@@ -1286,6 +1290,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   return {
     router: app,
     shutdown: async () => {
+      try { await intrusionRuntime.stop(); }
+      catch { logger.error('intrusion shutdown failed; crash marker remains closed on restart'); }
       stopViewerPublication();
       overviewCache.stop();
       federationPayloadCache.stop();

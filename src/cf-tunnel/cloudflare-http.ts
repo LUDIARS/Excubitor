@@ -23,6 +23,7 @@ export async function cfRequest<T>(
   method: string,
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(`${CF_API_BASE}${path}`, {
     method,
@@ -31,6 +32,7 @@ export async function cfRequest<T>(
       'content-type': 'application/json',
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   // エラー文にはアカウント ID を含む path を出さない (method と末尾の種類だけ)。
   const label = `${method} ${path.replace(/[0-9a-f]{32}/gi, '<id>')}`;

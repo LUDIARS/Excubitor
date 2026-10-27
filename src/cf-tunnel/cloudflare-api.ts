@@ -33,11 +33,11 @@ export interface CfTunnelConfig {
 
 /** @implements SPEC-CF-TUNNEL-ROUTES */
 export class CloudflareTunnelApi {
-  constructor(private readonly creds: CfCredentials) {}
+  constructor(private readonly creds: CfCredentials, private readonly signal?: AbortSignal) {}
 
   /** @implements SPEC-CF-TUNNEL-ROUTES */
   private request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return cfRequest<T>(this.creds, method, `/accounts/${this.creds.accountId}${path}`, body);
+    return cfRequest<T>(this.creds, method, `/accounts/${this.creds.accountId}${path}`, body, this.signal);
   }
 
   /** @implements SPEC-CF-TUNNEL-ROUTES */

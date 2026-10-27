@@ -13,6 +13,7 @@
  */
 
 import { Hono } from 'hono';
+import { assertIntrusionRouteMutation } from '../intrusion/route-guard.js';
 import { createNamedLogger } from '../shared/logger.js';
 import { accessIdentity, accessOriginRequest, findAppForHostname } from './access-service.js';
 import { currentAllowlist, failureStatus, resolveTunnel } from './broker-support.js';
@@ -69,6 +70,7 @@ export function buildCfTunnelRouter(): Hono {
       return c.json({ error: 'bad_request', message: 'hostname と service は必須' }, 400);
     }
     try {
+      assertIntrusionRouteMutation(body.hostname, body.service);
       const creds = await resolveCfCredentials();
       const api = new CloudflareTunnelApi(creds);
       const tunnel = await resolveTunnel(api, body.tunnel);
