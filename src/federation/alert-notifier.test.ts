@@ -13,6 +13,32 @@ function observe(partial: Partial<AlertObservation>): AlertObservation {
 }
 
 describe('notifyAlerts', () => {
+  it('reports monitoring configuration failure once, without a downtime alarm or fake restart', async () => {
+    const store = createAlertStateStore(); const send = vi.fn(async (_text: string) => undefined);
+    const options = { peerDownAfterMs: DOWN_AFTER, send };
+    const blocked = observe({ status: 'unauthorized', error: 'mesh_security_not_configured' });
+    await notifyAlerts(store, [blocked], 0, options);
+    await notifyAlerts(store, [blocked], DOWN_AFTER * 2, options);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0]).toContain('監視を確認できません');
+    await notifyAlerts(store, [observe({})], DOWN_AFTER * 3, options);
+    expect(send.mock.calls[1]![0]).toContain('監視を再開');
+    expect(send.mock.calls.map(call => call[0]).join('\n')).not.toContain('応答しません');
+  });
+
+  it('retries blocked notifications and starts a fresh downtime clock for a later transport failure', async () => {
+    const store = createAlertStateStore();
+    const send = vi.fn(async (_text: string) => undefined).mockRejectedValueOnce(new Error('delivery'));
+    const options = { peerDownAfterMs: DOWN_AFTER, send };
+    const blocked = observe({ status: 'down', error: 'mesh_security_not_configured' });
+    await expect(notifyAlerts(store, [blocked], 0, options)).rejects.toThrow('delivery');
+    await notifyAlerts(store, [blocked], 1, options);
+    const down = observe({ status: 'down', error: 'timeout' });
+    await notifyAlerts(store, [down], DOWN_AFTER * 2, options);
+    expect(send).toHaveBeenCalledTimes(2);
+    await notifyAlerts(store, [down], DOWN_AFTER * 3, options);
+    expect(send.mock.calls[2]![0]).toContain('応答しません');
+  });
   it('reports an unresponsive node once after the grace period and again when it recovers', async () => {
     const store = createAlertStateStore();
     const send = vi.fn(async (_text: string) => undefined);

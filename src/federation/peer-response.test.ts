@@ -3,6 +3,11 @@ import { classifyPeerResponse } from './peer-response.js';
 import { healthPayload } from './test-fixtures.js';
 
 describe('classifyPeerResponse', () => {
+  it('distinguishes local configuration and remote mesh security failures from downtime', () => {
+    expect(classifyPeerResponse({ ok: false, status: null, data: null, error: 'mesh_security_not_configured' }, 0).status).toBe('unauthorized');
+    expect(classifyPeerResponse({ ok: false, status: 503, data: { error: 'mesh_security_unavailable' }, error: 'HTTP 503 mesh_security_unavailable' }, 5).status).toBe('unauthorized');
+    expect(classifyPeerResponse({ ok: false, status: 503, data: null, error: 'HTTP 503' }, 5).status).toBe('down');
+  });
   it('accepts a payload that matches the contract', () => {
     const payload = healthPayload('mac');
     expect(classifyPeerResponse({ ok: true, status: 200, data: payload, error: null }, 15)).toEqual({

@@ -9,6 +9,7 @@
  */
 
 import type { NodeResourceAlert, PeerLinkStatus } from './health-types.js';
+import { isLocalMonitoringBlock } from './monitoring-block.js';
 
 export interface AlertObservation {
   /** 状態を引き継ぐためのキー (ピア id、 自拠点は `self`)。 */
@@ -25,6 +26,7 @@ export interface AlertObservation {
 export interface NodeAlertState {
   downSince: number | null;
   downNotified: boolean;
+  monitoringBlockedNotified?: boolean;
   /** 通知済みの資源アラート (key → level)。 */
   notified: Map<string, NodeResourceAlert['level']>;
 }
@@ -52,6 +54,10 @@ export async function notifyAlerts(
     if (observation.status === 'pending') continue;
     const state = store.get(observation.id) ?? { downSince: null, downNotified: false, notified: new Map() };
     store.set(observation.id, state);
+    if (observation.status === 'unauthorized' || observation.status === 'unregistered' || isLocalMonitoringBlock(observation.error)) {
+      await notifyMonitoringBlocked(observation, state, options);
+      continue;
+    }
     if (observation.status === 'up') {
       await notifyRecovered(observation, state, now, options);
       await notifyResourceAlerts(observation, state, options);
@@ -59,6 +65,22 @@ export async function notifyAlerts(
       await notifyUnreachable(observation, state, now, options);
     }
   }
+}
+
+/** @spec spec/feature/federation-monitoring-status.md */
+async function notifyMonitoringBlocked(observation: AlertObservation, state: NodeAlertState,
+  options: AlertNotifierOptions): Promise<void> {
+  if (!state.monitoringBlockedNotified) {
+    await options.send([
+      `⚠️ **拠点の監視を確認できません: ${observation.node}**`,
+      '認証・登録の設定を確認してください。拠点が停止したことを示す通知ではありません。',
+      `状態: ${observation.status}${observation.error ? ` — ${observation.error}` : ''}`,
+    ].join('\n'));
+    state.monitoringBlockedNotified = true;
+  }
+  // Do not count time without authentication as remote downtime, or announce a fake restart.
+  state.downSince = null;
+  state.downNotified = false;
 }
 
 async function notifyUnreachable(
@@ -83,6 +105,10 @@ async function notifyRecovered(
   now: number,
   options: AlertNotifierOptions,
 ): Promise<void> {
+  if (state.monitoringBlockedNotified) {
+    await options.send(`✅ **拠点の監視を再開: ${observation.node}** (認証済みの応答を確認)`);
+    state.monitoringBlockedNotified = false;
+  }
   if (state.downSince !== null && state.downNotified) {
     await options.send(`✅ **拠点が応答を再開: ${observation.node}** (応答なし ${formatDuration(now - state.downSince)})`);
   }

@@ -8,6 +8,7 @@
 import type { PeerCallResult } from './client.js';
 import { FEDERATION_HEALTH_SCHEMA, NodeHealthPayloadSchema, type PeerLinkStatus } from './health-types.js';
 import type { PeerPollOutcome } from './peer-cache.js';
+import { isLocalMonitoringBlock } from './monitoring-block.js';
 
 /** @implements SPEC-FEDERATION-HEALTH-CACHE */
 
@@ -55,6 +56,8 @@ export function classifyPeerResponse(
 
 function failureStatus(result: PeerCallResult<unknown>): PeerLinkStatus {
   const code = (result.data as { error?: unknown } | null)?.error;
+  if (result.status === null && isLocalMonitoringBlock(result.error)) return 'unauthorized';
+  if (result.status === 503 && code === 'mesh_security_unavailable') return 'unauthorized';
   if (result.status === 403 && code === NOT_REGISTERED) return 'unregistered';
   if (result.status === 401 || result.status === 403) return 'unauthorized';
   return 'down';
