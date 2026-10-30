@@ -126,6 +126,30 @@ EXCUBITOR_ADMIN_ALLOWED_ORIGINS=https://ex.example.com,http://site.example.test:
 - 判断は純関数 `src/security/browser-allowlist.ts`、env の読み取りは `browser-allowlist-env.ts`。
 - これはブラウザ経路の境界であり、管理 API の認証の代わりにはならない (下の残課題は変わらない)。
 
+### 公開ホストは Cloudflare Access の JWT 必須
+
+参照: actio:8abb43ec-a0ff-4804-b479-e1e04cf6e0e7
+
+Host と Origin はクライアントが自由に付けられる。Origin を付けない curl は Origin 検査を通るので、公開ホストを allowlist に
+入れると、前段に Access が無い (または bypass がある) 経路からインターネットの誰でも管理 API 全体を使えた
+(秘密の取り出し、サービス制御、Vault 取得元やトンネルの書き換え)。
+
+- 公開ホスト = loopback・私設網 (10/8, 172.16/12, 192.168/16, 100.64/10 = Tailscale, 169.254/16, IPv6 ULA / link-local)・
+  `*.ts.net` 以外のホスト。私設網のホストは公開トンネルのホスト名からは届かないので対象外。
+- 公開ホストで届いた要求は、Origin の有無にかかわらず `Cf-Access-Jwt-Assertion` の検証を必須にする。RS256、
+  `https://<team>/cdn-cgi/access/certs` の鍵 (kid)、`iss = https://<team domain>`、`aud` に Excubitor の Access アプリの AUD、
+  exp / nbf (誤差 60 秒) を確かめる。検証できない要求は 401 `access_required`。
+- team ドメインと AUD は Excubitor 自身の runtime-config の `cloudflareAccess` (`POST /api/v1/cf-access/apps` に
+  `service: "excubitor"` を渡すと書かれる) から起動時に読む。
+- fail-closed: allowlist に公開ホストがあるのに `cloudflareAccess` が無い・不正なら、起動時にその公開ホストを allowlist から外し
+  error ログを出す (私設網のホストは残る)。
+- 公開鍵は 1 時間ごとに取り直す。知らない kid での取り直しは 30 秒に 1 回まで。取得に失敗した間は検証できず拒否する。
+- 実装: `src/security/cf-access-jwt.ts` (検証・鍵取得)、`src/security/admin-access.ts` (設定の読み出しと組み立て)、
+  `src/security/local-browser-guard.ts`。
+
+移行: 公開 URL を allowlist に入れている拠点は、更新前に Excubitor の Access アプリを作り (`service: "excubitor"`)、
+runtime-config に `cloudflareAccess` があることを確かめる。無いまま更新すると、その公開 URL は 403 `invalid_host` になる。
+
 移行手順: (1) 従来どおりのアクセスが 403 `invalid_host` / `invalid_origin` になる拠点を確認する。(2) その拠点の env に
 実際に使う origin だけを書いて Ex を再起動する。(3) 起動ログの許可 origin を確認する。(4) 不要になった origin は外す。
 

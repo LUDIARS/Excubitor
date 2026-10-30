@@ -86,8 +86,8 @@ loopback 専用のため他拠点から届く口が無く、集約ビューは�
 
 相手が自分を登録していない拠点とは疎通しない。登録は一方向ではなく両方向で揃ったときだけ効く。
 
-1. **呼び出し側の証明** — 拠点 A が拠点 B を呼ぶとき、A は B の agent token を Bearer に載せ (A が B を
-   登録している証拠)、さらに **A 自身の** agent token を鍵にして要求を HMAC-SHA256 で署名する
+1. **呼び出し側の証明** — 拠点 A が拠点 B を呼ぶとき、A は B の mesh token を Bearer に載せ (A が B を
+   登録している証拠)、さらに **A 自身の** mesh token を鍵にして要求を HMAC-SHA256 で署名する
    (`x-excubitor-node` / `-ts` / `-nonce` / `-signature`)。署名対象は method・path・時刻・nonce・本文の SHA-256。
    token 自体は送らない。
 2. **受け側の確認** — B は Bearer が自分の token であることを確かめたうえで、B が登録している有効なピアの token で
@@ -97,6 +97,9 @@ loopback 専用のため他拠点から届く口が無く、集約ビューは�
 4. **適用範囲** — 他拠点向け公開面のすべて (health / node / operations / git bundle)。本体 17332 に載る同じ公開面にも
    同じ確認がかかる (公開面は 1 インスタンスを本体と拠点間リスナーで共有し、nonce も共有する)。
    管理面 (loopback) は従来どおり署名を要らない。
+5. **token の用途** — ここでの token は拠点間専用の mesh token で、secret-agent の token とは分ける
+   ([local-secret-hardening](local-secret-hardening.md#SPEC-SECURITY-AGENT-TOKEN-SPLIT))。既存拠点では旧 agent token の値で
+   作られるので、更新しただけでは相手の登録を変えなくてよい。
 
 ### 拠点情報 {#SPEC-FEDERATION-NODE-INFO}
 
@@ -233,7 +236,7 @@ catalog の concordia port へ PUT し、保存後の状態 (siteId / hqUrl / ha
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| GET | `/api/v1/federation/self` | 拠点名 + agent token + 拠点間リスナーの状態と URL |
+| GET | `/api/v1/federation/self` | 拠点名 + 拠点間リスナーの状態と URL + `token_command` (token 自体は返さない) |
 | GET | `/api/v1/federation/mesh` | 拠点 / 拠点間リンク / サービス × 拠点の担保表 |
 | GET | `/api/v1/federation/coverage` | 自拠点の担保一覧 (死活付き) |
 | PUT | `/api/v1/federation/coverage/:code` | 自拠点での担保の上書き |
@@ -277,8 +280,9 @@ bind アドレスは拠点ごとに違うので git 共有の catalog / config �
    (`tailscale ip -4` など)。
 2. 新拠点の Ex の env に `EXCUBITOR_FEDERATION_LISTEN=<そのアドレス>` を置き、Ex を再起動する。
    Federation タブ「このノード」に拠点間リスナーの URL が出れば bind できている。
-3. 新拠点の「このノード」から token と URL を写し、既存の各拠点でピア登録する。逆向きも同様に、
-   既存の各拠点の token と URL を新拠点でピア登録する (メッシュなので全組み合わせ。片方だけでは疎通しない)。
+3. 新拠点の端末で `npm run agent-token -- mesh` を実行して token を取り出し、「このノード」の URL と合わせて
+   既存の各拠点でピア登録する。逆向きも同様に、既存の各拠点の token と URL を新拠点でピア登録する
+   (メッシュなので全組み合わせ。片方だけでは疎通しない)。token は loopback の API では返さない。
 4. 各拠点の「疎通」で `接続` になることを確かめる。`相互登録待ち` は相手側がまだこちらを登録していない、
    `認証NG` は token の貼り間違い、`不達` はメッシュ到達性 (相手のリスナー未起動 / アドレス違い / ACL) を疑う。
 5. 「担保」表で `複数拠点が管理` が出たサービスは、担保しない側の拠点で上書きを「担保しない」にする。

@@ -5,12 +5,14 @@
  * 各サービス (crawler 等) が起動時に自分の service code を投げ、 resolved secret を
  * **レスポンス (in-process)** で受け取る。 env にもファイルにも書かない。
  * 認証は loopback (server.ts が 127.0.0.1 bind) + agent token の二段。
+ * token はサービスごと (token のサービスしか resolve できない)。 旧共有 token は移行期間だけ受ける
+ * (secret-agent-auth.ts、 spec/feature/secret-agent.md)。
  */
 
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
-import { verifyAgentToken } from './agent-token.js';
+import { authenticateSecretAgent, callerMayResolve, type SecretAgentCaller } from './secret-agent-auth.js';
 import { resolveServiceSecrets } from './resolve.js';
 import type { ServiceInfisical } from './config-store.js';
 
@@ -22,6 +24,14 @@ const BodySchema = z.object({
 });
 
 type HttpStatus = 400 | 401 | 403 | 404 | 502;
+
+const legacyWarned = new Set<string>();
+
+function warnLegacyCaller(service: string): void {
+  if (legacyWarned.has(service)) return;
+  legacyWarned.add(service);
+  logger.warn({ service }, 'secret-agent resolved with the legacy shared token; switch the caller to its service token');
+}
 
 const ERROR_STATUS: Record<string, HttpStatus> = {
   no_mapping: 404,
@@ -38,15 +48,19 @@ export function buildSecretAgentRouter(
   const app = new Hono();
 
   app.post('/api/v1/secrets/resolve', async (c) => {
-    if (!verifyAgentToken(c.req.header('authorization'))) {
-      return c.json({ error: 'unauthorized' }, 401);
-    }
+    const caller: SecretAgentCaller | null = authenticateSecretAgent(c.req.header('authorization'));
+    if (!caller) return c.json({ error: 'unauthorized' }, 401);
     const body = await c.req.json().catch(() => null);
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       return c.json({ error: 'invalid_body', detail: parsed.error.flatten() }, 400);
     }
     const { service, keys } = parsed.data;
+    if (!callerMayResolve(caller, service)) {
+      logger.warn({ service, caller: caller.kind === 'service' ? caller.service : null }, 'secret-agent service mismatch');
+      return c.json({ error: 'service_mismatch' }, 403);
+    }
+    if (caller.kind === 'legacy') warnLegacyCaller(service);
     const res = await resolveServiceSecrets(service, undefined, keys);
     if (!res.ok) {
       logger.warn({ service, code: res.code }, 'resolve failed');

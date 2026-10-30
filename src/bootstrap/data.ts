@@ -43,7 +43,7 @@ export async function migrateData(root: string, manifest: BootstrapManifest, act
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    await runBootstrapHook(root, manifest.data.export, ['--output', path]);
+    await runBootstrapHook(root, manifest.data.export, ['--output', path], manifest.service);
     await containedFile(transfers, name);
     await chmod(path, 0o600);
     return 'artifact=' + options.artifact + ' sha256=' + await fileHash(path);
@@ -51,6 +51,6 @@ export async function migrateData(root: string, manifest: BootstrapManifest, act
   if (!options.sha256) throw new Error('Import requires expected sha256 from the source export');
   await containedFile(transfers, name);
   if (await fileHash(path) !== options.sha256) throw new Error('Transfer checksum mismatch');
-  await runBootstrapHook(root, manifest.data.import, ['--input', path, '--sha256', options.sha256]);
+  await runBootstrapHook(root, manifest.data.import, ['--input', path, '--sha256', options.sha256], manifest.service);
   return 'Imported artifact=' + options.artifact;
 }

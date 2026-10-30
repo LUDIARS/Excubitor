@@ -22,6 +22,11 @@ describe('service-owned script env', () => {
     expect(env.EXCUBITOR_AGENT_TOKEN_PATH).toBe('/custom/token');
   });
 
+  it('hands the script its own service-scoped secret-agent token when given', () => {
+    expect(bootstrapHookEnv({}, '/cfg/agent-token', 'exsa1.svc.mac').EXCUBITOR_AGENT_TOKEN).toBe('exsa1.svc.mac');
+    expect(bootstrapHookEnv({}, '/cfg/agent-token').EXCUBITOR_AGENT_TOKEN).toBeUndefined();
+  });
+
   it('rejects an invalid port instead of silently falling back', () => {
     expect(() => resolveExcubitorPort('abc')).toThrow('invalid EXCUBITOR_PORT');
     expect(() => resolveExcubitorPort('70000')).toThrow('invalid EXCUBITOR_PORT');

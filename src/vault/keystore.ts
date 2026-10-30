@@ -55,7 +55,9 @@ class FileKeyStore implements KeyStore {
 }
 
 // 値は argv に載せず env で PowerShell へ渡す (プロセス一覧に出さない)。
-const DPAPI_SCRIPT = (op: 'Protect' | 'Unprotect') =>
+// master 鍵 (secrets/master-key-store.ts) も同じ手順で保護する。
+export const DPAPI_INPUT_ENV = 'EXCUBITOR_VAULT_DPAPI_IN';
+export const DPAPI_SCRIPT = (op: 'Protect' | 'Unprotect') =>
   'Add-Type -AssemblyName System.Security; '
   + `$b = [Convert]::FromBase64String($env:EXCUBITOR_VAULT_DPAPI_IN); `
   + `[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${op}($b, $null, 'CurrentUser'))`;
@@ -82,7 +84,7 @@ function runDpapi(op: 'Protect' | 'Unprotect', inputB64: string): Promise<string
     execFile(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', DPAPI_SCRIPT(op)],
-      { windowsHide: true, timeout: 30_000, encoding: 'utf8', env: { ...process.env, EXCUBITOR_VAULT_DPAPI_IN: inputB64 } },
+      { windowsHide: true, timeout: 30_000, encoding: 'utf8', env: { ...process.env, [DPAPI_INPUT_ENV]: inputB64 } },
       (error, stdout) => {
         if (error) reject(new Error(`DPAPI ${op} failed`));
         else resolve(stdout.trim());

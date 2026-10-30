@@ -394,7 +394,7 @@ raw INSERT が `created_at`/`updated_at`/`ts` を渡しておらず、これら�
 ### 13.1 設定ストア (`src/secrets/config-store.ts` + `crypto.ts`)
 - 保存先: **AppData (リポジトリ外)** — `%APPDATA%/Excubitor/config.enc` (非Win は `$XDG_CONFIG_HOME` or `~/.config/Excubitor/`)。`EXCUBITOR_CONFIG_PATH` で上書き可。作業ツリーに置かないので AI/git から普通には見えない。
 - **ファイル全体を salt 付き AES-256-GCM で暗号化** (scrypt 鍵導出)。siteUrl やサービスマッピングも含め平文を残さない。読めても EncryptedBlob `{v,salt,iv,tag,data}`。
-- master 鍵: `EXCUBITOR_MASTER_KEY` (env) → 無ければマシン束縛値 (`hostname` + user)。鍵が変わると復号失敗 → 未設定扱いで再入力を促す。
+- master 鍵: `EXCUBITOR_MASTER_KEY` (env) → 無ければ KeyStore (win32 は DPAPI、他は 0600) のランダム鍵。鍵が変わると復号失敗 → 未設定扱いで再入力を促す。旧版の `hostname` + user 由来の鍵で暗号化したデータは読み込み時に暗号化し直す ([local-secret-hardening](../feature/local-secret-hardening.md#SPEC-SECURITY-MASTER-KEY-STORE))。
 - 中身 (復号後): `infisical` (Excubitor の machine identity: siteUrl/environment/clientId/clientSecret) + `services[code]` (各サービスの Infisical マッピング = catalog yaml の代替、こちらを優先)。「全部 Excubitor の設定に入れておく」。
 
 ### 13.2 boot フロー

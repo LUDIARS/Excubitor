@@ -90,4 +90,4 @@ Config ページの **Genius runtime configuration** から Genius の完全な 
 ## 保存先
 
 - `%APPDATA%/Excubitor/config.enc` (Windows) / `~/.config/Excubitor/config.enc` (他)
-- master 鍵: `EXCUBITOR_MASTER_KEY` env → 無ければマシン束縛値 (hostname + user)
+- master 鍵: `EXCUBITOR_MASTER_KEY` env → 無ければ KeyStore (DPAPI / 0600) のランダム鍵 ([local-secret-hardening](../feature/local-secret-hardening.md))

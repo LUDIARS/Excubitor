@@ -718,7 +718,7 @@ describe('Excubitor HTTP APIs', () => {
     { name: 'serves release detail', path: '/api/v1/releases/demo', key: 'manifest' },
     { name: 'serves reviews list', path: '/api/v1/reviews', key: 'items' },
     { name: 'serves review repo dates', path: '/api/v1/reviews/RepoA', key: 'dates' },
-    { name: 'serves federation self', path: '/api/v1/federation/self', key: 'token' },
+    { name: 'serves federation self', path: '/api/v1/federation/self', key: 'token_command' },
     { name: 'serves peers list', path: '/api/v1/peers', key: 'peers' },
   ];
 
@@ -729,6 +729,14 @@ describe('Excubitor HTTP APIs', () => {
       expect(data).toHaveProperty(c.key);
     });
   }
+
+  // loopback には別 OS ユーザや sandbox 内のプロセスも届く。 token を返すと secret-agent の二段認証が一段に落ちる。
+  it('never returns a token from federation self', async () => {
+    const { res, data } = await requestJson<Record<string, unknown>>(router, 'GET', '/api/v1/federation/self');
+    expect(res.status).toBe(200);
+    expect(data).not.toHaveProperty('token');
+    expect(JSON.stringify(data)).not.toContain('good');
+  });
 
   // 2026-08-08、 state=crashed なのに health_ok=true という表示のまま、 管理外に落ちた
   // 旧プロセスが port を握り続けていた。 state と health を並べるだけでは実体が管理外で

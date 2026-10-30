@@ -200,20 +200,24 @@ export default function Federation() {
   );
 }
 
-/** 本ノードの federation 名 + agent token。 相手ノードに貼ってピア登録するための導線。 */
+/**
+ * 本ノードの federation 名と拠点間リスナー。 相手ノードに貼ってピア登録するための導線。
+ * token は loopback の API では返さない (同じ PC の別ユーザ・sandbox からも届くため)。
+ * 管理者が端末でコマンドを実行して取り出す。
+ */
 function SelfNodePanel({ self }: { self: SelfNode | null }) {
-  const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!self) return null;
+  const command = self.token_command ?? 'npm run agent-token -- mesh';
 
   const onCopy = async () => {
     try {
-      await navigator.clipboard.writeText(self.token);
+      await navigator.clipboard.writeText(command);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      setRevealed(true); // クリップボード不可なら手動コピーできるよう表示する
+      /* クリップボード不可でもコマンドは画面に出ている */
     }
   };
 
@@ -222,9 +226,9 @@ function SelfNodePanel({ self }: { self: SelfNode | null }) {
       <h2 className="mem-section-title">このノード</h2>
       <div className="self-node-row">
         <span className="self-node-name">{self.node}</span>
-        <code className="self-token mono">{revealed ? self.token : `…${self.token.slice(-4)}`}</code>
-        <button onClick={() => setRevealed((v) => !v)}>{revealed ? '隠す' : '表示'}</button>
-        <button onClick={() => void onCopy()}>{copied ? 'コピー済' : 'token をコピー'}</button>
+        <span className="muted">token:</span>
+        <code className="self-token mono">{command}</code>
+        <button onClick={() => void onCopy()}>{copied ? 'コピー済' : 'コマンドをコピー'}</button>
       </div>
       <div className="self-node-row">
         <span className="muted">拠点間リスナー:</span>
@@ -241,8 +245,9 @@ function SelfNodePanel({ self }: { self: SelfNode | null }) {
         )}
       </div>
       <p className="self-node-hint muted">
-        この token と拠点間リスナーの URL を相手ノードの「他拠点ピア」登録に貼り、 こちらでも相手を登録すると
-        つながります (相互登録。 Tailscale / Cloudflare Mesh の中だけで通信します)。
+        Excubitor のフォルダで上のコマンドを実行して表示された token と、 拠点間リスナーの URL を相手ノードの
+        「他拠点ピア」登録に貼り、 こちらでも相手を登録するとつながります (相互登録。 Tailscale / Cloudflare Mesh の
+        中だけで通信します)。
       </p>
     </section>
   );

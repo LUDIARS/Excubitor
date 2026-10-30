@@ -1,7 +1,7 @@
 /**
  * 拠点メッシュの閲覧・担保設定の HTTP 面 (loopback の本体にだけ載せる)。
  *
- *   GET /api/v1/federation/self             拠点名 + agent token + 拠点間リスナーの状態と URL
+ *   GET /api/v1/federation/self             拠点名 + 拠点間リスナーの状態と URL (token は返さない)
  *   GET /api/v1/federation/mesh             拠点 / 拠点間リンク / サービス × 拠点の担保表
  *   GET /api/v1/federation/coverage         自拠点の担保一覧 (死活付き)
  *   PUT /api/v1/federation/coverage/:code   自拠点での担保の上書き
@@ -14,7 +14,6 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createNamedLogger } from '../shared/logger.js';
 import type { Catalog } from '../catalog/loader.js';
-import { getOrCreateAgentToken } from '../secrets/agent-token.js';
 import { listPeers, listEnabledPeerIdentities, type RemotePeer } from './store.js';
 import { localNodeName, localNodeSnapshot } from './node-snapshot.js';
 import { localHealthPayload } from './node-health.js';
@@ -68,17 +67,21 @@ function legacyNodeView(peer: RemotePeer | undefined, state: PeerPollState, stal
 }
 
 /**
- * 本拠点の identity (federation 名 + agent token + 拠点間リスナー)。
- * ピア登録には相手拠点に「こちらの token」と「メッシュ上の URL」を貼る必要があるので raw token を返す。
- * token は本拠点を操作できる機密なので、 loopback の本体にだけ載せる (拠点間リスナーには載せない)。
+ * 本拠点の identity (federation 名 + 拠点間リスナー)。
+ * token は返さない。 loopback には別の OS ユーザや sandbox 内のプロセスも届くため、 API で返すと
+ * 「loopback + token」 の二段が一段に落ちる。 ピア登録に貼る token は管理者が
+ * `npm run agent-token -- mesh` で取り出す (token_command)。
+ * @implements SPEC-SECURITY-AGENT-TOKEN-SPLIT
  */
+export const MESH_TOKEN_COMMAND = 'npm run agent-token -- mesh';
+
 export function buildSelfRoutes(getListenerStatus: () => FederationListenerStatus): Hono {
   const app = new Hono();
   app.get('/api/v1/federation/self', (c) => {
     const listener = getListenerStatus();
     return c.json({
       node: localNodeName(),
-      token: getOrCreateAgentToken(),
+      token_command: MESH_TOKEN_COMMAND,
       listener,
       mesh_base_urls: listener.listening.map((address) => `http://${address}`),
       // 移行用 legacy-monitor などの拠点間認証の状態。 警告は画面上部に出す。

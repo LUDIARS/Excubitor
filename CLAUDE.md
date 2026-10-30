@@ -108,6 +108,9 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
 ## 注意
 
 - 通常起動・secret-agent は Vault-only。Infisical の接続・移行 import・設定画面は廃止。
+  secret-agent の token はサービスごと (Ex が起動するサービスには env `EXCUBITOR_AGENT_TOKEN` で渡す)。
+  旧共有 token は `EXCUBITOR_SECRET_AGENT_LEGACY_TOKEN=reject` まで互換で受ける。config.enc / remote_peers の
+  master 鍵は KeyStore (DPAPI / 0600) に置く (spec/feature/local-secret-hardening.md)。
   共有／プロジェクト binding と source peer の詳細は spec/feature/vault.md を参照。
 - 子の stdout/stderr は pipe ではなく **ファイル fd** に向ける (`data/process-logs/<code>.{out,err}.log`)。
   backend が落ちても子が EPIPE で死なない。ライブログ/エラー検知は backend 復旧後に tail へ再接続する。
@@ -138,8 +141,10 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   サービスの実体として採らない。採ると stop / restart が全コンテナを止める。
 - update / deploy の git 取り込みは cwd を含む checkout の root で行い (cwd が `Cernere/server` のようなサブディレクトリでも可、
   2 段まで・ワークスペース root は採らない)、依存の install は cwd で行う。
-- **他拠点連携 (federation)**: ピアの認証は各ノードの agent token (secret-agent と共用、
-  `EXCUBITOR_AGENT_TOKEN` or token ファイル) を Bearer で交換する。 ローカル DB (remote_peers) に
+- **他拠点連携 (federation)**: ピアの認証は各ノードの mesh token (secret-agent の token とは別、
+  `EXCUBITOR_MESH_TOKEN` or `mesh.token`。初回は旧 agent token の値で作る) を Bearer で交換する。
+  token は `/api/v1/federation/self` では返さず、`npm run agent-token -- mesh` で取り出す
+  (spec/feature/local-secret-hardening.md)。 ローカル DB (remote_peers) に
   相手の base_url + token を保存するため (token は at-rest 暗号化) DB ファイル自体を機密扱いにする。 他拠点向け公開面
   (`/api/v1/federation/` の health / node / operations / git/bundle) だけが token + 相互登録の署名で開き、 ピア管理 (CRUD) は loopback 依存。
   拠点名は `EXCUBITOR_NODE_NAME` (既定 hostname)。 拠点間通信は Tailscale / Cloudflare Mesh のプライベート網だけで行う

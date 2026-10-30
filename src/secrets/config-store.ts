@@ -6,7 +6,8 @@
  *     → 作業ツリーに置かないので AI/git から普通には見えない。
  *   - ファイル全体を salt 付き AES-256-GCM で暗号化 (crypto.ts)。 siteUrl やサービス
  *     マッピングも含め平文を残さない。 読めても EncryptedBlob (= 鍵が無いと中身不明)。
- *   - master 鍵は EXCUBITOR_MASTER_KEY (env) → 無ければマシン束縛値 (hostname + user)。
+ *   - master 鍵は EXCUBITOR_MASTER_KEY (env) → 無ければ KeyStore (DPAPI / 0600) のランダム鍵 (master-key.ts)。
+ *     旧版の hostname + user 由来の鍵で暗号化されたファイルは読み込み時に新しい鍵で暗号化し直す。
  *
  * 中身 (復号後):
  *   - infisical: legacy encrypted data preserved without applying credentials
@@ -16,12 +17,12 @@
  * 設定が無ければ identity は未設定のまま → UI が入力を促す。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createNamedLogger } from '../shared/logger.js';
 import { encryptJson, decryptJson, isEncryptedBlob, type EncryptedBlob } from './crypto.js';
-import { masterSecret } from './master-key.js';
+import { masterSecret, openWithMasterKeys } from './master-key.js';
 import { normalizeDiscordWebhookUrl } from '../notify/discord-webhook.js';
 
 const logger = createNamedLogger('excubitor.config');
@@ -153,7 +154,8 @@ export class ServiceRuntimeConfigValidationError extends Error {
 }
 
 export const DEFAULT_DOMAIN_ROOT = '';
-let configCache: { path: string; mtimeMs: number | null; value: ExcubitorConfig } | null = null;
+/** writable=false は「master 鍵を用意できず読めなかった」状態。 上書きで旧データを消さないよう書き込みを拒否する。 */
+let configCache: { path: string; mtimeMs: number | null; value: ExcubitorConfig; writable?: false } | null = null;
 
 export type DomainRootSource = 'env' | 'config' | 'unset';
 
@@ -212,9 +214,19 @@ function readConfig(): ExcubitorConfig {
       configCache = { path, mtimeMs, value };
       return value;
     }
-    const value = decryptJson<ExcubitorConfig>(blob, masterSecret());
-    configCache = { path, mtimeMs, value };
-    return value;
+    try {
+      masterSecret();
+    } catch (err) {
+      // 鍵が用意できないだけで中身は無事。 空扱いで上書きすると消えるので、 書き込みを止める。
+      logger.error({ err: (err as Error).message }, 'master key unavailable — config.enc is read-only until it can be loaded');
+      const value: ExcubitorConfig = {};
+      configCache = { path, mtimeMs, value, writable: false };
+      return value;
+    }
+    const opened = openWithMasterKeys<ExcubitorConfig>(blob);
+    configCache = { path, mtimeMs, value: opened.value };
+    if (opened.legacy) migrateLegacyConfig(path, opened.value);
+    return opened.value;
   } catch (err) {
     logger.warn({ err: (err as Error).message }, 'config decrypt failed (master key changed?) — treating as empty');
     const value: ExcubitorConfig = {};
@@ -223,12 +235,38 @@ function readConfig(): ExcubitorConfig {
   }
 }
 
-/** config 全体を暗号化して書く。 */
+/**
+ * 旧 master 鍵 (hostname + user) の config.enc を新しい鍵で暗号化し直す。
+ * 一時ファイルに書いてから置き換えるので、 失敗しても旧ファイルは壊れない (次の読み込みで再試行)。
+ * @implements SPEC-SECURITY-MASTER-KEY-STORE
+ */
+function migrateLegacyConfig(path: string, value: ExcubitorConfig): void {
+  try {
+    writeConfig(value);
+    logger.info('config.enc re-encrypted with the stored master key');
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, path }, 'config.enc re-encryption failed; legacy file kept');
+  }
+}
+
+/** config 全体を暗号化して書く。 一時ファイル → rename で置き換え、 書いた blob が開けることを確かめてから置く。 */
 function writeConfig(cfg: ExcubitorConfig): void {
   const path = configPath();
+  if (configCache?.path === path && configCache.writable === false) {
+    throw new Error('config.enc is not writable: the master key could not be loaded');
+  }
   mkdirSync(dirname(path), { recursive: true });
-  const blob = encryptJson(cfg, masterSecret());
-  writeFileSync(path, JSON.stringify(blob), 'utf8');
+  const key = masterSecret();
+  const blob = encryptJson(cfg, key);
+  decryptJson<ExcubitorConfig>(blob, key); // 読めない blob で置き換えない
+  const tmp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(blob), { encoding: 'utf8', mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
   configCache = { path, mtimeMs: statSync(path).mtimeMs, value: cfg };
 }
 

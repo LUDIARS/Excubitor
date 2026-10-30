@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import { verifyAgentToken } from '../secrets/agent-token.js';
+import { verifyMeshToken } from './mesh-token.js';
 import { createNonceCache } from './nonce-cache.js';
 import { NONCE_HEADER, TIMESTAMP_HEADER, SIGNATURE_HEADER, SIGNATURE_MAX_SKEW_MS, verifyRequestSignature } from './request-signature.js';
 import { cachedAuthenticationPeers } from './store.js';
@@ -103,7 +103,7 @@ export function requireMutualPeer(deps: PeerAuthDeps = {}): MiddlewareHandler<Fe
       if (!isLegacyMonitorRequest(c.req.method, url.pathname)) {
         return c.json({ error: 'legacy_monitor_only' }, 403);
       }
-      if (!(deps.verifyBearer ?? verifyAgentToken)(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
+      if (!(deps.verifyBearer ?? verifyMeshToken)(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
       if (Math.abs(current - timestamp) > SIGNATURE_MAX_SKEW_MS) return c.json({ error: 'stale_request' }, 401);
       const peer = peers().find(entry => entry.enabled && allowsLegacyMonitorPeer(policy, entry.id) &&
         entry.token && verifyRequestSignature(entry.token, parts, signature));

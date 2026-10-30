@@ -42,7 +42,7 @@ export async function runBootstrapOperation(ctx: OperationContext, existing?: Se
       return succeeded();
     }
     step = 'setup';
-    await runBootstrapHook(root, manifest.setup, []);
+    await runBootstrapHook(root, manifest.setup, [], manifest.service);
     ctx.record({ step, ok: true, detail: 'Service-owned setup completed' });
     if (options?.start) {
       step = 'start';

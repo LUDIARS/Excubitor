@@ -11,6 +11,11 @@
  *      - 既定パス: EXCUBITOR_AGENT_TOKEN_PATH → AppData/.config 配下 secret-agent.token
  *
  * クライアント (各サービス) は同じ env かファイルから token を読む (同一マシン前提)。
+ *
+ * この token は **旧共有 token** (移行期間の互換)。 新しい呼び出し元はサービスごとの token
+ * (service-agent-token.ts) を使い、 拠点間認証は別の mesh token (federation/mesh-token.ts) を使う。
+ * Excubitor が起動したサービスの env EXCUBITOR_AGENT_TOKEN にはサービス token が入るので、
+ * env の値がサービス token の形なら旧共有 token として扱わない。
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -18,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createNamedLogger } from '../shared/logger.js';
+import { looksLikeServiceAgentToken } from './service-agent-token.js';
 
 const logger = createNamedLogger('excubitor.secrets.agent-token');
 
@@ -39,7 +45,9 @@ let cached: string | null = null;
 export function getOrCreateAgentToken(): string {
   if (cached) return cached;
   const fromEnv = process.env.EXCUBITOR_AGENT_TOKEN;
-  if (fromEnv && fromEnv.length > 0) {
+  if (fromEnv && looksLikeServiceAgentToken(fromEnv)) {
+    logger.warn('EXCUBITOR_AGENT_TOKEN holds a service-scoped token; ignoring it as the legacy shared token');
+  } else if (fromEnv && fromEnv.length > 0) {
     cached = fromEnv;
     return cached;
   }

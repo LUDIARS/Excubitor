@@ -15,6 +15,7 @@
     "service": "node dist/service-runner.js",
     "ctl": "node dist/local-control/cli.js",
     "mesh:legacy-monitor": "node dist/federation/security/legacy-monitor-cli.js",
+    "agent-token": "node dist/secrets/agent-token-cli.js",
     "start:service": "node dist/server.js --service",
     "start:safe": "node dist/server.js --safe",
     "typecheck": "tsc --noEmit",

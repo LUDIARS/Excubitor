@@ -56,11 +56,15 @@ import { buildVaultRouter } from './vault/vault-router.js';
 import { buildSecurityReportsRouter } from './security-reports/router.js';
 import { localBrowserGuard } from './security/local-browser-guard.js';
 import { readBrowserAllowlist } from './security/browser-allowlist-env.js';
+import { createAdminAccessVerifier, readAdminAccessConfig } from './security/admin-access.js';
 import { describeMeshAuth } from './federation/security/legacy-monitor.js';
 import { readMeshAuthPolicy } from './federation/security/legacy-monitor-store.js';
 import { buildTerminalRouter } from './terminal/router.js';
 import { sharedVault } from './vault/vault.js';
 import { getOrCreateAgentToken, agentTokenPath } from './secrets/agent-token.js';
+import { legacyTokenAccepted, LEGACY_TOKEN_ENV } from './secrets/secret-agent-auth.js';
+import { getOrCreateMeshToken, meshTokenPath } from './federation/mesh-token.js';
+import { resealLegacyPeerSecrets } from './federation/store.js';
 import { detectSafeMode, detectServiceMode, setSafeMode, isSafeMode, detectLogSafeMode, setLogSafeMode, isLogSafeMode } from './safe-mode.js';
 import { setTopologyFromCatalog, getTopologyEnv } from './process/topology.js';
 import { setGlobalEnv } from './process/inject.js';
@@ -502,10 +506,16 @@ const logSafeModeAsyncNoop = async (): Promise<void> => { /* log safe mode: noth
 
 /** @implements SPEC-SERVICE-RUNTIME-VERSION */
 export async function bootObservability(options: BootObservabilityOptions = {}): Promise<ObservabilityHandle> {
-  // secret-agent: 常駐 resolve エンドポイント用のローカルトークンを用意 (無ければ生成)。
-  // 各サービスは同じトークン (env or token ファイル) で /api/v1/secrets/resolve を叩く。
+  // secret-agent: 旧共有トークンを用意 (無ければ生成)。 Ex が起動するサービスにはサービスごとの token を
+  // env で渡す (process/inject.ts)。 旧共有 token は移行期間だけ受ける (secret-agent-auth.ts)。
   getOrCreateAgentToken();
-  logger.info({ tokenPath: agentTokenPath() }, 'secret-agent token ready');
+  logger.info({ tokenPath: agentTokenPath(), legacyAccepted: legacyTokenAccepted() }, 'secret-agent token ready');
+  if (legacyTokenAccepted()) {
+    logger.warn(`secret-agent still accepts the legacy shared token; set ${LEGACY_TOKEN_ENV}=reject after callers use service tokens`);
+  }
+  // 拠点間 token は secret-agent と分ける (初回は旧共有 token の値で作り、 既存のピア登録を保つ)。
+  getOrCreateMeshToken();
+  logger.info({ tokenPath: meshTokenPath() }, 'federation mesh token ready');
 
   // .mcp.json (ワークスペース直下) の excubitor エントリを backend 直載せの
   // Streamable HTTP (`/mcp`) に整合する。 旧 stdio 形式 (セッション毎プロセス) からの
@@ -582,6 +592,13 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
   // 構造化された死活履歴の retention 剪定。
+  // 旧 master 鍵 (hostname + user) で暗号化された peer secret を KeyStore の鍵で暗号化し直す。
+  try {
+    const reseal = resealLegacyPeerSecrets();
+    if (reseal.resealed > 0 || reseal.failed > 0) logger.info(reseal, 'remote_peers secrets re-encrypted with the stored master key');
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'remote_peers re-encryption skipped; legacy values kept');
+  }
   const retentionHandle = startRetentionLoop(() => currentCatalog!);
   // 拠点間ヘルス: 有効な各ピアの health (相手がキャッシュしている値) を周期的に取りに行く。
   const peerPollerHandle = startPeerPoller({ getCatalog: () => currentCatalog! });
@@ -672,9 +689,12 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // ─── HTTP router ───────────────────────────────────────
   const app = new Hono();
   // 公開 URL / 拠点 IP からの管理画面は管理者が env で明示した origin だけ許可する (既定は loopback のみ)。
-  const browserAllowlist = readBrowserAllowlist();
-  app.use('/api/*', localBrowserGuard({ allowlist: browserAllowlist }));
-  app.use('/mcp', localBrowserGuard({ allowlist: browserAllowlist }));
+  // 公開ホストは Cloudflare Access の JWT 検証が必須。 Access の設定が無ければ公開ホストを外す (fail-closed)。
+  const adminAccessConfig = readAdminAccessConfig();
+  const browserAllowlist = readBrowserAllowlist(process.env, adminAccessConfig);
+  const adminAccess = adminAccessConfig && browserAllowlist.accessHosts.size > 0 ? createAdminAccessVerifier(adminAccessConfig) : null;
+  app.use('/api/*', localBrowserGuard({ allowlist: browserAllowlist, access: adminAccess }));
+  app.use('/mcp', localBrowserGuard({ allowlist: browserAllowlist, access: adminAccess }));
   installRequestLogging(app);
 
   app.onError((err, c) => {

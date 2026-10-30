@@ -109,6 +109,11 @@ function rewriteTag(tag: string, target: ViewerTarget, nonce: string): string {
     (_all, name: string, quote: string, value: string) => `${name}=${quote}${viewerUrl(value, target)}${quote}`);
   rewritten = rewritten.replace(/\bstyle\s*=\s*(["'])(.*?)\1/gi,
     (_all, quote: string, value: string) => `style=${quote}${rewriteCss(value, target)}${quote}`);
+  // ページ側の referrer 指定で Referer を消すと、 アプリ自身の要求が別アプリ扱いになる (isolation.ts)。
+  if (/^<meta\b/i.test(rewritten) && /\bname\s*=\s*(["'])referrer\1/i.test(rewritten)) {
+    rewritten = rewritten.replace(/(\bcontent\s*=\s*)(["'])(.*?)\2/i,
+      (_all, lead: string, quote: string) => `${lead}${quote}same-origin${quote}`);
+  }
   if (/^<meta\b/i.test(rewritten)
     && /\bhttp-equiv\s*=\s*(["'])Content-Security-Policy\1/i.test(rewritten)) {
     rewritten = rewritten.replace(/(\bcontent\s*=\s*)(["'])(.*?)\2/i,

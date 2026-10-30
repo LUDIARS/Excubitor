@@ -3,11 +3,12 @@ import { killProcessTree } from '../shared/kill-tree.js';
 import { containedFile } from './manifest.js';
 import { bootstrapHookEnv } from './hook-env.js';
 import { agentTokenPath } from '../secrets/agent-token.js';
+import { secretAgentEnvFor } from '../process/inject.js';
 
 /** @implements SPEC-SERVICE-BOOTSTRAP */
-export async function runBootstrapHook(root: string, script: string, args: string[]): Promise<void> {
+export async function runBootstrapHook(root: string, script: string, args: string[], service: string): Promise<void> {
   const path = await containedFile(root, script);
-  const env = bootstrapHookEnv(process.env, agentTokenPath());
+  const env = bootstrapHookEnv(process.env, agentTokenPath(), secretAgentEnvFor({ code: service }).EXCUBITOR_AGENT_TOKEN);
   await new Promise<void>((resolve, reject) => {
     // Discard potentially secret output rather than accumulating it in backend memory or operation history.
     const child = spawn(process.execPath, [path, ...args], {

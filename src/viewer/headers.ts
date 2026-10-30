@@ -11,7 +11,10 @@ function stripHopHeaders(headers: Headers): void {
 
 const cookiePrefix = (code: string): string => `exv_${code}.`;
 
-export function upstreamHeaders(incoming: Headers, target: ViewerTarget): Headers {
+/**
+ * forwardCookies=false は同じ origin の別アプリから出た要求 (isolation.ts)。 アプリの cookie を付けずに中継する。
+ */
+export function upstreamHeaders(incoming: Headers, target: ViewerTarget, options: { forwardCookies?: boolean } = {}): Headers {
   const headers = new Headers(incoming);
   stripHopHeaders(headers);
   for (const key of [...headers.keys()]) {
@@ -30,7 +33,7 @@ export function upstreamHeaders(incoming: Headers, target: ViewerTarget): Header
       catch { return ''; }
     }).filter(Boolean);
   headers.delete('cookie');
-  if (cookies.length) headers.set('cookie', cookies.join('; '));
+  if (cookies.length && options.forwardCookies !== false) headers.set('cookie', cookies.join('; '));
   headers.set('accept-encoding', 'identity');
   headers.set('x-forwarded-prefix', target.prefix);
   // Origin is deliberately preserved: a remote caller must never gain the
@@ -60,5 +63,7 @@ export function viewerHeaders(incoming: Headers, target: ViewerTarget): Headers 
   headers.delete('clear-site-data');
   headers.delete('alt-svc');
   headers.set('cache-control', 'no-store');
+  // アプリ自身の要求に Referer を残す (isolation.ts がどのアプリのページから出た要求かを見る)。
+  headers.set('referrer-policy', 'same-origin');
   return headers;
 }

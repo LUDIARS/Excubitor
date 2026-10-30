@@ -11,6 +11,8 @@ export function buildViewerRouter(directory: ViewerDirectory): Hono {
   app.get('/viewer', (c) => c.redirect('/viewer/', 308));
   app.get('/viewer/', async (c) => {
     try {
+      // iframe / 新しいタブへの遷移に Referer (/viewer/) を残す (isolation.ts)。
+      c.header('referrer-policy', 'same-origin');
       return c.html(await readFile(resolve('frontend/dist-dmz/index.html'), 'utf8'));
     } catch { return c.text('Viewerのフロントエンドをビルドしてください。', 503); }
   });

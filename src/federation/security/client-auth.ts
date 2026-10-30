@@ -1,6 +1,6 @@
 import type { RemotePeer } from '../store.js';
 import { signatureHeaders } from '../request-signature.js';
-import { getOrCreateAgentToken } from '../../secrets/agent-token.js';
+import { getOrCreateMeshToken } from '../mesh-token.js';
 import { localNodeName } from '../node-snapshot.js';
 import { requiredCredential } from './config.js';
 import { allowsLegacyMonitorPeer, isLegacyMonitorRequest } from './legacy-monitor.js';
@@ -15,7 +15,7 @@ export async function meshRequestHeaders(peer: RemotePeer, method: string, path:
   if (allowsLegacyMonitorPeer(authPolicy, peer.id)) {
     if (action !== 'monitor' || !isLegacyMonitorRequest(method, path)) throw new Error('legacy_monitor_only');
     headers = { authorization: `Bearer ${peer.token}`,
-      ...signatureHeaders(getOrCreateAgentToken(), localNodeName(), { method, path, body }) };
+      ...signatureHeaders(getOrCreateMeshToken(), localNodeName(), { method, path, body }) };
   } else {
     const config = authPolicy.kind === 'configured' ? authPolicy.config : null;
     const policy = config?.peers[peer.id];

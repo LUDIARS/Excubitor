@@ -1087,7 +1087,7 @@ export function setCoverage(code: string, covered: boolean | null) {
   );
 }
 
-// ─────────────── このノードの identity (federation token) ───────────────
+// ─────────────── このノードの identity ───────────────
 export interface FederationListenerStatus {
   enabled: boolean;
   listening: string[];
@@ -1096,7 +1096,8 @@ export interface FederationListenerStatus {
 
 export interface SelfNode {
   node: string;
-  token: string;
+  /** token は API では返さない。 管理者がこのコマンドで端末から取り出す。 旧 backend では無い。 */
+  token_command?: string;
   listener: FederationListenerStatus;
   /** 拠点間リスナーの URL。 相手拠点のピア登録 (base_url) に貼る。 */
   mesh_base_urls: string[];
@@ -1113,7 +1114,7 @@ export interface MeshAuthStatus {
   warning: string | null;
 }
 
-/** 本ノードの federation 名 + agent token。 ピアに貼り付けて登録するための導線。 */
+/** 本ノードの federation 名 + 拠点間リスナー。 ピア登録に使う (token は返らない)。 */
 export function fetchSelfNode(): Promise<SelfNode> {
   return getJSON<SelfNode>('/api/v1/federation/self');
 }

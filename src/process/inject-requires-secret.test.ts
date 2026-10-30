@@ -10,6 +10,10 @@ vi.mock('../secrets/config-store.js', () => ({
   getServiceRuntimeConfig: mocks.config, resolveServiceInfisical: mocks.mapping,
 }));
 vi.mock('./topology.js', () => ({ getTopologyEnv: () => ({ SAME: 'topology' }) }));
+vi.mock('../secrets/service-agent-token.js', () => ({
+  isServiceCode: () => true,
+  serviceAgentToken: (code: string) => `exsa1.${code}.test-mac`,
+}));
 vi.mock('./service-version.js', () => ({
   injectServiceRuntimeVersion: async (_svc: Service, env: Record<string, string>) => ({ env }),
 }));
@@ -74,5 +78,12 @@ describe('Vault-only spawn environment', () => {
     mocks.config.mockReturnValue({ model: 'config' });
     mocks.vault.mockResolvedValue({ EXCUBITOR_SERVICE_CONFIG_JSON: '{"model":"vault"}' });
     expect((await resolveInjectEnv(service())).EXCUBITOR_SERVICE_CONFIG_JSON).toBe('{"model":"vault"}');
+  });
+  it('gives each launched service its own secret-agent token, never Excubitor itself', async () => {
+    mocks.vault.mockResolvedValue({ EXCUBITOR_AGENT_TOKEN: 'from-vault' });
+    expect((await resolveInjectEnv(service())).EXCUBITOR_AGENT_TOKEN).toBe('exsa1.consumer.test-mac');
+    mocks.vault.mockResolvedValue({});
+    expect((await resolveInjectEnv(service({ code: 'excubitor' }))).EXCUBITOR_AGENT_TOKEN).toBeUndefined();
+    expect((await resolveInjectEnv(service({ code: 'excubitor-viewer-dmz', project_code: 'Ex' }))).EXCUBITOR_AGENT_TOKEN).toBeUndefined();
   });
 });

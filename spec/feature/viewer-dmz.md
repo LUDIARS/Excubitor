@@ -29,6 +29,40 @@ Cloudflare Access設定が適切であること。DMZワーカーはAccess設定
 - EX-DMZ-06: 一覧の欠落・不正・期限切れはHTTP/SSE開始、WebSocket開始を拒否する。
   本体は10秒ごとに更新し、最後の成功から30秒で期限切れ。既存接続を即時失効させる契約ではない。
 
+## 同じ origin でのアプリ間の封じ込め {#EX-VIEWER-CROSS-APP}
+
+参照: actio:8abb43ec-a0ff-4804-b479-e1e04cf6e0e7
+
+全アプリを 1 つの origin のパス違い (`/viewer/apps/<code>/`) で配信しているため、cookie の `Path` 分離はブラウザ内の JS に対する
+隔離にならない。アプリ A のページ (XSS・悪意ある HTML) が `fetch('/viewer/apps/B/…', {credentials:'include'})` で B の認証済み
+API を読み書きでき、Origin も同じなので B の CSRF 対策でも区別できない。アプリごとの origin へ分けるのは DNS・Tunnel・Access の
+設定替えを伴い大きいので、まず最小の封じ込めを入れる (`src/viewer/isolation.ts`)。
+
+- `Sec-Fetch-Site: same-origin` の要求について、Referer の path から要求を出したページのアプリを判定する。
+  B 自身 (`/viewer/apps/B/…`) と同じ project の peer (web/API 分割、`target.origins`) 以外から出た要求は「別アプリ」とする。
+  Referer が無い同じ origin の要求も別アプリとする。統合ビューのトップ (`/viewer/`) と Ex の Monitor からの画面遷移は通す。
+- 別アプリから出た要求は、変更系 (GET / HEAD 以外) を 403 にし、読み取りは B の cookie を付けずに中継する。
+- アプリ自身の要求に Referer が残るよう、viewer の応答は `Referrer-Policy: same-origin` に揃え、HTML の
+  `<meta name="referrer">` も same-origin に書き換える。
+- 対象外: ブックマーク・直接入力 (`Sec-Fetch-Site: none`)、別サイトからの要求 (アプリ自身の CSRF 対策と SameSite に任せる)、
+  WebSocket (handshake に Referer が無い)。
+
+### 残課題 (完全な隔離ではない)
+
+同じ origin のページ同士は DOM を直接操作できる。親の統合ビュー経由や `window.open` で B のページを開いて中で実行したり、
+`history.replaceState` で自分の URL (= Referer) を B のパスに変えたりすれば、上の判定は迂回できる。上の封じ込めが止めるのは、
+他アプリの API への素朴な fetch や form 送信だけである。
+
+完全な隔離には、アプリごとの origin (`<code>.viewer.<domain>`) で配信し、cookie を host-only にする必要がある。必要な作業は次のとおり。
+
+- ワイルドカードの DNS / Tunnel ルート / Access アプリ
+- DMZ worker で Host によりアプリを選ぶ経路
+- 書き換えの prefix を空にする
+- 統合ビューの一覧を別 origin へのリンクに変える
+- WebSocket を Host で振り分ける
+
+それまでは、利用者のログインを伴うサービス (例: Concordia の web SSO) を、他のサービスと同じ viewer に載せる判断は慎重に行う。
+
 ## 所有と寿命
 
 管理プロセスは `data/viewer-manifest.json` の単独書き手。atomic renameで更新し、
@@ -41,7 +75,8 @@ Cloudflare Access設定が適切であること。DMZワーカーはAccess設定
 
 これはプロセス・提供API・bundleの分離であり、別OSユーザー・コンテナ・ファイアウォール
 によるサンドボックスではない。PC内侵害は今回の要件外。公開対象サービスは引き続き
-同じoriginと信頼範囲を共有し、個別サービスの認証・認可はそれぞれの責任。
+同じoriginと信頼範囲を共有し、個別サービスの認証・認可はそれぞれの責任 (アプリ間の最小の封じ込めは
+[EX-VIEWER-CROSS-APP](#EX-VIEWER-CROSS-APP))。
 各サービスの公開ホストのAccessはローカル中継時には通らないので、ExのAccess許可範囲に
 含めてよいサービスだけをopt-inする。異なる利用者権限のサービスを無条件に統合しない。
 

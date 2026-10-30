@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import type { ViewerTarget } from './catalog.js';
 import { upstreamHeaders, viewerHeaders } from './headers.js';
+import { isCrossAppRequest } from './isolation.js';
 import { upstreamRequestUrl } from './urls.js';
 import { rewriteCss, rewriteHtml, rewriteModules } from './rewrite.js';
 
@@ -44,6 +45,9 @@ export async function proxyViewer(c: Context, target: ViewerTarget): Promise<Res
   try { url = upstreamRequestUrl(c.req.url, target); }
   catch { return c.text('Invalid Viewer path', 400); }
   const request = c.req.raw;
+  // 同じ origin の別アプリから出た要求: 変更系は拒否し、 読み取りは cookie を付けずに中継する。
+  const crossApp = isCrossAppRequest(request.headers, target);
+  if (crossApp && !['GET', 'HEAD'].includes(request.method)) return c.text('別のアプリからの要求は受け付けません', 403);
   const controller = new AbortController();
   const abort = (): void => controller.abort();
   request.signal.addEventListener('abort', abort, { once: true });
@@ -55,7 +59,7 @@ export async function proxyViewer(c: Context, target: ViewerTarget): Promise<Res
   let streamOwnsCleanup = false;
   try {
     const init: RequestInit & { duplex?: 'half' } = {
-      method: request.method, headers: upstreamHeaders(request.headers, target),
+      method: request.method, headers: upstreamHeaders(request.headers, target, { forwardCookies: !crossApp }),
       redirect: 'manual', signal: controller.signal,
     };
     if (!['GET', 'HEAD'].includes(request.method)) { init.body = request.body; init.duplex = 'half'; }

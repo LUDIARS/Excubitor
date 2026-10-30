@@ -6,10 +6,11 @@
  *
  * 保存形式: 暗号化したら EncryptedBlob を JSON 文字列にして列へ入れる。
  * 後方互換: 既存の平文トークンはそのまま復号せず返す (blob として parse できない値は legacy 平文)。
+ * 旧 master 鍵 (hostname + user) の blob も開き、 起動時に新しい鍵で暗号化し直す (store.ts)。
  */
 
-import { encryptJson, decryptJson, isEncryptedBlob } from '../secrets/crypto.js';
-import { masterSecret } from '../secrets/master-key.js';
+import { encryptJson, isEncryptedBlob } from '../secrets/crypto.js';
+import { masterSecret, openWithMasterKeys } from '../secrets/master-key.js';
 
 /** 平文 → 暗号化済み文字列 (DB 列に保存する形)。 */
 export function sealSecret(plaintext: string): string {
@@ -21,17 +22,29 @@ export function sealSecret(plaintext: string): string {
  * 復号失敗 (master key 変更等) は null を返す (無言で平文扱いして漏らさない)。
  */
 export function openSecret(stored: string | null): string | null {
-  if (stored == null) return null;
+  return openSecretDetailed(stored).value;
+}
+
+export interface OpenedSecret {
+  value: string | null;
+  /** 新しい master 鍵で暗号化し直すべき値 (旧鍵の blob、 または暗号化されていない平文)。 */
+  needsReseal: boolean;
+}
+
+/** openSecret と同じ判定に、 再暗号化が要るかを添える (起動時の移行用)。 */
+export function openSecretDetailed(stored: string | null): OpenedSecret {
+  if (stored == null) return { value: null, needsReseal: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(stored);
   } catch {
-    return stored; // JSON ですらない = 旧来の平文トークン
+    return { value: stored, needsReseal: true }; // JSON ですらない = 旧来の平文トークン
   }
-  if (!isEncryptedBlob(parsed)) return stored; // JSON だが blob でない = 平文 (将来の互換)
+  if (!isEncryptedBlob(parsed)) return { value: stored, needsReseal: true }; // JSON だが blob でない = 平文
   try {
-    return decryptJson<string>(parsed, masterSecret());
+    const opened = openWithMasterKeys<string>(parsed);
+    return { value: opened.value, needsReseal: opened.legacy };
   } catch {
-    return null; // 鍵不一致 / 改竄。 平文へフォールバックしない (機密漏洩防止)。
+    return { value: null, needsReseal: false }; // 鍵不一致 / 改竄。 平文へフォールバックしない (機密漏洩防止)。
   }
 }

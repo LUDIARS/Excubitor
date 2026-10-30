@@ -10,5 +10,7 @@ export default defineConfig({
     // なく負荷に対する予算不足なので、setup の予算だけ広げる。テスト本体の timeout は
     // 既定のままにして、本当に遅い実装を見逃さないようにする。
     hookTimeout: 30_000,
+    // token ファイルと master 鍵を実ユーザの %APPDATA%/Excubitor に作らない・上書きしない。
+    setupFiles: ['src/test-support/isolate-local-secrets.ts'],
   },
 });

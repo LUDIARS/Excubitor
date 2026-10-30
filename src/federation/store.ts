@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { sealSecret, openSecret } from './secret-box.js';
+import { sealSecret, openSecret, openSecretDetailed } from './secret-box.js';
 
 export interface RemotePeer {
   id: string;
@@ -168,6 +168,33 @@ export function deletePeer(id: string): boolean {
   authenticationPeers = [];
   listPeers();
   return (res.changes ?? 0) > 0;
+}
+
+/**
+ * 旧 master 鍵 (hostname + user) の blob と平文のまま残った token / CF secret を、 新しい master 鍵で
+ * 暗号化し直す。 起動時に 1 回呼ぶ。 復号できない値 (鍵不一致) は触らない (旧データを壊さない)。
+ * 1 行ずつ更新し、 失敗した行は次回の起動で再試行する。 戻り値は再暗号化した行数。
+ * @implements SPEC-SECURITY-MASTER-KEY-STORE
+ */
+export function resealLegacyPeerSecrets(): { resealed: number; failed: number } {
+  const rows = db().all(sql`SELECT id, token, cf_access_secret FROM remote_peers`) as Array<Record<string, unknown>>;
+  let resealed = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const token = openSecretDetailed(row.token as string | null);
+    const cf = openSecretDetailed(row.cf_access_secret as string | null);
+    if (!(token.needsReseal && token.value != null) && !(cf.needsReseal && cf.value != null)) continue;
+    try {
+      const nextToken = token.needsReseal && token.value != null ? sealSecret(token.value) : (row.token as string | null);
+      const nextCf = cf.needsReseal && cf.value != null ? sealSecret(cf.value) : (row.cf_access_secret as string | null);
+      db().run(sql`UPDATE remote_peers SET token = ${nextToken}, cf_access_secret = ${nextCf} WHERE id = ${row.id as string}`);
+      resealed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  if (resealed > 0) listPeers();
+  return { resealed, failed };
 }
 
 /** 疎通結果を記録する (test / 集約時)。 */

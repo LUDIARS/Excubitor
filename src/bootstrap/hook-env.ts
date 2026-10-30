@@ -19,8 +19,13 @@ export function resolveExcubitorPort(raw: string | undefined): number {
   return port;
 }
 
-/** @implements SPEC-SERVICE-BOOTSTRAP */
-export function bootstrapHookEnv(base: NodeJS.ProcessEnv, agentTokenPath: string): NodeJS.ProcessEnv {
+/**
+ * serviceToken を渡すと、 そのサービス専用の secret-agent token を EXCUBITOR_AGENT_TOKEN に入れる
+ * (クライアントは env をファイルより先に読む)。 token ファイルの場所は旧クライアントのために残す。
+ * @implements SPEC-SERVICE-BOOTSTRAP
+ * @implements SPEC-SECURITY-AGENT-TOKEN-SPLIT
+ */
+export function bootstrapHookEnv(base: NodeJS.ProcessEnv, agentTokenPath: string, serviceToken?: string): NodeJS.ProcessEnv {
   const port = resolveExcubitorPort(base.EXCUBITOR_PORT);
   return {
     ...base,
@@ -28,5 +33,6 @@ export function bootstrapHookEnv(base: NodeJS.ProcessEnv, agentTokenPath: string
     // backend は loopback にだけ bind するので、 自拠点の管理 endpoint は常に 127.0.0.1。
     EXCUBITOR_URL: `http://127.0.0.1:${port}`,
     EXCUBITOR_AGENT_TOKEN_PATH: base.EXCUBITOR_AGENT_TOKEN_PATH || agentTokenPath,
+    ...(serviceToken ? { EXCUBITOR_AGENT_TOKEN: serviceToken } : {}),
   };
 }

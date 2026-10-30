@@ -79,7 +79,7 @@ describe('legacy-monitor migration policy', () => {
     try {
       const file = join(dir, 'mesh-legacy-monitor.json');
       vi.stubEnv('EXCUBITOR_MESH_LEGACY_MONITOR_FILE', file);
-      vi.stubEnv('EXCUBITOR_AGENT_TOKEN', 'local-agent-token');
+      vi.stubEnv('EXCUBITOR_MESH_TOKEN', 'local-mesh-token');
       const peer = { id: 'branch', name: 'Branch', base_url: 'https://branch.invalid', enabled: true, token: 'peer-token' } as RemotePeer;
       await expect(meshRequestHeaders(peer, 'GET', '/api/v1/federation/health', '', 'monitor', 'node:self')).rejects.toThrow('mesh_security_not_configured');
       enableLegacyMonitorMigration('Cr rollout', new Date(NOW), file);

@@ -9,6 +9,7 @@ import { getTopologyEnv } from './topology.js';
 import { injectServiceRuntimeVersion } from './service-version.js';
 import { resolveVaultEnv } from '../vault/vault-inject.js';
 import { planRequiresSecret } from './requires-secret-plan.js';
+import { isServiceCode, serviceAgentToken } from '../secrets/service-agent-token.js';
 
 const logger = createNamedLogger('excubitor.process.inject');
 
@@ -51,6 +52,24 @@ function runtimeConfigEnvFor(svc: Pick<Service, 'code'>): Record<string, string>
   const config = getServiceRuntimeConfig(svc.code);
   if (config === null) return {};
   return { EXCUBITOR_SERVICE_CONFIG_JSON: JSON.stringify(config) };
+}
+
+/**
+ * そのサービス専用の secret-agent token を env EXCUBITOR_AGENT_TOKEN で渡す。 既存のクライアントは
+ * env を token ファイルより先に読むので、 改修なしで旧共有 token からサービス token へ移る。
+ * Excubitor 自身 (project Ex) には渡さない: Ex は env EXCUBITOR_AGENT_TOKEN を旧共有 token として読む。
+ * @implements SPEC-SECURITY-AGENT-TOKEN-SPLIT
+ */
+export function secretAgentEnvFor(svc: Pick<Service, 'code' | 'project_code'>): Record<string, string> {
+  if (svc.code === 'excubitor' || svc.code.startsWith('excubitor-') || svc.project_code === 'Ex') return {};
+  if (!isServiceCode(svc.code)) return {};
+  try {
+    return { EXCUBITOR_AGENT_TOKEN: serviceAgentToken(svc.code) };
+  } catch (err) {
+    // master 鍵が用意できないときは起動を止めず、 旧共有 token (ファイル) での接続に任せる。
+    logger.warn({ service: svc.code, err: (err as Error).message }, 'service secret-agent token unavailable');
+    return {};
+  }
 }
 
 /** Resolve requirements only through the consumer's own Vault bindings. */
@@ -96,7 +115,7 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
   }
   const requiresSecretEnv = await resolveRequiresSecretEnv(svc, vaultEnv);
   // 優先順位: ars-root < vestigium < global < topology < 静的 env (catalog)
-  //           < encrypted runtime config < requires_secret < Vault。
+  //           < encrypted runtime config < requires_secret < Vault < secret-agent token。
   return (await injectServiceRuntimeVersion(
     svc,
     {
@@ -108,6 +127,7 @@ export async function resolveInjectEnv(svc: Service): Promise<Record<string, str
       ...runtimeConfigEnv,
       ...requiresSecretEnv,
       ...vaultEnv,
+      ...secretAgentEnvFor(svc),
     },
   )).env;
 }
