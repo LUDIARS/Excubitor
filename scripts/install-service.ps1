@@ -167,7 +167,7 @@ $ActionArguments = "`"$NodeExecutable`" $NodeArguments"
 $Action = New-ScheduledTaskAction -Execute $HiddenLauncher -Argument $ActionArguments -WorkingDirectory $Root
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Limited
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 
 $PreviousTaskXml = if ($ExistingTask) {
   Export-ScheduledTask -TaskName $Name -TaskPath $TaskPath

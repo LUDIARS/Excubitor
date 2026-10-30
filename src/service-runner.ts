@@ -13,12 +13,13 @@ try {
 if (argumentsValid) {
   const [
     { createLocalControlSupervisor },
-    { createNamedLogger },
+    { createSupervisorLogger, installSupervisorFatalHandlers },
   ] = await Promise.all([
     import('./local-control/supervisor.js'),
-    import('./shared/logger.js'),
+    import('./local-control/supervisor-log.js'),
   ]);
-  const logger = createNamedLogger('excubitor.supervisor');
+  const logger = createSupervisorLogger(process.cwd());
+  installSupervisorFatalHandlers(process, logger, (code) => process.exit(code));
   const supervisor = createLocalControlSupervisor({ rootDir: process.cwd() });
   let stopping = false;
 

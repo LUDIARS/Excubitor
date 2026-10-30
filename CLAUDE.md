@@ -124,6 +124,10 @@ catalog の各サービスは `tier` でデプロイ/挙動クラスを分ける
   新しいコンソールを確保して窓が一瞬出る。SW_HIDE のコンソールも既定ターミナル (Windows Terminal) への引き渡しで窓が出る。
   WMI の launcher は `CreateFlags=8` でコンソールを持たない。Excubitor 自身の起動はすべて `windowsHide: true` でコンソール窓を出さない。 既存 start-<service>.bat (pull/build/dev 一式) は
   catalog の `start_script` に絶対パスを置けば `command` より優先してヘッドレス起動する。
+- **supervisor 自身のログは `data/process-logs/excubitor-supervisor.log`** (`src/local-control/supervisor-log.ts`)。
+  Task 起動では stdout がどこにも繋がらないためファイルにも書く。想定外の例外・拒否は fatal を同期書き込みしてから
+  exit(1) し、再起動は Scheduled Task に任せる (`RestartCount 999` / 1 分間隔。旧 3 回は過負荷で使い切り、
+  2026-10-29 に朝まで停止した)。導入済みの Task は再インストールで設定が変わる。
 - **LogSafeMode** (`EXCUBITOR_LOG_SAFE_MODE=1` / `--no-logs`): file-tail / process-log-tail /
   error-detector / parquet 圧縮を止め、自身の pino も warn へ落として起動する。 ログ I/O 起因の
   障害切り分け用 (監視/制御/WebUI/ログ読み出しは動く)。 状態は `/health` の `log_safe_mode`。
