@@ -407,6 +407,73 @@ const FederationSchema = z.object({
   peer_down_after_sec: z.number().int().positive().default(300),
 });
 
+/**
+ * 通信監視 (netwatch)。 tshark (Wireshark の CLI) で通信先を集め、 国外をマークする
+ * (spec/feature/network-watch.md)。 この config は全拠点で共有するので方針だけを置く。
+ * キャプチャするインタフェースと tshark の場所は拠点ごとの env
+ * (`EXCUBITOR_NETWATCH_INTERFACE` / `EXCUBITOR_NETWATCH_TSHARK`) で、 interface を設定した拠点だけが動かす。
+ */
+const NetwatchSchema = z.object({
+  /** false なら env があっても動かさない (全拠点の停止スイッチ)。 */
+  enabled: z.boolean().default(true),
+  /** BPF のキャプチャフィルタ。 空なら既定 (接続開始 / DNS / TLS・QUIC の ClientHello / HTTP)。 */
+  capture_filter: z.string().default(''),
+  /**
+   * tshark の `-N` (名前解決フラグ)。 g = MaxMind GeoIP。 n / N (外部 DNS) は使えない。
+   * 空なら名前解決をすべて切る (国が付かなくなる)。
+   */
+  name_resolution: z.string().default('g'),
+  /** 自国 (ISO 3166-1 alpha-2)。 これ以外の国を国外とする。 */
+  home_country: z.string().regex(/^[A-Za-z]{2}$/).default('JP').transform((value) => value.toUpperCase()),
+  /** 覚えておく通信先 (アドレス) の上限。 */
+  max_destinations: z.number().int().min(16).max(100_000).default(5_000),
+  /** DNS 応答で覚えた名前を使う期間 (秒)。 */
+  dns_ttl_sec: z.number().int().min(60).default(3_600),
+  /** tshark の内部状態が積み上がるので、 この分数ごとに起動し直す。 0 で無効。 */
+  restart_after_min: z.number().int().min(0).default(60),
+  /** 異常終了後に起動し直すまでの待ち (秒)。 */
+  retry_after_sec: z.number().int().min(5).default(30),
+  overlay: z.object({
+    /** Tela に渡す一覧ファイル (`TELA_LIST_VIEW 1`)。 相対パスは Excubitor の cwd から。 空なら書かない。 */
+    file: z.string().default('data/netwatch/overlay.telalist'),
+    /** 一覧に出す行数。 */
+    max_rows: z.number().int().min(1).max(256).default(12),
+    /** foreign = 国外だけ、 public = 公開アドレス全部 (国外を先頭に印つき)。 */
+    include: z.enum(['foreign', 'public']).default('public'),
+    /** 書き出しの周期 (秒)。 */
+    interval_sec: z.number().int().min(1).default(2),
+  }).default({}),
+  /** 検知 (送信元プロセスの特定と怪しい通信の判定)。 通信は止めない。 */
+  detect: z.object({
+    /** 接続表 (Windows の netstat -ano) を読む周期 (秒)。 0 で送信元プロセスを特定しない。 */
+    owner_poll_sec: z.number().int().min(0).max(60).default(2),
+    /** 怪しいとしない宛先ポート。 */
+    allowed_ports: z.array(z.number().int().min(1).max(65535)).default([53, 80, 443, 853]),
+    /** 怪しいとしないドメイン (そのドメインと配下)。 */
+    trusted_domains: z.array(z.string().min(1)).default([]),
+  }).default({}),
+  /**
+   * 遮断 (Windows ファイアウォール)。 人が API で登録したものだけを、 管理者権限の同期タスク
+   * (scripts/install-netwatch-firewall.ps1 で導入) が反映する。 Excubitor は希望状態を書くだけ。
+   */
+  block: z.object({
+    /** false なら遮断 API を止める (登録済みの遮断ファイルはそのまま残る)。 */
+    enabled: z.boolean().default(true),
+    /** 遮断の希望状態 (同期タスクが読む)。 相対パスは Excubitor の cwd から。 */
+    file: z.string().min(1).default('data/netwatch/firewall-blocks.json'),
+    /** 同期タスクの状態ファイル。 空なら %ProgramData%\Excubitor\netwatch-firewall\status.json。 */
+    status_file: z.string().default(''),
+    max_entries: z.number().int().min(1).max(1_000).default(256),
+    default_ttl_min: z.number().int().min(1).default(60),
+    /** 期限の上限 (分)。 既定 7 日。 */
+    max_ttl_min: z.number().int().min(1).default(10_080),
+    /** 既定の守る範囲 (loopback・LAN・Tailscale など) に足す範囲。 DNS サーバや拠点のアドレスなど。 */
+    protected_addresses: z.array(z.string().min(1)).default([]),
+    /** 既定の守るプログラム (svchost.exe など) に足す実行ファイル名。 */
+    protected_programs: z.array(z.string().min(1)).default([]),
+  }).default({}),
+});
+
 const CatalogSchema = z.object({
   project_versions: z.record(ProjectVersionSchema).default({}),
   services: z.array(ServiceSchema),
@@ -424,6 +491,8 @@ const CatalogSchema = z.object({
   monitor: MonitorSchema.default({}),
   /** 拠点間連携のピア巡回。 */
   federation: FederationSchema.default({}),
+  /** 通信監視 (tshark) と Tela への一覧。 */
+  netwatch: NetwatchSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;

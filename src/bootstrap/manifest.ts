@@ -17,7 +17,10 @@ export async function containedFile(root: string, name: string): Promise<string>
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Expected a regular file: ' + name);
   const actual = await realpath(path);
-  const rel = relative(root, actual);
+  // root も実体に直してから比べる。 realpath は 8.3 短縮名 (MITARA~1.KAZ など) やリンクを展開するので、
+  // 展開していない root と比べると checkout 内のファイルまで「外」と判定してしまう (TEMP が短縮名の環境)。
+  const base = await realpath(root);
+  const rel = relative(base, actual);
   if (isAbsolute(rel) || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) throw new Error('File escapes checkout');
   return actual;
 }

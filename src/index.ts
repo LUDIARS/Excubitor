@@ -90,6 +90,11 @@ import {
 import { buildReleaseRouter } from './release/router.js';
 import { startMemoryLoop } from './memory/loop.js';
 import { buildMemoryRouter } from './memory/router.js';
+import { startNetwatch } from './netwatch/runtime.js';
+import { loadRunningInstances } from './memory/collector.js';
+import { buildNetwatchRouter } from './netwatch/router.js';
+import { startNetwatchBlocking } from './netwatch/block-runtime.js';
+import { buildBlockRouter } from './netwatch/block-router.js';
 import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
@@ -591,6 +596,17 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // メモリ監視ループ (プロセス RSS / docker stats / WSL → 時系列 + leak 検知)。
   // catalog は live 参照で渡し、 file watch 後の memory_monitor 設定変更にも追従させる。
   const memoryHandle = startMemoryLoop(() => currentCatalog!);
+  // 通信監視 (tshark で通信先を集め国外をマーク、 Tela 用一覧を書き出す)。 env
+  // EXCUBITOR_NETWATCH_INTERFACE を設定した拠点だけ tshark を起動する。 spec/feature/network-watch.md
+  const netwatchHandle = startNetwatch({
+    getCatalog: () => currentCatalog!,
+    // サービス (とその子孫) の通信を一覧から外すための根 pid。 起動は supervisor が持つので DB の running instance から引く。
+    listServiceRoots: () => [...loadRunningInstances().values()]
+      .filter((instance) => instance.pid !== null)
+      .map((instance) => ({ code: instance.code, pid: instance.pid! })),
+  });
+  // 遮断 (Windows ファイアウォール)。 人が API で登録した遮断の希望状態を書き、 管理者権限の同期タスクが反映する。
+  const netwatchBlocking = startNetwatchBlocking({ getCatalog: () => currentCatalog! });
   // 構造化された死活履歴の retention 剪定。
   // 旧 master 鍵 (hostname + user) で暗号化された peer secret を KeyStore の鍵で暗号化し直す。
   try {
@@ -861,6 +877,10 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // メモリ監視 (/api/v1/memory/summary, /api/v1/memory/series)
   app.route('/', buildMemoryRouter(() => currentCatalog!));
+  // 通信監視 (/api/v1/netwatch/status, /api/v1/netwatch/destinations)
+  app.route('/', buildNetwatchRouter(netwatchHandle.snapshot));
+  // 遮断 (/api/v1/netwatch/blocks)
+  app.route('/', buildBlockRouter(netwatchBlocking.service));
   app.route('/', buildProcessSnapshotRouter());
 
   // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作、 メッシュ集約・担保)
@@ -1324,6 +1344,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { dispatchHandle.stop(); } catch { /* best-effort shutdown */ }
       try { errorDetectorHandle.stop(); } catch { /* best-effort shutdown */ }
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
+      try { netwatchHandle.stop(); } catch { /* best-effort shutdown */ }
+      try { netwatchBlocking.stop(); } catch { /* best-effort shutdown */ }
       try { processSnapshotHandle.stop(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { peerPollerHandle.stop(); } catch { /* best-effort shutdown */ }

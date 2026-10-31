@@ -38,6 +38,16 @@ function cat(services: Service[]): Catalog {
     log_store: { ring_lines_per_service: 2_000, ring_lines_global: 20_000, compact_hour_utc: 18 },
     monitor: { health_interval_sec: 60, inventory_interval_sec: 300, probe_concurrency: 8, liveness_heartbeat_sec: 300 },
     federation: { peer_poll_sec: 60, peer_timeout_ms: 5_000, stale_after_sec: 180, peer_down_after_sec: 300 },
+    netwatch: {
+      enabled: true, capture_filter: '', name_resolution: 'g', home_country: 'JP', max_destinations: 5_000,
+      dns_ttl_sec: 3_600, restart_after_min: 60, retry_after_sec: 30,
+      overlay: { file: 'data/netwatch/overlay.telalist', max_rows: 12, include: 'public', interval_sec: 2 },
+      detect: { owner_poll_sec: 2, allowed_ports: [53, 80, 443, 853], trusted_domains: [] },
+      block: {
+        enabled: true, file: 'data/netwatch/firewall-blocks.json', status_file: '', max_entries: 256,
+        default_ttl_min: 60, max_ttl_min: 10_080, protected_addresses: [], protected_programs: [],
+      },
+    },
   };
 }
 

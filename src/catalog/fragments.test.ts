@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearFragmentCache, fragmentFiles, readFragmentServicesRaw } from './fragments.js';
 
 const originalArsRoot = process.env.EXCUBITOR_ARS_ROOT;
+// 拠点で設定した追加の走査ルート (実在のリポの fragment) を持ち込まない。 持ち込むと一時 ARS_ROOT 以外の
+// サービスが混ざる (Revisor の審査は拠点の env を引き継ぐ)。 loader.test.ts と同じ隔離。
+const originalFragmentDirs = process.env.EXCUBITOR_FRAGMENT_DIRS;
 const tempDirs: string[] = [];
 
 function makeRepoFragment(root: string, repo: string, body: string): string {
@@ -16,12 +19,15 @@ function makeRepoFragment(root: string, repo: string, body: string): string {
 }
 
 beforeEach(() => {
+  delete process.env.EXCUBITOR_FRAGMENT_DIRS;
   clearFragmentCache();
 });
 
 afterEach(() => {
   if (originalArsRoot === undefined) delete process.env.EXCUBITOR_ARS_ROOT;
   else process.env.EXCUBITOR_ARS_ROOT = originalArsRoot;
+  if (originalFragmentDirs === undefined) delete process.env.EXCUBITOR_FRAGMENT_DIRS;
+  else process.env.EXCUBITOR_FRAGMENT_DIRS = originalFragmentDirs;
   clearFragmentCache();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();

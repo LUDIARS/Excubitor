@@ -32,7 +32,7 @@ import { isDockerRuntime, isLocalProcessRuntime } from '../catalog/runtime-kind.
 
 const logger = createNamedLogger('excubitor.memory');
 
-interface RunningInstance {
+export interface RunningInstance {
   code: string;
   instanceId: string;
   pid: number | null;
@@ -47,7 +47,7 @@ function primarySource(svc: Service): 'process' | 'docker' {
 }
 
 /** running な instance を code → {instanceId, pid} で引けるよう取得。 */
-function loadRunningInstances(): Map<string, RunningInstance> {
+export function loadRunningInstances(): Map<string, RunningInstance> {
   const rows = db().all(sql`
     SELECT s.code AS code, si.id AS instance_id, si.pid AS pid, si.started_at AS started_at
     FROM services s

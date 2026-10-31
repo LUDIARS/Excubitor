@@ -1,0 +1,16 @@
+{
+  "name": "network-watch",
+  "description": "Outbound destination monitoring via tshark: DNS/SNI/Host/SYN observations, destination aggregation, foreign-country marking from Wireshark's MaxMind lookup, and a Tela list file for the desktop overlay.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/netwatch/"
+    }
+  ],
+  "cardTemplate": "Summarise the network-watch domain: tshark capture lifecycle, metadata-only observations, IP-to-domain mapping from captured DNS answers, foreign/domestic/unknown classification, read-only API, and the TELA_LIST_VIEW overlay file.",
+  "specRefs": [
+    "spec/feature/network-watch.md"
+  ],
+  "rationale": "Network destination monitoring owns an external capture process and a country policy that change independently of process resource sampling (resource-monitoring) and public ingress protection (intrusion). Tests also belong to the cross-cutting test-environment domain."
+}

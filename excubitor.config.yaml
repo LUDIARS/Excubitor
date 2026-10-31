@@ -41,6 +41,43 @@ federation:
   # これより古いピアの値は stale と表示する。
   stale_after_sec: 180
 
+netwatch:
+  # 通信監視 (spec/feature/network-watch.md)。 ここは全拠点共有の方針だけ。 キャプチャは env
+  # EXCUBITOR_NETWATCH_INTERFACE (tshark -D の名前) を設定した拠点だけが動かす。 tshark の場所は
+  # EXCUBITOR_NETWATCH_TSHARK (未設定なら PATH 上の tshark)。
+  enabled: true
+  # これ以外の国を国外としてマークする (ISO 3166-1 alpha-2)。
+  home_country: JP
+  # tshark -N。 g = Wireshark の MaxMind GeoIP (Wireshark 側で mmdb のディレクトリを登録する)。 n / N は不可。
+  name_resolution: g
+  restart_after_min: 60
+  overlay:
+    # Tela のデスクトップオーバーレイが読む一覧 (TELA_LIST_VIEW 1)。
+    file: data/netwatch/overlay.telalist
+    max_rows: 12
+    include: public
+    interval_sec: 2
+  detect:
+    # 送信元プロセスを特定し、 Excubitor のサービス (とその子孫) の通信を一覧から外す。
+    # 接続表 (netstat -ano) を読む周期 (秒)。 0 で特定しない。 Windows のみ。
+    owner_poll_sec: 2
+    # サービス以外の通信で、 これ以外の宛先ポートは「許可外ポート」として怪しいとする。
+    allowed_ports: [53, 80, 443, 853]
+    # 怪しいとしないドメイン (配下を含む)。 例: [github.com, anthropic.com]
+    trusted_domains: []
+  block:
+    # 遮断 (Windows ファイアウォール)。 人が POST /api/v1/netwatch/blocks で登録したものだけを止める。
+    # 反映は管理者権限の同期タスク (scripts/install-netwatch-firewall.ps1 を管理者で 1 回実行して導入)。
+    # 同期タスクを入れていない拠点では登録しても止まらない (GET の sync.state が missing)。
+    enabled: true
+    file: data/netwatch/firewall-blocks.json
+    default_ttl_min: 60
+    max_ttl_min: 10080
+    # 既定で守る範囲 (loopback・LAN・Tailscale 100.64/10・link-local) に足す範囲。 例: DNS サーバ
+    protected_addresses: []
+    # 既定で守るプログラム (svchost.exe・lsass.exe・tailscale 系など) に足す実行ファイル名。
+    protected_programs: []
+
 retention:
   enabled: true
   logs_hours: 72
