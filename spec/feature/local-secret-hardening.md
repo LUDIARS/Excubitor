@@ -30,6 +30,11 @@ config.enc と remote_peers の機密列 (相手拠点の token・CF Access secr
   - KeyStore の鍵が読めない (DPAPI の失敗など) ときは旧鍵に落とさない。config.enc は読み取り専用扱いにし、
     空の設定で上書きしない。
 - 旧鍵で作られたバックアップは旧鍵で開けたままになる。必要なら移行後にバックアップを作り直す。
+- テストは実拠点の設定に触れない。vitest の setup (`src/test-support/isolate-local-secrets.ts`) が `APPDATA` /
+  `XDG_CONFIG_HOME` / `EXCUBITOR_CONFIG_PATH` / `EXCUBITOR_MASTER_KEY_DIR` / token の置き場所を一時フォルダへ強制し
+  (継承した値も上書き)、`EXCUBITOR_MASTER_KEY` を外す。さらに実際の `%APPDATA%/Excubitor` への書き込み・rename・削除を
+  失敗させるガード (`real-config-guard.ts`) を入れる。旧版の setup は鍵の置き場所だけを逃がしていたため、
+  一時鍵で本物の config.enc を「移行」して本番が起動できなくなった (2026-10-30)。
 
 ## agent token の用途分離 {#SPEC-SECURITY-AGENT-TOKEN-SPLIT}
 
