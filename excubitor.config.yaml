@@ -78,6 +78,22 @@ netwatch:
     # 既定で守るプログラム (svchost.exe・lsass.exe・tailscale 系など) に足す実行ファイル名。
     protected_programs: []
 
+dns_filter:
+  # DNS フィルタ (spec/feature/dns-filter.md)。 ここは全拠点共有の方針だけ。 待ち受けは env
+  # EXCUBITOR_DNS_FILTER_LISTEN (例 127.0.0.1:53,[::1]:53) と EXCUBITOR_DNS_FILTER_UPSTREAM (上流の IP) の
+  # 両方を設定した拠点だけ。 PC の DNS をここへ向けるのは管理者が scripts/set-dns-excubitor.ps1 で行う。
+  enabled: true
+  # API (POST /api/v1/dns-filter/rules) で足す拒否規則の置き場所。
+  rules_file: data/dnsfilter/rules.json
+  # 既知の DoH の入口と Firefox / iCloud プライベートリレーの canary を止める (暗号化 DNS へ逃げさせない)。
+  block_doh: true
+  # 常に止めるドメイン (配下を含む)。
+  blocked_domains: []
+  # 止めないドメイン (配下を含む)。 拒否のどの規則より優先する。
+  allowed_domains: []
+  # 既定 (loopback・LAN・Tailscale・link-local) に足す、 問い合わせを受ける相手の範囲。
+  allowed_clients: []
+
 retention:
   enabled: true
   logs_hours: 72

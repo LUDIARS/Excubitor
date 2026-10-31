@@ -6,7 +6,7 @@
 
 import type { DnsAnswerCache } from './dns-answer-cache.js';
 import type { DestinationStore } from './destination-store.js';
-import type { Destination, PacketObservation } from './types.js';
+import type { Destination, DnsAnswer, PacketObservation } from './types.js';
 
 export interface IngestCounters {
   /** 公開アドレス宛ての観測数。 */
@@ -40,6 +40,11 @@ export class ObservationIngest {
       if (!observation.country) this.counters.publicWithoutCountry += 1;
     }
     return destination;
+  }
+
+  /** キャプチャ以外 (DNS フィルタの中継) で分かった名前の対応を覚える。 */
+  recordDns(answer: DnsAnswer, atMs: number): void {
+    this.dns.record(answer, atMs);
   }
 
   resetCounters(): void {

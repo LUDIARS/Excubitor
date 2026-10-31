@@ -95,6 +95,8 @@ import { loadRunningInstances } from './memory/collector.js';
 import { buildNetwatchRouter } from './netwatch/router.js';
 import { startNetwatchBlocking } from './netwatch/block-runtime.js';
 import { buildBlockRouter } from './netwatch/block-router.js';
+import { startDnsFilter } from './dnsfilter/runtime.js';
+import { buildDnsFilterRouter } from './dnsfilter/router.js';
 import { startProcessSnapshotLoop } from './process-snapshot/loop.js';
 import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
@@ -607,6 +609,13 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   });
   // 遮断 (Windows ファイアウォール)。 人が API で登録した遮断の希望状態を書き、 管理者権限の同期タスクが反映する。
   const netwatchBlocking = startNetwatchBlocking({ getCatalog: () => currentCatalog! });
+  // DNS フィルタ (中継して規則に当たる名前を NXDOMAIN で止める)。 env EXCUBITOR_DNS_FILTER_LISTEN と
+  // EXCUBITOR_DNS_FILTER_UPSTREAM を設定した拠点だけ待ち受ける。 解決した名前は通信監視の名前付けへ渡す。
+  // spec/feature/dns-filter.md
+  const dnsFilterHandle = startDnsFilter({
+    getCatalog: () => currentCatalog!,
+    onAnswer: (answer) => netwatchHandle.recordDnsAnswer(answer),
+  });
   // 構造化された死活履歴の retention 剪定。
   // 旧 master 鍵 (hostname + user) で暗号化された peer secret を KeyStore の鍵で暗号化し直す。
   try {
@@ -881,6 +890,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildNetwatchRouter(netwatchHandle.snapshot));
   // 遮断 (/api/v1/netwatch/blocks)
   app.route('/', buildBlockRouter(netwatchBlocking.service));
+  // DNS フィルタ (/api/v1/dns-filter/status, /queries, /rules)
+  app.route('/', buildDnsFilterRouter(dnsFilterHandle));
   app.route('/', buildProcessSnapshotRouter());
 
   // 他拠点連携 (/api/v1/peers/*, /api/v1/federation/* — 認証付きピア集約/操作、 メッシュ集約・担保)
@@ -1346,6 +1357,11 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
       try { memoryHandle?.stop?.(); } catch { /* noop */ }
       try { netwatchHandle.stop(); } catch { /* best-effort shutdown */ }
       try { netwatchBlocking.stop(); } catch { /* best-effort shutdown */ }
+      try {
+        await dnsFilterHandle.stop();
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'dns filter stop failed');
+      }
       try { processSnapshotHandle.stop(); } catch { /* noop */ }
       try { retentionHandle?.stop?.(); } catch { /* noop */ }
       try { peerPollerHandle.stop(); } catch { /* best-effort shutdown */ }

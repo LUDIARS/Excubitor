@@ -48,6 +48,11 @@ function cat(services: Service[]): Catalog {
         default_ttl_min: 60, max_ttl_min: 10_080, protected_addresses: [], protected_programs: [],
       },
     },
+    dns_filter: {
+      enabled: true, rules_file: 'data/dnsfilter/rules.json', max_rules: 1_000, max_ttl_min: 525_600, block_doh: true,
+      blocked_domains: [], allowed_domains: [], allowed_clients: [], upstream_timeout_ms: 3_000, max_in_flight: 256,
+      query_log_size: 1_000,
+    },
   };
 }
 

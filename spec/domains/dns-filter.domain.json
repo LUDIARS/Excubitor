@@ -1,0 +1,16 @@
+{
+  "name": "dns-filter",
+  "description": "DNS forwarding filter: UDP/TCP listener, client range check, domain rules (allow > API > config > known DoH) answered with NXDOMAIN, single upstream relay with response validation, in-memory query log, rule API, and hand-off of resolved addresses to network-watch.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/dnsfilter/"
+    }
+  ],
+  "cardTemplate": "Summarise the dns-filter domain: per-site env listen/upstream, client policy, rule precedence and storage, NXDOMAIN answers, upstream validation, query log retention (memory only), and the /api/v1/dns-filter API.",
+  "specRefs": [
+    "spec/feature/dns-filter.md"
+  ],
+  "rationale": "The DNS filter owns a network listener and a name-based policy that change independently of packet capture (network-watch) and firewall blocking. It only hands resolved addresses to network-watch. Tests also belong to the cross-cutting test-environment domain."
+}

@@ -21,7 +21,7 @@ import { renderListView } from './tela-list-format.js';
 import { parseTsharkLine } from './tshark-line.js';
 import { TsharkProcess } from './tshark-process.js';
 import { getFreshProcessSnapshot } from '../process-snapshot/store.js';
-import type { AssessedDestination, CaptureStatus } from './types.js';
+import type { AssessedDestination, CaptureStatus, DnsAnswer } from './types.js';
 
 const logger = createNamedLogger('excubitor.netwatch');
 const RECONCILE_INTERVAL_MS = 5_000;
@@ -45,6 +45,8 @@ export interface NetwatchSnapshot {
 
 export interface NetwatchHandle {
   snapshot: () => NetwatchSnapshot;
+  /** DNS フィルタが中継して分かった「名前 → アドレス」。 キャプチャしていない拠点では捨てる。 */
+  recordDnsAnswer: (answer: DnsAnswer) => void;
   stop: () => void;
 }
 
@@ -249,6 +251,7 @@ export function startNetwatch(deps: NetwatchDeps): NetwatchHandle {
 
   return {
     snapshot,
+    recordDnsAnswer: (answer) => aggregation?.ingest.recordDns(answer, now()),
     stop: () => {
       clearInterval(reconcileTimer);
       supervisor.stop();

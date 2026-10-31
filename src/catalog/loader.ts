@@ -474,6 +474,35 @@ const NetwatchSchema = z.object({
   }).default({}),
 });
 
+/**
+ * DNS フィルタ (spec/feature/dns-filter.md)。 Excubitor が DNS を中継し、 規則に当たる名前を NXDOMAIN で止める。
+ * この config は全拠点共有の方針だけ。 待ち受けるアドレスと上流は拠点ごとの env
+ * (`EXCUBITOR_DNS_FILTER_LISTEN` / `EXCUBITOR_DNS_FILTER_UPSTREAM`) で、 両方を設定した拠点だけが待ち受ける。
+ */
+const DnsFilterSchema = z.object({
+  /** false なら待ち受けも規則 API も止める (全拠点の停止スイッチ)。 */
+  enabled: z.boolean().default(true),
+  /** API で足す拒否規則のファイル。 相対パスは Excubitor の cwd から。 */
+  rules_file: z.string().min(1).default('data/dnsfilter/rules.json'),
+  max_rules: z.number().int().min(1).max(10_000).default(1_000),
+  /** 期限つき規則の期限の上限 (分)。 既定 365 日。 期限を省いた規則は期限なし。 */
+  max_ttl_min: z.number().int().min(1).default(525_600),
+  /** 既知の DoH / 暗号化 DNS の入口 (と Firefox・iCloud プライベートリレーの canary) を止める。 */
+  block_doh: z.boolean().default(true),
+  /** 常に止めるドメイン (配下を含む)。 */
+  blocked_domains: z.array(z.string().min(1)).default([]),
+  /** 止めないドメイン (配下を含む)。 拒否のどの規則より優先する。 */
+  allowed_domains: z.array(z.string().min(1)).default([]),
+  /** 既定 (loopback・LAN・Tailscale・link-local) に足す、 問い合わせを受ける相手の範囲。 */
+  allowed_clients: z.array(z.string().min(1)).default([]),
+  /** 上流の応答を待つ時間 (ms)。 */
+  upstream_timeout_ms: z.number().int().min(200).max(10_000).default(3_000),
+  /** 同時に中継する問い合わせの上限。 超えたら SERVFAIL。 */
+  max_in_flight: z.number().int().min(1).max(10_000).default(256),
+  /** メモリに置く直近の問い合わせの件数。 */
+  query_log_size: z.number().int().min(10).max(20_000).default(1_000),
+});
+
 const CatalogSchema = z.object({
   project_versions: z.record(ProjectVersionSchema).default({}),
   services: z.array(ServiceSchema),
@@ -493,6 +522,8 @@ const CatalogSchema = z.object({
   federation: FederationSchema.default({}),
   /** 通信監視 (tshark) と Tela への一覧。 */
   netwatch: NetwatchSchema.default({}),
+  /** DNS フィルタ (中継と名前の拒否)。 */
+  dns_filter: DnsFilterSchema.default({}),
 });
 
 export type Service = z.infer<typeof ServiceSchema>;
