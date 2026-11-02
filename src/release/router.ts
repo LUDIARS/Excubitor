@@ -13,9 +13,10 @@ import { listReleaseManifests, loadReleaseManifest } from './manifest.js';
 import { planRelease } from './plan.js';
 import { readGitMeta } from './git-meta.js';
 import { buildRelease } from './orchestrator.js';
+import { isReleaseIdentifier } from './identifier.js';
 
 const BuildBodySchema = z.object({
-  version: z.string().optional(),
+  version: z.string().refine(isReleaseIdentifier, 'invalid release version').optional(),
   skipBuild: z.boolean().optional(),
   skipInstall: z.boolean().optional(),
   skipArchive: z.boolean().optional(),

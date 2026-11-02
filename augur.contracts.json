@@ -1,6 +1,8 @@
 {
   "version": 1,
   "contracts": [
+    {"id":"C-26","criterion":"C-26 isReleaseIdentifier(value): version と manifest.name は英数字で始まる64文字以内の許可形式に限る","symbol":"isReleaseIdentifier","file":"src/release/identifier.ts","module":"src/release/identifier.contract.ts"},
+    {"id":"C-27","criterion":"C-27 createArchiveCommand(bundleDir, zipPath, platform): shell 無効の引数配列と Windows の環境変数・リテラルパスで ZIP を作る","symbol":"createArchiveCommand","file":"src/release/archive.ts","module":"src/release/archive.contract.ts"},
     {"id":"C-14","criterion":"C-14 validateWorkloadClaims(input): Cr workload の主体・宛先・60秒以内の期限・Ed25519鍵を検査する","symbol":"validateWorkloadClaims","file":"src/federation/security/claims.ts","module":"src/federation/security/claims.contract.ts"},
     {"id":"C-15","criterion":"C-15 permitsMeshAction(input): 完全一致のaction/resourceだけを許可しlegacyの高権限を拒否する","symbol":"permitsMeshAction","file":"src/federation/security/grants.ts","module":"src/federation/security/grants.contract.ts"},
     {"id":"C-16","criterion":"C-16 selectVaultKeys(input): 許可された秘密キーだけを配布対象に残す","symbol":"selectVaultKeys","file":"src/federation/security/grants.ts","module":"src/federation/security/vault-keys.contract.ts"},

@@ -89,6 +89,22 @@ discutere-allinone-<version>/
 
 ## 6. 設計判断
 
+### 入力・アーカイブ境界
+
+関連タスク: `actio:3ebc6ee9-fb52-455d-bb6a-f4e0e3052e3e`。
+
+- version と manifest.name は `^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$` に限る。
+  API は不正な version を 400 `invalid_body` とし、直接呼び出しでも buildRelease が
+  opts.version・manifest.name・primary の版をビルドと出力操作の前に検査する。
+- ZIP は shell 無効の runner を使う。非 Windows は親ディレクトリを cwd として zip の
+  argv に渡す。Windows は固定 PowerShell スクリプトに環境変数でパスを渡し、
+  Get-ChildItem / Compress-Archive の `-LiteralPath` で既存の内容のみを格納する。
+- 回帰検証は release 単体テストのみ。API の拒否、直接呼び出しの副作用前の失敗、正常版、
+  モック runner の両 OS の引数を確認する。アーカイバ・サービスは実行しない。
+
+C-26 isReleaseIdentifier(value): version と manifest.name は英数字で始まる64文字以内の許可形式に限る
+C-27 createArchiveCommand(bundleDir, zipPath, platform): shell 無効の引数配列と Windows の環境変数・リテラルパスで ZIP を作る
+
 - **build runner は注入** (`StepRunner`)。 テストは fake で npm を実際に叩かずに
   assemble/launcher/VERSION までの組み立てを固定する (`orchestrator.test.ts`)。
 - **prod node_modules は staged copy で `npm ci --omit=dev`**。 native dep (better-sqlite3 /

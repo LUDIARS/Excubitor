@@ -31,6 +31,7 @@ import {
   type VersionComponent,
 } from './launcher.js';
 import { archiveBundle } from './archive.js';
+import { isReleaseIdentifier } from './identifier.js';
 
 const logger = createNamedLogger('excubitor.release');
 
@@ -97,6 +98,11 @@ export async function buildRelease(
     components: [],
   };
 
+  // Reject unsafe filename components before build commands or output mutations.
+  if (!isReleaseIdentifier(manifest.name)) base.errors.push('invalid manifest.name: expected release identifier');
+  if (opts.version !== undefined && !isReleaseIdentifier(opts.version)) base.errors.push('invalid version: expected release identifier');
+  if (base.errors.length > 0) return { ...base, ok: false, stage: 'plan' };
+
   // 1. plan
   const plan = planRelease(manifest, opts.catalog);
   if (plan.errors.length > 0) {
@@ -106,6 +112,9 @@ export async function buildRelease(
   const primary = plan.components.find((c) => c.component.role === 'primary');
   const version = opts.version ?? readPrimaryVersion(primary) ?? '0.0.0';
   base.version = version;
+  if (!isReleaseIdentifier(version)) {
+    return { ...base, ok: false, stage: 'plan', errors: ['invalid primary version: expected release identifier'] };
+  }
 
   // 2. build
   if (!opts.skipBuild) {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -64,6 +64,37 @@ function manifest() {
 }
 
 describe('buildRelease', () => {
+  const invalid = ["1'", '1;echo', '1 2', '..', '../x', '1/x', '1\\x', '', 'a'.repeat(65), '1\n'];
+  it.each(invalid)('rejects explicit version %j before effects', async (version) => {
+    const runner = vi.fn(fakeRunner);
+    const r = await buildRelease(manifest(), { catalog: null, runner, version });
+    expect(r).toMatchObject({ ok: false, stage: 'plan', bundleDir: null, zipPath: null });
+    expect(r.errors.join(' ')).toContain('invalid version');
+    expect(runner).not.toHaveBeenCalled();
+    expect(existsSync(outRoot)).toBe(false);
+  });
+  it.each(invalid)('rejects manifest name %j before effects', async (name) => {
+    const runner = vi.fn(fakeRunner);
+    const r = await buildRelease({ ...manifest(), name }, { catalog: null, runner });
+    expect(r).toMatchObject({ ok: false, stage: 'plan', bundleDir: null });
+    expect(r.errors.join(' ')).toContain('invalid manifest.name');
+    expect(runner).not.toHaveBeenCalled();
+    expect(existsSync(outRoot)).toBe(false);
+  });
+  it.each([...invalid, 123])('rejects primary package version %j before effects', async (version) => {
+    writeFileSync(join(appRepo, 'package.json'), JSON.stringify({ version }));
+    const runner = vi.fn(fakeRunner);
+    const r = await buildRelease(manifest(), { catalog: null, runner });
+    expect(r).toMatchObject({ ok: false, stage: 'plan', bundleDir: null });
+    expect(r.errors.join(' ')).toContain('invalid primary version');
+    expect(runner).not.toHaveBeenCalled();
+    expect(existsSync(outRoot)).toBe(false);
+  });
+  it.each(['0.0.0', '1.2.3', '1.2.3-rc.1+build'])('preserves valid version %s', async (version) => {
+    const r = await buildRelease(manifest(), { catalog: null, runner: fakeRunner, version, skipArchive: true });
+    expect(r.ok).toBe(true);
+    expect(r.version).toBe(version);
+  });
   it('自己完結バンドルを組み立てる (version は primary package.json 由来)', async () => {
     const r = await buildRelease(manifest(), {
       catalog: null,
