@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "contracts": [
+    {
+      "id": "C-28",
+      "criterion": "C-28 verifyQsLock(before, after, release): qs 6.16.2 の配布情報と親要求を確認し、他のロック項目を変更しない",
+      "symbol": "verifyQsLock",
+      "file": "verify.mjs",
+      "module": "verify.contract.mjs",
+      "mode": "enforce"
+    }
+  ]
+}

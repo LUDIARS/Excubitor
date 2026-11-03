@@ -17,6 +17,9 @@
       "pathPattern": "(^|/)scripts/runtime-smoke\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)spec/verification/qs-security/"
+    },
+    {
       "pathPattern": "(^|/)spec/[^/]+/[^/]+$"
     },
     {
@@ -26,5 +29,9 @@
       "pathPattern": "(^|/)review/[^/]+/[^/]+$"
     }
   ],
-  "cardTemplate": "Summarise the test-environment domain: automated coverage, fixture boundaries, local specs, and review artifacts."
+  "cardTemplate": "Summarise the test-environment domain: automated coverage, fixture boundaries, local specs, and review artifacts.",
+  "specRefs": [
+    "spec/verification/qs-security/README.md — SPEC-EX-QS-SECURITY-LOCK"
+  ],
+  "rationale": "The qs security verification checks the lockfile patch boundary and release integrity without changing application behavior."
 }

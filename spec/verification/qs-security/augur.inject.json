@@ -1,0 +1,5 @@
+{
+  "service": "excubitor-qs-security-verification",
+  "include": ["*.mjs"],
+  "exclude": ["*.contract.mjs", "*.test.mjs"]
+}

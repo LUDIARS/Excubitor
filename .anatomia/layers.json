@@ -36,6 +36,7 @@
 
     { "glob": "migrations/**", "layer": "infrastructure" },
     { "glob": "scripts/**", "layer": "infrastructure" },
+    { "glob": "spec/verification/qs-security/**", "layer": "infrastructure" },
     { "glob": "shared/**", "layer": "infrastructure" },
     { "glob": "src/android/**", "layer": "infrastructure" },
     { "glob": "src/cf-tunnel/**", "layer": "infrastructure" },
