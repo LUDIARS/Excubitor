@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { fingerprint, type Fingerprint } from './baseline.js';
+import { WINDOWS_INVENTORY_COMMAND } from './windows-inventory.js';
 
 export interface AuthSignal { at: number; kind: 'ssh_failure' | 'ssh_success'; actor: string }
 export interface NativeObservation {
@@ -46,7 +47,7 @@ export async function nativeObservation(since: number, platform = process.platfo
     } else {
       // Hash registry/startup/account metadata in-process. No executable action/arguments persisted.
       const inventory = await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $u=@(Get-LocalUser | Sort-Object Name | Select-Object Name,Enabled,SID); $t=@(Get-ScheduledTask | Sort-Object TaskPath,TaskName | Select-Object TaskPath,TaskName,Actions); $r=@(foreach($p in @('HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run')) { if(Test-Path $p) { Get-ItemProperty $p } }); @{users=$u;tasks=$t;autorun=$r} | ConvertTo-Json -Depth 8 -Compress"]);
+        WINDOWS_INVENTORY_COMMAND]);
       const parsed = JSON.parse(inventory) as Record<string, unknown>;
       for (const key of ['users', 'tasks', 'autorun']) entries.push({ asset: `windows_${key}`, hash: fingerprint(JSON.stringify(parsed[key])) });
       inventoryState = 'healthy';

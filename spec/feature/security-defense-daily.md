@@ -32,3 +32,6 @@ POST `/api/v1/intrusion/defense/baseline/approve` accepts `{digest,note}` of the
 ## Acceptance / review
 
 Verify privacy/redaction, per-service independence, normal high-volume browser traffic, auth route matching, TTL expiry, collection failures, baseline addition/change/deletion and stale approval, report date boundaries, restart recovery and no duplicate delivery after uncertainty. Session does not run tests without explicit permission; submit fixtures to Revisor.
+# Windows inventory serialization
+
+Windows account SIDs, scheduled task action properties and autorun registry values are projected to scalar fields before JSON serialization. Native CIM/provider metadata is excluded to keep collection inside its existing timeout and output limit. Candidate fingerprints may change when this projection changes; baseline trust is never inferred from a successful collection.
