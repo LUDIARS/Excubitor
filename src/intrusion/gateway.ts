@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
 import type { IntrusionConfig } from './config.js';
 import type { AccessEvidence } from './detection.js';
@@ -24,7 +25,8 @@ export async function startIntrusionGateway(config: IntrusionConfig, port: numbe
     const ip = request.headers['cf-connecting-ip'];
     const evidence: AccessEvidence = { service: route.service, hostname: route.hostname,
       clientIp: typeof ip === 'string' ? ip : '', country: typeof country === 'string' ? country : '',
-      path: raw.split('?')[0] ?? '/', method: request.method ?? 'GET', at: now() };
+      path: raw.split('?')[0] ?? '/', method: request.method ?? 'GET', at: now(),
+      requestId: randomUUID(), cfRay: userAccessMetadata(request.headers).cf_ray };
     recordUserAccess?.(evidence, userAccessMetadata(request.headers));
     if (!monitor.inspect(evidence)) return null;
     // Restore the reviewed origin Host; the internal selector must never reach the service.

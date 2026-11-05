@@ -22,12 +22,16 @@ import { installIntrusionRouteGuard } from './route-guard.js';
 import { validateOriginTargets } from './origin-policy.js';
 import { verifyExistingOrigins } from './origin-adoption.js';
 import { OriginApprovals } from './origin-approvals.js';
+import { startDefenseRuntime, type DefenseRuntime } from '../security-defense/runtime.js';
+import type { NetwatchSnapshot } from '../netwatch/runtime.js';
+import type { AccessEvidence } from './detection.js';
+import type { AccessDecision } from './decision.js';
 
 const logger = createNamedLogger('excubitor.intrusion');
 export interface IntrusionRuntime { router: Hono; stop(): Promise<void> }
 
 /** Owns gateway, state store and retry timer; unconfigured is explicit and inert. */
-export async function startIntrusionRuntime(catalog: Catalog): Promise<IntrusionRuntime> {
+export async function startIntrusionRuntime(catalog: Catalog, network?: () => NetwatchSnapshot): Promise<IntrusionRuntime> {
   const router = new Hono();
   const config = readIntrusionConfig();
   if (!config) {
@@ -51,12 +55,22 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
   let monitor: IntrusionMonitor | RequestFilter | null = null;
   let gateway: Awaited<ReturnType<typeof startIntrusionGateway>> | null = null;
   let releaseRouteGuard: (() => void) | null = null;
+  let defense: DefenseRuntime | null = null;
   try {
     const unclean = store.wasRunning();
-    const writeEvidence = accessEvidenceWriter(sharedLogsRoot());
+    const writeLog = accessEvidenceWriter(sharedLogsRoot());
+    defense = startDefenseRuntime(catalog, config.site, webhook, network, Date.now, config.routes.map(route => route.service));
+    const activeDefense = defense;
+    router.route('/', activeDefense.router);
+    const writeEvidence = (event: AccessEvidence, status: number, decision?: AccessDecision): void => {
+      try { writeLog(event, status, decision); }
+      catch (error) { activeDefense.logFailure(); throw error; }
+      activeDefense.evidence(event, status, decision);
+    };
     const userAccess = new UserAccessLog(userAccessWriter(sharedLogsRoot()), message => logger.warn(message));
     monitor = requestFiltering ? new RequestFilter(config, {
       evidence: writeEvidence,
+      policy: activeDefense.policy,
       notifyDenied: (event, reason) => reportRequestDenial(webhook, config.site, event, reason),
       warn: message => logger.warn(message), now: Date.now,
     }) : new IntrusionMonitor(config, {
@@ -97,11 +111,11 @@ export async function startIntrusionRuntime(catalog: Catalog): Promise<Intrusion
         try { await activeGateway.close(); }
         finally { await activeMonitor.stop(); }
         if (!activeMonitor.status().incident) store.markRunning(false);
-      } finally { releaseRouteGuard?.(); store.close(); }
+      } finally { try { await activeDefense.stop(); } finally { releaseRouteGuard?.(); store.close(); } }
     } };
   } catch (error) {
     try { await gateway?.close(); await monitor?.stop(); }
-    finally { releaseRouteGuard?.(); store.close(); }
+    finally { try { await defense?.stop(); } finally { releaseRouteGuard?.(); store.close(); } }
     throw error;
   }
 }

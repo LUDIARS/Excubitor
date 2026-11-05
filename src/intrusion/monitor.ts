@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { IntrusionDetector, type AccessEvidence, type DetectionReason } from './detection.js';
 import type { IntrusionConfig } from './config.js';
 import type { Incident } from './store.js';
+import type { AccessDecision } from './decision.js';
 
 export interface MonitorDeps {
   load(): Incident | null;
   save(incident: Incident): void;
-  evidence(event: AccessEvidence, status: number): void;
+  evidence(event: AccessEvidence, status: number, decision?: AccessDecision): void;
   contain(): Promise<void>;
   notify(incident: Incident): Promise<void>;
   closePublicConnections(): void;
@@ -37,7 +38,7 @@ export class IntrusionMonitor {
     if (this.stopping || this.incident) return false;
     const reason = this.detector.inspect(event);
     if (reason) {
-      try { this.deps.evidence(event, 403); }
+      try { this.deps.evidence(event, 403, { source: 'gateway', action: 'deny', reason }); }
       catch { this.deps.warn('trigger evidence write failed; incident latch still required'); }
       this.trip(event, reason);
     }
@@ -46,9 +47,9 @@ export class IntrusionMonitor {
   response(event: AccessEvidence, status: number): void {
     // No growing blocked-request log or report storm after the first incident.
     if (this.incident) return;
-    try { this.deps.evidence(event, status); }
-    catch { this.trip(event, 'evidence_failure'); return; }
     const reason = this.detector.response({ ...event, at: this.deps.now() }, status);
+    try { this.deps.evidence(event, status, { source: 'upstream', action: reason ? 'observe' : 'allow', reason: reason ?? 'none' }); }
+    catch { this.trip(event, 'evidence_failure'); return; }
     if (reason) this.trip(event, reason);
   }
   trip(event: Pick<AccessEvidence, 'service' | 'at'>, reason: DetectionReason | 'unclean_restart'): void {

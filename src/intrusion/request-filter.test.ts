@@ -11,10 +11,10 @@ describe('request filtering preserves JP availability', () => {
   it.each(['US', 'XX', '', 'T1'])('denies and logs %s without latching subsequent JP requests', async country => {
     const {filter, deps} = harness();
     expect(filter.inspect({...event, country})).toBe(false);
-    expect(deps.evidence).toHaveBeenCalledWith(expect.objectContaining({country}), 403);
+    expect(deps.evidence).toHaveBeenCalledWith(expect.objectContaining({country}), 403, expect.objectContaining({action:'deny',source:'gateway'}));
     expect(filter.inspect(event)).toBe(true);
     filter.response(event, 200);
-    expect(deps.evidence).toHaveBeenCalledWith(event, 200);
+    expect(deps.evidence).toHaveBeenCalledWith(event, 200, {action:'allow',source:'upstream',reason:'none'});
     expect(filter.status()).toMatchObject({state:'armed',incident:null});
     await filter.stop();
   });

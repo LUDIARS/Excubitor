@@ -9,6 +9,8 @@ export interface AccessEvidence {
   path: string;
   method: string;
   at: number;
+  requestId?: string;
+  cfRay?: string | null;
 }
 export type DetectionReason = 'foreign_country' | 'unknown_country' | 'invalid_identity' |
   'exploit_path' | 'request_burst' | 'authentication_burst' | 'capacity_exceeded' | 'evidence_failure';
@@ -21,7 +23,7 @@ export class IntrusionDetector {
   private readonly clients = new Map<string, Counter>();
   constructor(private readonly config: IntrusionConfig) {}
 
-  inspect(event: AccessEvidence): DetectionReason | null {
+  inspect(event: AccessEvidence, servicePolicy = false): DetectionReason | null {
     if (!isIP(event.clientIp)) return 'invalid_identity';
     if (!/^[A-Z]{2}$/.test(event.country) || event.country === 'XX') {
       return event.country === 'T1' ? 'foreign_country' : 'unknown_country';
@@ -36,6 +38,7 @@ export class IntrusionDetector {
     if (/(?:^|[\\/])\.\.(?:[\\/]|$)|\x00|(?:^|\/)\.(?:env(?:\.|\/|$)|git(?:\/|$))|\/(?:etc\/passwd|proc\/self\/environ)(?:\/|$)/i.test(path)) {
       return 'exploit_path';
     }
+    if (servicePolicy) return null; // Country/path checks above remain mandatory; service policy owns its counters.
     const count = this.counter(event);
     if (!count) return 'capacity_exceeded';
     count.requests++;
@@ -51,14 +54,15 @@ export class IntrusionDetector {
   }
 
   private counter(event: AccessEvidence): Counter | null {
-    let count = this.clients.get(event.clientIp);
+    const key = JSON.stringify([event.service, event.clientIp]);
+    let count = this.clients.get(key);
     if (count && event.at - count.start < WINDOW_MS) return count;
     if (this.clients.size >= MAX_CLIENTS) {
       for (const [ip, value] of this.clients) if (event.at - value.start >= WINDOW_MS) this.clients.delete(ip);
       if (!count && this.clients.size >= MAX_CLIENTS) return null;
     }
     count = { start: event.at, requests: 0, failures: 0 };
-    this.clients.set(event.clientIp, count);
+    this.clients.set(key, count);
     return count;
   }
 }

@@ -1319,7 +1319,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     return c.json(payload, 502);
   });
 
-  const intrusionRuntime = await startIntrusionRuntime(currentCatalog);
+  const intrusionRuntime = await startIntrusionRuntime(currentCatalog, netwatchHandle.snapshot);
   app.route('/', intrusionRuntime.router);
 
   // ─── built Web UI (frontend/dist) 配信 ─────────────────────
