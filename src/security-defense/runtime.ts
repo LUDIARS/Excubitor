@@ -81,6 +81,14 @@ export function startDefenseRuntime(catalog: Catalog, site: string, webhook: str
     coverage: store.data(jstDay(now())).coverage,
     limits: ['local-host-only', 'periodic-observation', 'no-cf-edge-logs', 'not-a-compromise-verdict'] }));
   router.get('/api/v1/intrusion/defense/reports', c => c.json({ reports: store.reports().map(r => ({ day: r.day, delivery: r.delivery, report: JSON.parse(r.body) as unknown })) }));
+  router.get('/api/v1/intrusion/defense/network', c => {
+    const day = c.req.query('day') ?? jstDay(now());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(day)) || new Date(day).toISOString().slice(0, 10) !== day) {
+      return c.json({ error: 'invalid_day' }, 400);
+    }
+    return c.json({ day, network: store.networkRows(day), coverage: store.data(day).coverage.filter(row => row.source === 'network_evidence'),
+      limitations: ['historical-hashes-cannot-be-reversed', 'periodic-snapshot-attribution-not-per-packet'] });
+  });
   // Existing management browser/access guard applies. Local paths never enter daily notifications.
   router.get('/api/v1/intrusion/defense/baseline/candidate', c => c.json({ candidate: baseline.review() }));
   router.post('/api/v1/intrusion/defense/baseline/approve', async c => {

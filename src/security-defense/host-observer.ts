@@ -5,6 +5,7 @@ import { fingerprint, Baseline } from './baseline.js';
 import { fileInventory } from './file-inventory.js';
 import { nativeObservation, type AuthSignal } from './native-observation.js';
 import type { DefenseStore } from './store.js';
+import { networkEvidence } from './network-evidence.js';
 
 /** Joins local collectors without taking control of processes, packet capture or firewall. */
 export class HostObserver {
@@ -68,6 +69,8 @@ export class HostObserver {
       const delta = !raw ? 0 : destination.packets >= previous ? destination.packets - previous : destination.packets;
       next.push([key, destination.packets]);
       if (!delta) continue;
+      const evidence = networkEvidence(destination);
+      if (evidence) this.store.network(now, evidence);
       const country = /^[A-Z]{2}$/.test(destination.country ?? '') ? destination.country : 'unknown';
       this.store.metric(now, `network_country_${country}`, delta);
       this.store.metric(now, 'network_observed_packets', delta);
@@ -78,7 +81,7 @@ export class HostObserver {
       }
       for (const port of destination.ports.slice(0, 8)) this.store.metric(now, `network_port_${port}`, delta);
       for (const reason of destination.assessment.reasons) {
-        this.store.finding(now, `network_${reason}`, `${key.slice(0, 12)}:${country}:${destination.ports.slice(0, 8).join(',')}`);
+        this.store.finding(now, `network_${reason}`, destination.remote);
       }
     }
     if (snapshot.destinations.length > 10000) this.store.coverage(now, 'tshark', 'capacity');

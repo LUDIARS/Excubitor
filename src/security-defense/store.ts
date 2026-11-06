@@ -2,11 +2,12 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { jstDay } from './dates.js';
+import type { NetworkEvidence, NetworkEvidenceRow } from './network-evidence.js';
 
 export interface CountRow { service: string; reason: string; action: string; status: number; count: number }
 export interface FindingRow { rule: string; asset: string; count: number; firstAt: number; lastAt: number }
 export interface CoverageRow { source: string; state: string; count: number; firstAt: number; lastAt: number }
-export interface DayData { day: string; counts: CountRow[]; findings: FindingRow[]; coverage: CoverageRow[]; metrics: { name: string; value: number }[] }
+export interface DayData { day: string; counts: CountRow[]; findings: FindingRow[]; coverage: CoverageRow[]; metrics: { name: string; value: number }[]; network?: NetworkEvidenceRow[] }
 export interface SavedReport { day: string; delivery: string; body: string }
 
 /** Durable bounded aggregates and attempt-before-send delivery state. No raw request data. */
@@ -27,6 +28,8 @@ export class DefenseStore {
       CREATE TABLE IF NOT EXISTS defense_reports(day TEXT PRIMARY KEY,delivery TEXT,body TEXT);
       CREATE TABLE IF NOT EXISTS defense_state(key TEXT PRIMARY KEY,value TEXT);
       CREATE TABLE IF NOT EXISTS defense_metrics(day TEXT,name TEXT,value INTEGER,PRIMARY KEY(day,name));
+      CREATE TABLE IF NOT EXISTS defense_network(day TEXT,ip TEXT,detail TEXT,count INTEGER,firstAt INTEGER,lastAt INTEGER,firstSeenAt INTEGER,lastSeenAt INTEGER,
+        PRIMARY KEY(day,ip,detail));
     `);
     } catch (error) { this.db.close(); throw error; }
   }
@@ -34,6 +37,22 @@ export class DefenseStore {
     const size = this.db.prepare('SELECT count(*) AS n FROM defense_metrics WHERE day=?').get(jstDay(at)) as { n: number };
     if (size.n >= 1000) name = 'metric_capacity_overflow';
     this.db.prepare('INSERT INTO defense_metrics VALUES(?,?,?) ON CONFLICT(day,name) DO UPDATE SET value=value+excluded.value').run(jstDay(at), name, value);
+  }
+  network(at: number, evidence: NetworkEvidence): void {
+    const day = jstDay(at);
+    const { firstSeenAt, lastSeenAt, ...metadata } = evidence;
+    const detail = JSON.stringify(metadata);
+    const existing = this.db.prepare('SELECT 1 FROM defense_network WHERE day=? AND ip=? AND detail=?').get(day, evidence.ip, detail);
+    const size = this.db.prepare('SELECT count(*) AS n FROM defense_network WHERE day=?').get(day) as { n: number };
+    if (!existing && size.n >= 1000) { this.coverage(at, 'network_evidence', 'capacity'); return; }
+    this.db.prepare(`INSERT INTO defense_network VALUES(?,?,?,1,?,?,?,?) ON CONFLICT(day,ip,detail)
+      DO UPDATE SET count=count+1,lastAt=excluded.lastAt,firstSeenAt=MIN(firstSeenAt,excluded.firstSeenAt),lastSeenAt=MAX(lastSeenAt,excluded.lastSeenAt)`)
+      .run(day, evidence.ip, detail, at, at, firstSeenAt, lastSeenAt);
+  }
+  networkRows(day: string): NetworkEvidenceRow[] {
+    const rows = this.db.prepare('SELECT detail,count,firstAt,lastAt,firstSeenAt,lastSeenAt FROM defense_network WHERE day=? ORDER BY lastAt DESC').all(day) as
+      { detail: string; count: number; firstAt: number; lastAt: number; firstSeenAt: number; lastSeenAt: number }[];
+    return rows.map(({ detail, ...row }) => ({ ...JSON.parse(detail) as NetworkEvidence, ...row }));
   }
   count(at: number, service: string, reason: string, action: string, status: number): void {
     this.db.prepare(`INSERT INTO defense_counts VALUES(?,?,?,?,?,1) ON CONFLICT(day,service,reason,action,status)
@@ -53,6 +72,7 @@ export class DefenseStore {
   }
   data(day: string): DayData {
     return { day,
+      network: this.networkRows(day),
       counts: this.db.prepare('SELECT service,reason,action,status,count FROM defense_counts WHERE day=? ORDER BY count DESC').all(day) as CountRow[],
       findings: this.db.prepare('SELECT rule,asset,count,firstAt,lastAt FROM defense_findings WHERE day=? ORDER BY lastAt DESC').all(day) as FindingRow[],
       coverage: this.db.prepare('SELECT source,state,count,firstAt,lastAt FROM defense_coverage WHERE day=?').all(day) as CoverageRow[],
@@ -72,7 +92,7 @@ export class DefenseStore {
   reports(): SavedReport[] { return this.db.prepare('SELECT * FROM defense_reports ORDER BY day DESC LIMIT 30').all() as SavedReport[]; }
   prune(now: number): void {
     const before = jstDay(now - 90 * 86400000);
-    for (const table of ['defense_counts', 'defense_findings', 'defense_coverage', 'defense_reports', 'defense_metrics']) {
+    for (const table of ['defense_counts', 'defense_findings', 'defense_coverage', 'defense_reports', 'defense_metrics', 'defense_network']) {
       this.db.prepare(`DELETE FROM ${table} WHERE day < ?`).run(before);
     }
   }
