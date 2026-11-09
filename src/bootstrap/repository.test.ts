@@ -7,6 +7,7 @@ import { NodeServiceHealthSchema } from '../federation/health-types.js';
 describe('approved bootstrap sources', () => {
   it('maps the approved external source to its catalog checkout', () => {
     expect(bootstrapCheckoutName('VGA-GLAB/GLAB-Hub')).toBe('GLAB');
+    expect(bootstrapCheckoutName('VGA-GLAB/Amicii')).toBe('Amicii');
     expect(bootstrapCheckoutName('LUDIARS/Tabula')).toBe('Tabula');
     expect(NodeServiceHealthSchema.shape.repository.parse('VGA-GLAB/GLAB-Hub')).toBe('VGA-GLAB/GLAB-Hub');
   });
