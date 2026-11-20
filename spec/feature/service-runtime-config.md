@@ -44,6 +44,9 @@ repository 内の ignored config file を人手で用意し忘れると、サー
 - Web UI の「全項目を入力」は、現在の `genius.config.example.json` と同じ
   `dataDir` / `embedding` / `distill` / `notify` / `questions` / `contradiction` /
   `queryLog` / 全 `sources` を展開する。各値は保存前に編集できる。
+- `distill.model` と `distill.sensitiveCheckModel` の初期値は Claude の役割名 `haiku`。
+  実行時のモデル解決は Genius 側が担う。保存済みのモデル指定は Excubitor がそのまま渡す。
+  関連タスクは `actio:d4d6b5aa-7574-4a53-846e-0afbc585cb61`。
 - payload は Genius schema を満たす完全な base config でなければならない。JSON 不正・schema
   不正は fail-closed で起動エラーになる。
 - port は payload に含めない。Excubitor catalog / ProcessMap が唯一の正本で、Genius には

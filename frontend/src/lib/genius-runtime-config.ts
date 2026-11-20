@@ -15,8 +15,8 @@ export const GENIUS_RUNTIME_CONFIG_TEMPLATE = {
   },
   distill: {
     backend: 'claude-cli',
-    model: 'claude-haiku-4-5-20251001',
-    sensitiveCheckModel: 'claude-haiku-4-5-20251001',
+    model: 'haiku',
+    sensitiveCheckModel: 'haiku',
     ollamaModel: 'gemma4:12b',
   },
   notify: {
