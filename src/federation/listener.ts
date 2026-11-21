@@ -51,6 +51,8 @@ export interface FederationListenerHandle {
 
 export interface FederationListenerOptions {
   publicRouter: Hono<FederationEnv>;
+  /** Privileged operations exposed only on the inter-site listener. */
+  peerOnlyRouter?: Hono<FederationEnv>;
   catalog: Catalog;
   env?: Record<string, string | undefined>;
 }
@@ -95,6 +97,7 @@ export function startFederationListener(options: FederationListenerOptions): Fed
     await next();
   });
   app.route('/', options.publicRouter);
+  if (options.peerOnlyRouter) app.route('/', options.peerOnlyRouter);
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
 
   const servers = new Map<string, ClosableServer>();

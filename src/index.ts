@@ -102,6 +102,7 @@ import { buildProcessSnapshotRouter } from './process-snapshot/router.js';
 import { buildFederationRouter } from './federation/router.js';
 import { buildDailyUpdateRouter } from './update/daily/router.js';
 import { buildFederationPublicRouter } from './federation/public-router.js';
+import { createColabRuntime } from './colab/runtime.js';
 import {
   startFederationListener,
   type FederationListenerHandle,
@@ -641,6 +642,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     federationListener?.status() ?? { enabled: false, listening: [], error: null };
   const federationPayloadCache = startFederationPayloadCache(() => currentCatalog!, getListenerStatus);
   const overviewCache = startOverviewCache(() => currentCatalog!);
+  const colab = createColabRuntime(currentDb(), () => !isSafeMode());
   const federationPublicRouter = buildFederationPublicRouter({
     readHealth: federationPayloadCache.read,
     getCatalog: () => currentCatalog!,
@@ -649,6 +651,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   });
   federationListener = startFederationListener({
     publicRouter: federationPublicRouter,
+    peerOnlyRouter: colab.meshRouter,
     catalog: currentCatalog!,
   });
   const meshAuth = describeMeshAuth(readMeshAuthPolicy);
@@ -837,6 +840,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   app.route('/', buildMcpHttpRouter(`http://127.0.0.1:${backendPort()}`));
   const awsCompute = createAwsComputeRuntime(currentDb(), sharedVault, () => !isSafeMode());
   app.route('/api/v1/aws-compute', awsCompute.router);
+  app.route('/api/v1/colab', colab.localRouter);
 
   app.route('/', overviewCache.router);
   app.route('/', buildReviewsRouter());
@@ -1345,6 +1349,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
     router: app,
     shutdown: async () => {
       await awsCompute.stop();
+      try { await colab.close(); }
+      catch { logger.error('Colab shutdown failed; recovery will inspect its journal'); }
       try { await intrusionRuntime.stop(); }
       catch { logger.error('intrusion shutdown failed; crash marker remains closed on restart'); }
       stopViewerPublication();

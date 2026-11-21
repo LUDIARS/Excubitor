@@ -11,14 +11,15 @@ import Config from './pages/Config';
 import Env from './pages/Env';
 import Federation from './pages/Federation';
 import AwsCompute from './pages/AwsCompute';
+import ColabSite from './pages/ColabSite';
 import Terminal from './terminal/Terminal';
 import { fetchSystem } from './lib/api';
 import type { SystemInfo } from './lib/api';
 import { config } from '../config';
 
-type Tab = 'overview' | 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'env' | 'config' | 'terminal' | 'aws-compute';
+type Tab = 'overview' | 'dashboard' | 'monitor' | 'function-metrics' | 'memory' | 'logs' | 'federation' | 'catalog' | 'errors' | 'env' | 'config' | 'terminal' | 'aws-compute' | 'colab-site';
 
-const TAB_IDS: Tab[] = ['overview', 'dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'env', 'config', 'terminal', 'aws-compute'];
+const TAB_IDS: Tab[] = ['overview', 'dashboard', 'monitor', 'function-metrics', 'memory', 'logs', 'federation', 'catalog', 'errors', 'env', 'config', 'terminal', 'aws-compute', 'colab-site'];
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'サービス' },
@@ -28,6 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'terminal', label: 'ターミナル' },
   { id: 'config', label: 'Config' },
   { id: 'aws-compute', label: 'AWS 計算' },
+  { id: 'colab-site', label: 'Colab 拠点' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'errors', label: 'Errors' },
@@ -122,6 +124,7 @@ export default function App() {
         {tab === 'logs' && <Logs />}
         {tab === 'federation' && <Federation />}
         {tab === 'aws-compute' && <AwsCompute />}
+        {tab === 'colab-site' && <ColabSite />}
         {tab === 'catalog' && <Catalog />}
         {tab === 'errors' && <Errors />}
         {tab === 'env' && <Env />}

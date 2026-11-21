@@ -30,6 +30,7 @@ LUDIARS 全サービスの **死活監視 / ログ集約 / 設定編集 / エラ
 | `src/cf-tunnel/` | **Cloudflare Tunnel ルート管理ブローカー**。 CF API トークンを外へ出さず public hostname ルート (ingress) を list/add/remove (`/api/v1/cf-tunnel/routes`)。 変更は allowlist (env `EXCUBITOR_CF_TUNNEL_ALLOWED_HOSTNAMES` → config store 設定) の hostname のみ (fail-closed)、 catch-all は保護。 CF API トークンは Vault (WebUI「環境変数」) の `CF_API_TOKEN` / `CF_ACCOUNT_ID` から読む (env 直指定が優先、Infisical は使わない)。 allowlist は設定 UI (`/api/v1/config/cf-tunnel`) でも編集可。 spec/feature/cf-tunnel-routes.md |
 | `src/vault/` | **Vault** (Infisical の置き換え)。 本社が暗号化した環境変数とサービスごとの「使用する環境変数」を `vault.json` に持ち、 起動時に env 注入 (最優先)。 鍵は DPAPI / 0600 ファイル。 拠点は取得元ピアを設定して本社から受け取り、 控えを持つ。 値を返す管理 API は無い。 spec/feature/vault.md |
 | `src/aws-compute/` | **AWS 計算ジョブ**。登録された EC2 / ECS Fargate 実行先を Vault の資格情報で起動・照会・停止する。SQLite 台帳、期限監視、実行先ごとの孤立資源棚卸しを持つ。ループバックの `/api/v1/aws-compute`、MCP、WebUI「AWS 計算」から操作する。 spec/feature/aws-compute.md |
+| `src/colab/` | Colab 拠点ランナー。登録済みプログラムの本人同席実行、SQLite 履歴、期限停止、Cr メッシュ経由の成果回収。 [仕様](spec/feature/colab-site-runner.md) |
 | `src/mcp/` | MCP サーバ (stdio, `npm run mcp`)。 稼働中 backend を叩きログ/死活/ポート/メモリCPU を公開 + 制御 (control/update/branch/federation) |
 | `src/auto_fix/` | error_task から Claude Code CLI を spawn して修正 PR まで |
 | `src/release/` | リリースマニフェスト (`releases/*.yaml`) から自己完結ランナブル配布物を焼く (build→assemble→launcher→archive)。 spec/release.md / `npm run release` |

@@ -38,6 +38,11 @@
     {"id": "C-22", "criterion": "C-22 callerMayResolve(caller, service): サービス token の呼び出し元は自分のサービスしか resolve できない", "symbol": "callerMayResolve", "file": "src/secrets/secret-agent-auth.ts", "module": "src/secrets/secret-agent-auth.contract.ts"},
     {"id": "C-23", "criterion": "C-23 openWithMasterKeys(blob): 旧鍵で開いた値は KeyStore の master 鍵で暗号化し直せる", "symbol": "openWithMasterKeys", "file": "src/secrets/master-key.ts", "module": "src/secrets/master-key.contract.ts"},
     {"id": "C-24", "criterion": "C-24 verifyAccessJwt(token, config, key, now): 受理する Access JWT は RS256・team の iss・Excubitor の AUD・有効期限内に限る", "symbol": "verifyAccessJwt", "file": "src/security/cf-access-jwt.ts", "module": "src/security/cf-access-jwt.contract.ts"},
-    {"id": "C-25", "criterion": "C-25 isCrossAppRequest(headers, target): 同じ origin の別アプリ・Referer 無しの要求を対象アプリの要求として扱わない", "symbol": "isCrossAppRequest", "file": "src/viewer/isolation.ts", "module": "src/viewer/isolation.contract.ts"}
+    {"id": "C-25", "criterion": "C-25 isCrossAppRequest(headers, target): 同じ origin の別アプリ・Referer 無しの要求を対象アプリの要求として扱わない", "symbol": "isCrossAppRequest", "file": "src/viewer/isolation.ts", "module": "src/viewer/isolation.contract.ts"},
+    {"id":"C-39","criterion":"C-39 authorizeColabStart(input): 有効な拠点設定と登録済みの本人が明示開始した場合だけ起動を許す","symbol":"authorizeColabStart","file":"src/colab/authorization.ts","module":"src/colab/contracts/c-39.contract.ts"},
+    {"id":"C-40","criterion":"C-40 admitColabJob(input): 同じキーの同一依頼は既存 receipt に戻し、不一致と同時投入を拒否する","symbol":"admitColabJob","file":"src/colab/admission.ts","module":"src/colab/contracts/c-40.contract.ts"},
+    {"id":"C-41","criterion":"C-41 releaseConfirmed(input): 割当済み endpoint の不在を認証済み一覧で確認した場合だけ解放とする","symbol":"releaseConfirmed","file":"src/colab/release.ts","module":"src/colab/contracts/c-41.contract.ts"},
+    {"id":"C-42","criterion":"C-42 allowsColabPeer(input): 登録済み HQ の有効な Cr 許可を操作と Colab 資源に完全一致で要求する","symbol":"allowsColabPeer","file":"src/colab/authorization.ts","module":"src/colab/contracts/c-42.contract.ts"},
+    {"id":"C-43","criterion":"C-43 verifyArtifactBytes(input): 上限以内でサイズと SHA-256 が一致するバイト列だけを受け入れる","symbol":"verifyArtifactBytes","file":"src/colab/artifact-integrity.ts","module":"src/colab/contracts/c-43.contract.ts"}
   ]
 }

@@ -11,6 +11,7 @@
  */
 
 import type { Catalog } from '../../catalog/loader.js';
+import { COLAB_SERVICE } from '../../colab/protocol.js';
 import { OperationRequestSchema, isActionAllowed, type OperationRequest, type UpdateSource } from './types.js';
 
 /** @implements SPEC-FEDERATION-OPERATIONS */
@@ -42,6 +43,7 @@ export function validateOperationRequest(
   }
   if (request.target.kind === 'service') {
     const code = request.target.code;
+    if (code === COLAB_SERVICE) return { ok: false, status: 404, error: 'service_not_found' };
     const entry = catalog.services.find((s) => s.code === code);
     if (!entry) {
       const converted = asBootstrapForMissingService(request);
