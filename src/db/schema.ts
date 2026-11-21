@@ -15,6 +15,7 @@
 
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { randomUUID } from 'node:crypto';
+import { AWS_COMPUTE_MIGRATIONS } from '../aws-compute/schema.js';
 
 export const hosts = sqliteTable('hosts', {
   id: text('id').primaryKey().$defaultFn(() => randomUUID()),
@@ -355,6 +356,7 @@ export function applyMigrations(db: Database.Database): void {
   db.pragma('foreign_keys = ON');
   const tx = db.transaction(() => {
     for (const stmt of MIGRATIONS) db.exec(stmt);
+    for (const stmt of AWS_COMPUTE_MIGRATIONS) db.exec(stmt);
     db.exec(`CREATE TABLE IF NOT EXISTS daily_update_state (id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS daily_update_runs (id TEXT PRIMARY KEY, day TEXT NOT NULL UNIQUE, started_at TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_update_active ON daily_update_runs(status) WHERE status='running';

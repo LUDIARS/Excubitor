@@ -19,7 +19,17 @@ export default defineConfig({
     host: true,
     allowedHosts: resolveViteAllowedHosts(),
     proxy: {
-      '/api': config.backendUrl,
+      '/api': {
+        target: config.backendUrl,
+        configure(proxy) {
+          proxy.on('proxyReq', (outgoing, incoming) => {
+            const address = incoming.socket.remoteAddress?.replace(/^::ffff:/, '');
+            if (address !== '127.0.0.1' && address !== '::1') {
+              outgoing.setHeader('x-forwarded-for', address ?? 'unknown');
+            }
+          });
+        },
+      },
     },
   },
 });

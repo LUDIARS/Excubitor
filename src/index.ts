@@ -121,6 +121,7 @@ import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-lo
 import { arsRoot } from './shared/roots.js';
 import { reconcileMcpJson, shouldReconcileMcpJson, DEFAULT_BACKEND_PORT } from './mcp/mcp-json.js';
 import { buildMcpHttpRouter } from './mcp/http.js';
+import { createAwsComputeRuntime } from './aws-compute/runtime.js';
 import { writeDiagnostic } from './shared/diagnostic-log.js';
 import { resolveBuildVersion, type BuildVersionInfo } from './shared/build-version.js';
 import { acquireRedisLock, redisCacheKey, writeRedisJson } from './shared/redis-cache.js';
@@ -834,6 +835,8 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
 
   // MCP (Streamable HTTP, stateless)。 セッション毎 stdio プロセス (≈100MB×N) の置き換え。
   app.route('/', buildMcpHttpRouter(`http://127.0.0.1:${backendPort()}`));
+  const awsCompute = createAwsComputeRuntime(currentDb(), sharedVault, () => !isSafeMode());
+  app.route('/api/v1/aws-compute', awsCompute.router);
 
   app.route('/', overviewCache.router);
   app.route('/', buildReviewsRouter());
@@ -1341,6 +1344,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   return {
     router: app,
     shutdown: async () => {
+      await awsCompute.stop();
       try { await intrusionRuntime.stop(); }
       catch { logger.error('intrusion shutdown failed; crash marker remains closed on restart'); }
       stopViewerPublication();

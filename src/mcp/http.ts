@@ -17,6 +17,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createNamedLogger } from '../shared/logger.js';
 import { buildMcpServer } from './tools.js';
 import { isLocalTerminalRequest } from '../terminal/request-policy.js';
+import { isAwsComputeLoopback } from '../aws-compute/loopback.js';
 
 const logger = createNamedLogger('excubitor.mcp-http');
 
@@ -27,7 +28,10 @@ export function buildMcpHttpRouter(baseUrl: string): Hono {
 
   app.post('/mcp', async (c) => {
     const { incoming, outgoing } = c.env as unknown as NodeBindings;
-    const server = buildMcpServer(baseUrl, { terminal: isLocalTerminalRequest(c.req.url, c.req.header('origin')) });
+    const server = buildMcpServer(baseUrl, {
+      terminal: isLocalTerminalRequest(c.req.url, c.req.header('origin')),
+      awsCompute: isAwsComputeLoopback(c),
+    });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     outgoing.on('close', () => {
       void transport.close();
