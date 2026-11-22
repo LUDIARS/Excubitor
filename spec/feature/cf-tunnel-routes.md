@@ -111,6 +111,28 @@ Tunnel の public hostname ルート (ingress) を list / add / remove する経
     - 再利用ポリシーは複数の Access アプリが共有する。書き換えは付いている全アプリに効く。
     - ログイン方法 (IdP) の作成は扱わない (client secret をブローカー経由で受け渡さない)。Zero Trust の画面で作る。
     - メールアドレスはログに件数だけを残す。
+11. **サービストークンを 1 つのヘッダで受ける設定** — 2026-11-22 neco 指示 (Actio
+    `actio:18837ace-7629-46f9-9c33-0944040b185d`)。Access アプリの `read_service_tokens_from_header` は
+    Cloudflare の画面に無く API でしか入れられない。ヘッダを 1 つしか送れないクライアント (Muse) が
+    サービストークン付きで Access の後ろへ届くよう、ブローカーで読み書きする。
+    ```
+    GET /api/v1/cf-access/apps/token-header?hostname=<host>
+        → { app: { id, name, domain }, read_service_tokens_from_header: string|null }
+    PUT /api/v1/cf-access/apps/token-header   { hostname, header: string|null, apply? }
+        → { ok, plan, applied, changed, app, before, after }
+    ```
+    - hostname は allowlist (要求 2 と同じ解決) に載るものだけ。domain が hostname と完全一致する self-hosted
+      アプリがちょうど 1 件のときに限る。0 件・複数・パス付きドメインのアプリしか無い場合は 400。
+    - header はヘッダ名として妥当なトークン (RFC 7230 token、1〜64 文字) か null (設定を外す)。それ以外は 400。
+    - 既定は計画だけを返す (`plan: true`、書かない)。`apply: true` かつ値が変わるときだけ書き、変更前の値
+      (`before`) を返す。戻すときはその値を header にして同じ API を呼ぶ。書いた後に読み直し、要求と
+      一致しなければ 502。
+    - CF のアプリ更新 (`PUT /accounts/:id/access/apps/:app_id`) は全体置換なので、GET した現行設定から
+      読み取り専用の項目 (id・aud・created_at・updated_at) を除き、この 1 項目だけを変えて送る
+      (domain・policies・session_duration などを落とさない)。policies は `{ id, precedence }` の参照形で送る。
+    - 応答・ログに AUD とトークン値を出さない (アプリ設定そのものは返さない)。
+    - 判断は `src/cf-tunnel/access-token-header-service.ts`、HTTP は `access-token-header-router.ts`。
+    - トークンに要る権限は要求 8 の Access: Apps and Policies Edit。
 
 ## 運用
 

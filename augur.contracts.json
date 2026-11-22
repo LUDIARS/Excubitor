@@ -43,6 +43,10 @@
     {"id":"C-40","criterion":"C-40 admitColabJob(input): 同じキーの同一依頼は既存 receipt に戻し、不一致と同時投入を拒否する","symbol":"admitColabJob","file":"src/colab/admission.ts","module":"src/colab/contracts/c-40.contract.ts"},
     {"id":"C-41","criterion":"C-41 releaseConfirmed(input): 割当済み endpoint の不在を認証済み一覧で確認した場合だけ解放とする","symbol":"releaseConfirmed","file":"src/colab/release.ts","module":"src/colab/contracts/c-41.contract.ts"},
     {"id":"C-42","criterion":"C-42 allowsColabPeer(input): 登録済み HQ の有効な Cr 許可を操作と Colab 資源に完全一致で要求する","symbol":"allowsColabPeer","file":"src/colab/authorization.ts","module":"src/colab/contracts/c-42.contract.ts"},
-    {"id":"C-43","criterion":"C-43 verifyArtifactBytes(input): 上限以内でサイズと SHA-256 が一致するバイト列だけを受け入れる","symbol":"verifyArtifactBytes","file":"src/colab/artifact-integrity.ts","module":"src/colab/contracts/c-43.contract.ts"}
+    {"id":"C-43","criterion":"C-43 verifyArtifactBytes(input): 上限以内でサイズと SHA-256 が一致するバイト列だけを受け入れる","symbol":"verifyArtifactBytes","file":"src/colab/artifact-integrity.ts","module":"src/colab/contracts/c-43.contract.ts"},
+    {"id":"C-44","criterion":"C-44 planTokenHeader(current, header): 送る本体は read_service_tokens_from_header だけを header に変え、読み取り専用 (id・aud 等) 以外の現行設定を落とさない","symbol":"planTokenHeader","file":"src/cf-tunnel/access-token-header-service.ts","module":"src/cf-tunnel/contracts/c-44.contract.ts"},
+    {"id":"C-45","criterion":"C-45 selectTokenHeaderApp(apps, hostname): domain が hostname と完全一致する self-hosted アプリがちょうど 1 件のときだけそれを返す","symbol":"selectTokenHeaderApp","file":"src/cf-tunnel/access-token-header-service.ts","module":"src/cf-tunnel/contracts/c-45.contract.ts"},
+    {"id":"C-46","criterion":"C-46 assertTokenHeaderName(header): RFC 7230 token の 1〜64 文字か null だけを通す","symbol":"assertTokenHeaderName","file":"src/cf-tunnel/access-token-header-service.ts","module":"src/cf-tunnel/contracts/c-46.contract.ts"},
+    {"id":"C-47","criterion":"C-47 changeTokenHeader(api, allowlist, input): apply が true でなければ書かず、応答に AUD を含めない","symbol":"changeTokenHeader","file":"src/cf-tunnel/access-token-header-service.ts","module":"src/cf-tunnel/contracts/c-47.contract.ts"}
   ]
 }

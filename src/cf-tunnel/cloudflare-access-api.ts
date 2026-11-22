@@ -81,6 +81,23 @@ export class CloudflareAccessApi {
     return { id: a.id, name: a.name ?? input.name, domain: a.domain ?? input.domain, aud: a.aud ?? '', type: a.type ?? 'self_hosted' };
   }
 
+  /**
+   * Access アプリ 1 件の設定を CF が返す形のまま読む (AUD を含むので応答・ログへは出さない)。
+   * @implements SPEC-CF-TUNNEL-ROUTES
+   */
+  async getApp(appId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', `/access/apps/${encodeURIComponent(appId)}`);
+  }
+
+  /**
+   * Access アプリ 1 件を更新する。CF の PUT は全体置換なので、呼び出し側は現行設定を保った本体を渡す。
+   * @implements SPEC-CF-TUNNEL-ROUTES
+   */
+  async updateApp(appId: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
+    logger.info({ appId }, 'updating access application');
+    return this.request<Record<string, unknown>>('PUT', `/access/apps/${encodeURIComponent(appId)}`, config);
+  }
+
   /** Access アプリを 1 件削除する (ポリシーは残る)。 @implements SPEC-CF-TUNNEL-ROUTES */
   async deleteApp(appId: string): Promise<void> {
     logger.info({ appId }, 'deleting access application');

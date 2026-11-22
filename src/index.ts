@@ -116,6 +116,7 @@ import { buildCfTunnelRouter } from './cf-tunnel/router.js';
 import { startIntrusionRuntime } from './intrusion/runtime.js';
 import { buildCfAccessRouter } from './cf-tunnel/access-router.js';
 import { buildCfAccessPolicyRouter } from './cf-tunnel/access-policy-router.js';
+import { buildCfAccessTokenHeaderRouter } from './cf-tunnel/access-token-header-router.js';
 import { buildCfRemovalRouter } from './cf-tunnel/removal-router.js';
 import { startRetentionLoop } from './db/retention.js';
 import { startProcessLogTail, type ProcessLogTailHandle } from './log/process-log-tail.js';
@@ -914,6 +915,7 @@ export async function bootObservability(options: BootObservabilityOptions = {}):
   // 同ブローカーの Access アプリ / DNS (/api/v1/cf-access/*, /api/v1/cf-tunnel/dns)
   app.route('/', buildCfAccessRouter());
   app.route('/', buildCfAccessPolicyRouter());
+  app.route('/', buildCfAccessTokenHeaderRouter());
   app.route('/', buildCfRemovalRouter());
 
   // 運用メタ (frontend が SafeMode バッジ等を出すため)。
