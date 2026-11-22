@@ -76,23 +76,29 @@ describe('loopback gateway', () => {
     const port = await listen(reservation);
     await new Promise<void>(resolve => reservation.close(() => resolve()));
     const localConfig = { ...config, enforcement: 'request-filter' as const, routes: [{ ...config.routes[0]!,
-      origin: `http://127.0.0.1:${originPort}`, foreignCountryPaths: ['/v1/instructions'] }] };
+      origin: `http://127.0.0.1:${originPort}`, foreignCountryPaths: ['/v1/instructions'],
+      foreignCountryRequiredHeaders: ['x-excubitor-token', 'authorization'] }] };
     const evidence = vi.fn();
     const filter = new RequestFilter(localConfig, { evidence, notifyDenied: vi.fn().mockResolvedValue(undefined), warn: vi.fn(), now: Date.now });
     const gateway = await startIntrusionGateway(localConfig, port, filter);
-    const status = (path: string, country: string) => new Promise<number>((resolve, reject) => {
-      const req = request(`http://127.0.0.1:${port}${path}`, { headers: { host: 'app.example.com', 'cf-ipcountry': country, 'cf-connecting-ip': '203.0.113.1' } }, res => {
+    const status = (path: string, country: string, extra: Record<string, string> = { 'x-excubitor-token': 'k' }) => new Promise<number>((resolve, reject) => {
+      const req = request(`http://127.0.0.1:${port}${path}`, { headers: { host: 'app.example.com', 'cf-ipcountry': country, 'cf-connecting-ip': '203.0.113.1', ...extra } }, res => {
         res.resume(); res.on('end', () => resolve(res.statusCode ?? 0));
       }); req.on('error', reject); req.end();
     });
     try {
       expect(await status('/v1/instructions?x=1', 'US')).toBe(200);
+      expect(await status('/v1/instructions', 'US', { authorization: 'Bearer k' })).toBe(200);
+      expect(await status('/v1/instructions', 'US', {})).toBe(403);
+      expect(await status('/v1/instructions', 'US', { 'x-excubitor-token': '' })).toBe(403);
       expect(await status('/v1/instructionsX', 'US')).toBe(403);
       expect(await status('/other', 'US')).toBe(403);
       expect(await status('/v1/instructions', 'T1')).toBe(403);
       expect(await status('/other', 'JP')).toBe(200);
       await vi.waitFor(() => expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ country: 'US', path: '/v1/instructions' }), 200,
         { source: 'upstream', action: 'allow', reason: 'foreign_country_exempt' }));
+      // Presence only: no header value reaches the evidence passed to logging.
+      expect(JSON.stringify(evidence.mock.calls)).not.toMatch(/Bearer k|"k"/);
     } finally {
       await gateway.close();
       await filter.stop();

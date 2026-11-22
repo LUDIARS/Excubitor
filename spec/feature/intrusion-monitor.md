@@ -62,8 +62,15 @@ A route may carry `foreignCountryPaths` (1-16 literal prefixes, each 2-256 chara
 with `/`). `/` alone, `*`, `?`, `%`, empty or dot segments and a trailing `/` are rejected by the
 config schema. The detector decodes the request path exactly as the exploit-path check does and
 matches on a segment boundary (`path === prefix || path.startsWith(prefix + "/")`); a malformed
-escape never matches. Only then are `foreign_country` and `unknown_country` skipped for that
-request. Tor (`T1`), invalid identity, exploit paths, request/authentication bursts, capacity
+escape never matches. The route must also set `foreignCountryRequiredHeaders` (1-4 lower-case
+RFC 7230 token names); the schema rejects either field without the other, so no keyless foreign
+exemption can be configured. Headers every client sends or Cloudflare adds (`host`, `cf-*`,
+`x-forwarded-*`, `forwarded`, `user-agent`, `accept*`, `connection`, `content-*`, `cookie`,
+`origin`, `referer`, `upgrade`) are rejected. The gateway checks presence only: at least one
+named header with a non-blank value. The value is never compared, carried in evidence, or logged;
+the origin service validates the credential. Only when both the path and a header match are
+`foreign_country` and `unknown_country` skipped for that request; otherwise the request is denied
+with `foreign_country` (403) as before. Tor (`T1`), invalid identity, exploit paths, request/authentication bursts, capacity
 limits and any service request policy still apply. Other routes and other paths on the same route
 keep the allowed-country check. A forwarded exempt request is recorded as `decision=allow` with
 `reason=foreign_country_exempt` (log format unchanged otherwise).
@@ -74,7 +81,8 @@ restart. Example for the Concordia playtest relay (the Tunnel already forwards o
 
 ```json
 { "hostname": "cc-playtest.ai-run-do.com", "service": "concordia", "origin": "http://127.0.0.1:...",
-  "foreignCountryPaths": ["/v1/instructions"] }
+  "foreignCountryPaths": ["/v1/instructions"],
+  "foreignCountryRequiredHeaders": ["x-excubitor-token", "authorization"] }
 ```
 
 ## Evidence and reporting

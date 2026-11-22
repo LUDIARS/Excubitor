@@ -11,6 +11,7 @@ frontend/dist-dmz/
 .vscode/
 coverage/
 .task-tmp/
+.test-tmp/
 *.tsbuildinfo
 
 # runtime artifacts

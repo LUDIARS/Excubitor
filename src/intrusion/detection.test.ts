@@ -29,12 +29,14 @@ describe('intrusion policy', () => {
   });
   it('lets non-allowed countries through only on a route foreign-country path, keeping every other check', () => {
     const detector = new IntrusionDetector(config);
-    const exempt = { ...event, foreignCountryPaths: ['/v1/instructions'], path: '/v1/instructions' };
+    const exempt = { ...event, foreignCountryPaths: ['/v1/instructions'], foreignCountryHeaderPresent: true, path: '/v1/instructions' };
     expect(detector.inspect({ ...exempt, country: 'US' })).toBeNull();
     expect(detector.inspect({ ...exempt, country: 'XX', path: '/v1/instructions/x' })).toBeNull();
     expect(detector.inspect({ ...exempt, country: 'US', path: '/v1/instructionsX' })).toBe('foreign_country');
     expect(detector.inspect({ ...exempt, country: 'US', path: '/other' })).toBe('foreign_country');
     expect(detector.inspect({ ...event, country: 'US', path: '/v1/instructions' })).toBe('foreign_country');
+    expect(detector.inspect({ ...exempt, country: 'US', foreignCountryHeaderPresent: false })).toBe('foreign_country');
+    expect(detector.inspect({ ...exempt, country: 'XX', foreignCountryHeaderPresent: undefined })).toBe('unknown_country');
     expect(detector.inspect({ ...exempt, country: 'T1' })).toBe('foreign_country');
     expect(detector.inspect({ ...exempt, country: 'US', clientIp: 'bad' })).toBe('invalid_identity');
     expect(detector.inspect({ ...exempt, country: 'US', path: '/v1/instructions/%2e%2e/.env' })).toBe('exploit_path');

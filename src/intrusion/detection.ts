@@ -14,6 +14,8 @@ export interface AccessEvidence {
   cfRay?: string | null;
   /** Route-configured literal prefixes where a non-allowed (non-Tor) country may pass. */
   foreignCountryPaths?: readonly string[];
+  /** Gateway-computed presence of a route-required header; the header value itself is never carried. */
+  foreignCountryHeaderPresent?: boolean;
 }
 export type DetectionReason = 'foreign_country' | 'unknown_country' | 'invalid_identity' |
   'exploit_path' | 'request_burst' | 'authentication_burst' | 'capacity_exceeded' | 'evidence_failure';
@@ -29,7 +31,8 @@ export class IntrusionDetector {
   inspect(event: AccessEvidence, servicePolicy = false): DetectionReason | null {
     if (!isIP(event.clientIp)) return 'invalid_identity';
     const path = decodeRequestPath(event.path);
-    const exempt = path !== null && isForeignCountryExempt(event.foreignCountryPaths, path);
+    const exempt = path !== null && event.foreignCountryHeaderPresent === true &&
+      isForeignCountryExempt(event.foreignCountryPaths, path);
     if (!/^[A-Z]{2}$/.test(event.country) || event.country === 'XX') {
       if (event.country === 'T1') return 'foreign_country'; // Tor is never exempt.
       if (!exempt) return 'unknown_country';

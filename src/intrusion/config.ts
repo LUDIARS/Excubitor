@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { isPrivateHttpOrigin, isCloudfrontHttpsOrigin } from './origin.js';
-import { foreignCountryPathsSchema } from './foreign-country-exemption.js';
+import { foreignCountryPathsSchema, foreignCountryRequiredHeadersSchema } from './foreign-country-exemption.js';
 
 const hostname = z.string().regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/);
 export const intrusionConfigSchema = z.object({
@@ -20,6 +20,8 @@ export const intrusionConfigSchema = z.object({
     origin: z.string().url().refine(value => isPrivateHttpOrigin(value) || isCloudfrontHttpsOrigin(value), 'unsupported origin'),
     // Literal path prefixes where non-allowed countries pass; Tor, exploit and rate checks still apply.
     foreignCountryPaths: foreignCountryPathsSchema.optional(),
+    // At least one must be present (non-blank) for the exemption; values are never compared or logged.
+    foreignCountryRequiredHeaders: foreignCountryRequiredHeadersSchema.optional(),
     adoptExisting: z.object({ tunnelId: z.string().uuid(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   }).strict()).min(1).max(200),
   tunnels: z.array(z.object({
@@ -36,6 +38,9 @@ export const intrusionConfigSchema = z.object({
     ctx.addIssue({ code: 'custom', message: 'path-restricted routes require an internal route key' });
   }
   for (const route of config.routes) {
+    if (!route.foreignCountryPaths !== !route.foreignCountryRequiredHeaders) {
+      ctx.addIssue({ code: 'custom', message: 'foreignCountryPaths and foreignCountryRequiredHeaders must be set together' });
+    }
     if (isCloudfrontHttpsOrigin(route.origin) && !route.adoptExisting) {
       ctx.addIssue({ code: 'custom', message: 'HTTPS origin requires existing-route adoption' });
     }
