@@ -18,6 +18,14 @@ describe('request filtering preserves JP availability', () => {
     expect(filter.status()).toMatchObject({state:'armed',incident:null});
     await filter.stop();
   });
+  it('marks a forwarded foreign request on an exempt route path', async () => {
+    const {filter,deps} = harness();
+    const exempt = {...event,country:'US',path:'/v1/instructions',foreignCountryPaths:['/v1/instructions']};
+    expect(filter.inspect(exempt)).toBe(true);
+    filter.response(exempt, 401);
+    expect(deps.evidence).toHaveBeenCalledWith(exempt, 401, {action:'allow',source:'upstream',reason:'foreign_country_exempt'});
+    await filter.stop();
+  });
   it('rejects an exploit request without denying another normal JP request', async () => {
     const {filter} = harness();
     expect(filter.inspect({...event,path:'/.env'})).toBe(false);

@@ -1,6 +1,6 @@
 import { IntrusionDetector, type AccessEvidence, type DetectionReason } from './detection.js';
 import type { IntrusionConfig } from './config.js';
-import type { AccessDecision } from './decision.js';
+import { forwardedReason, type AccessDecision } from './decision.js';
 import type { RequestPolicy } from '../security-defense/request-policy.js';
 
 export interface RequestFilterDeps {
@@ -21,7 +21,7 @@ export class RequestFilter {
   private nextNotification = -Infinity;
   private readonly observations = new WeakMap<AccessEvidence, AccessDecision>();
 
-  constructor(config: IntrusionConfig, private readonly deps: RequestFilterDeps) {
+  constructor(private readonly config: IntrusionConfig, private readonly deps: RequestFilterDeps) {
     this.detector = new IntrusionDetector(config);
   }
   status(): { state: 'armed'; incident: null; logging: 'healthy' | 'failed' } {
@@ -45,7 +45,7 @@ export class RequestFilter {
     const reason = this.deps.policy?.handles(event.service) ? null : this.detector.response({ ...event, at: this.deps.now() }, status);
     const decision = this.deps.policy?.response(event, status) ?? this.observations.get(event);
     this.observations.delete(event);
-    this.record(event, status, decision ?? { source: 'upstream', action: reason ? 'observe' : 'allow', reason: reason ?? 'none' });
+    this.record(event, status, decision ?? { source: 'upstream', action: reason ? 'observe' : 'allow', reason: reason ?? forwardedReason(this.config, event) });
     if (reason) this.report(event, reason);
   }
   private record(event: AccessEvidence, status: number, decision: AccessDecision): void {

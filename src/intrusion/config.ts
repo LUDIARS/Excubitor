@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { isPrivateHttpOrigin, isCloudfrontHttpsOrigin } from './origin.js';
+import { foreignCountryPathsSchema } from './foreign-country-exemption.js';
 
 const hostname = z.string().regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/);
 export const intrusionConfigSchema = z.object({
@@ -17,6 +18,8 @@ export const intrusionConfigSchema = z.object({
     forwardHost: z.string().regex(/^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/).max(259).optional(),
     service: z.string().regex(/^[a-z0-9_-]{1,64}$/),
     origin: z.string().url().refine(value => isPrivateHttpOrigin(value) || isCloudfrontHttpsOrigin(value), 'unsupported origin'),
+    // Literal path prefixes where non-allowed countries pass; Tor, exploit and rate checks still apply.
+    foreignCountryPaths: foreignCountryPathsSchema.optional(),
     adoptExisting: z.object({ tunnelId: z.string().uuid(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   }).strict()).min(1).max(200),
   tunnels: z.array(z.object({

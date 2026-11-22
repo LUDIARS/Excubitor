@@ -27,6 +27,22 @@ describe('intrusion policy', () => {
     expect(detector.response(event, 401)).toBeNull();
     expect(detector.response(event, 403)).toBe('authentication_burst');
   });
+  it('lets non-allowed countries through only on a route foreign-country path, keeping every other check', () => {
+    const detector = new IntrusionDetector(config);
+    const exempt = { ...event, foreignCountryPaths: ['/v1/instructions'], path: '/v1/instructions' };
+    expect(detector.inspect({ ...exempt, country: 'US' })).toBeNull();
+    expect(detector.inspect({ ...exempt, country: 'XX', path: '/v1/instructions/x' })).toBeNull();
+    expect(detector.inspect({ ...exempt, country: 'US', path: '/v1/instructionsX' })).toBe('foreign_country');
+    expect(detector.inspect({ ...exempt, country: 'US', path: '/other' })).toBe('foreign_country');
+    expect(detector.inspect({ ...event, country: 'US', path: '/v1/instructions' })).toBe('foreign_country');
+    expect(detector.inspect({ ...exempt, country: 'T1' })).toBe('foreign_country');
+    expect(detector.inspect({ ...exempt, country: 'US', clientIp: 'bad' })).toBe('invalid_identity');
+    expect(detector.inspect({ ...exempt, country: 'US', path: '/v1/instructions/%2e%2e/.env' })).toBe('exploit_path');
+    expect(detector.inspect({ ...exempt, country: 'US', path: '/v1/instructions/%E0%A4%A' })).toBe('foreign_country');
+    const burst = new IntrusionDetector(config);
+    for (let i = 0; i < 9; i++) expect(burst.inspect({ ...exempt, country: 'US' })).toBeNull();
+    expect(burst.inspect({ ...exempt, country: 'US' })).toBe('request_burst');
+  });
   it('rejects arbitrary upstreams, credentials and incomplete tunnel coverage', () => {
     expect(() => intrusionConfigSchema.parse({ ...config, routes: [{ ...config.routes[0], origin: 'https://external.example' }] })).toThrow();
     expect(() => intrusionConfigSchema.parse({ ...config, tunnels: [] })).toThrow();

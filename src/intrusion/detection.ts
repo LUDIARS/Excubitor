@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import type { IntrusionConfig } from './config.js';
+import { decodeRequestPath, isForeignCountryExempt } from './foreign-country-exemption.js';
 
 export interface AccessEvidence {
   service: string;
@@ -11,6 +12,8 @@ export interface AccessEvidence {
   at: number;
   requestId?: string;
   cfRay?: string | null;
+  /** Route-configured literal prefixes where a non-allowed (non-Tor) country may pass. */
+  foreignCountryPaths?: readonly string[];
 }
 export type DetectionReason = 'foreign_country' | 'unknown_country' | 'invalid_identity' |
   'exploit_path' | 'request_burst' | 'authentication_burst' | 'capacity_exceeded' | 'evidence_failure';
@@ -25,16 +28,13 @@ export class IntrusionDetector {
 
   inspect(event: AccessEvidence, servicePolicy = false): DetectionReason | null {
     if (!isIP(event.clientIp)) return 'invalid_identity';
+    const path = decodeRequestPath(event.path);
+    const exempt = path !== null && isForeignCountryExempt(event.foreignCountryPaths, path);
     if (!/^[A-Z]{2}$/.test(event.country) || event.country === 'XX') {
-      return event.country === 'T1' ? 'foreign_country' : 'unknown_country';
-    }
-    if (!this.config.allowedCountries.includes(event.country)) return 'foreign_country';
-    let path = event.path;
-    try {
-      path = decodeURIComponent(path);
-      for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(path); i++) path = decodeURIComponent(path);
-    }
-    catch { return 'exploit_path'; }
+      if (event.country === 'T1') return 'foreign_country'; // Tor is never exempt.
+      if (!exempt) return 'unknown_country';
+    } else if (!this.config.allowedCountries.includes(event.country) && !exempt) return 'foreign_country';
+    if (path === null) return 'exploit_path';
     if (/(?:^|[\\/])\.\.(?:[\\/]|$)|\x00|(?:^|\/)\.(?:env(?:\.|\/|$)|git(?:\/|$))|\/(?:etc\/passwd|proc\/self\/environ)(?:\/|$)/i.test(path)) {
       return 'exploit_path';
     }

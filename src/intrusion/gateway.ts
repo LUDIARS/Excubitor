@@ -26,7 +26,8 @@ export async function startIntrusionGateway(config: IntrusionConfig, port: numbe
     const evidence: AccessEvidence = { service: route.service, hostname: route.hostname,
       clientIp: typeof ip === 'string' ? ip : '', country: typeof country === 'string' ? country : '',
       path: raw.split('?')[0] ?? '/', method: request.method ?? 'GET', at: now(),
-      requestId: randomUUID(), cfRay: userAccessMetadata(request.headers).cf_ray };
+      requestId: randomUUID(), cfRay: userAccessMetadata(request.headers).cf_ray,
+      ...(route.foreignCountryPaths ? { foreignCountryPaths: route.foreignCountryPaths } : {}) };
     recordUserAccess?.(evidence, userAccessMetadata(request.headers));
     if (!monitor.inspect(evidence)) return null;
     // Restore the reviewed origin Host; the internal selector must never reach the service.

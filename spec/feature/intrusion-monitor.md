@@ -53,6 +53,30 @@ state. Never delete DNS, tunnels, Access applications or firewall management rul
 An explicit maintenance recovery restores verified routes and clears the local
 latch only after investigation; this change provides no automatic reset endpoint.
 
+## Route foreign-country paths {#SPEC-EX-INTRUSION-FOREIGN-PATHS}
+
+User authorization: neco, 2026-11-23: Muse reaches Concordia from outside JP, so a reviewed path
+must pass the country block without opening the rest of the site.
+
+A route may carry `foreignCountryPaths` (1-16 literal prefixes, each 2-256 characters, starting
+with `/`). `/` alone, `*`, `?`, `%`, empty or dot segments and a trailing `/` are rejected by the
+config schema. The detector decodes the request path exactly as the exploit-path check does and
+matches on a segment boundary (`path === prefix || path.startsWith(prefix + "/")`); a malformed
+escape never matches. Only then are `foreign_country` and `unknown_country` skipped for that
+request. Tor (`T1`), invalid identity, exploit paths, request/authentication bursts, capacity
+limits and any service request policy still apply. Other routes and other paths on the same route
+keep the allowed-country check. A forwarded exempt request is recorded as `decision=allow` with
+`reason=foreign_country_exempt` (log format unchanged otherwise).
+
+The list lives only in `data/intrusion-config.json`, edited by a human, followed by an Excubitor
+restart. Example for the Concordia playtest relay (the Tunnel already forwards only
+`^/v1/instructions(/|$)` to the gateway):
+
+```json
+{ "hostname": "cc-playtest.ai-run-do.com", "service": "concordia", "origin": "http://127.0.0.1:...",
+  "foreignCountryPaths": ["/v1/instructions"] }
+```
+
 ## Evidence and reporting
 
 Record access evidence in Vg JSONL with a structured `ctx.evt=security_access`.

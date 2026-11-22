@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { IntrusionDetector, type AccessEvidence, type DetectionReason } from './detection.js';
 import type { IntrusionConfig } from './config.js';
 import type { Incident } from './store.js';
-import type { AccessDecision } from './decision.js';
+import { forwardedReason, type AccessDecision } from './decision.js';
 
 export interface MonitorDeps {
   load(): Incident | null;
@@ -48,7 +48,7 @@ export class IntrusionMonitor {
     // No growing blocked-request log or report storm after the first incident.
     if (this.incident) return;
     const reason = this.detector.response({ ...event, at: this.deps.now() }, status);
-    try { this.deps.evidence(event, status, { source: 'upstream', action: reason ? 'observe' : 'allow', reason: reason ?? 'none' }); }
+    try { this.deps.evidence(event, status, { source: 'upstream', action: reason ? 'observe' : 'allow', reason: reason ?? forwardedReason(this.config, event) }); }
     catch { this.trip(event, 'evidence_failure'); return; }
     if (reason) this.trip(event, reason);
   }

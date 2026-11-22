@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream';
 import { describe, it, expect, vi } from 'vitest';
 import { startIntrusionGateway } from './gateway.js';
 import { IntrusionMonitor } from './monitor.js';
+import { RequestFilter } from './request-filter.js';
 import { config } from './test-fixtures.js';
 
 async function listen(server: Server): Promise<number> {
@@ -65,6 +66,36 @@ describe('loopback gateway', () => {
       await gateway?.close();
       await monitor.stop();
       for (const socket of originSockets) socket.destroy();
+      await new Promise<void>(resolve => origin.close(() => resolve()));
+    }
+  });
+  it('forwards a foreign request only on the route foreign-country path and denies the rest', async () => {
+    const origin = createServer((_incoming, response) => response.end('ok'));
+    const originPort = await listen(origin);
+    const reservation = createServer();
+    const port = await listen(reservation);
+    await new Promise<void>(resolve => reservation.close(() => resolve()));
+    const localConfig = { ...config, enforcement: 'request-filter' as const, routes: [{ ...config.routes[0]!,
+      origin: `http://127.0.0.1:${originPort}`, foreignCountryPaths: ['/v1/instructions'] }] };
+    const evidence = vi.fn();
+    const filter = new RequestFilter(localConfig, { evidence, notifyDenied: vi.fn().mockResolvedValue(undefined), warn: vi.fn(), now: Date.now });
+    const gateway = await startIntrusionGateway(localConfig, port, filter);
+    const status = (path: string, country: string) => new Promise<number>((resolve, reject) => {
+      const req = request(`http://127.0.0.1:${port}${path}`, { headers: { host: 'app.example.com', 'cf-ipcountry': country, 'cf-connecting-ip': '203.0.113.1' } }, res => {
+        res.resume(); res.on('end', () => resolve(res.statusCode ?? 0));
+      }); req.on('error', reject); req.end();
+    });
+    try {
+      expect(await status('/v1/instructions?x=1', 'US')).toBe(200);
+      expect(await status('/v1/instructionsX', 'US')).toBe(403);
+      expect(await status('/other', 'US')).toBe(403);
+      expect(await status('/v1/instructions', 'T1')).toBe(403);
+      expect(await status('/other', 'JP')).toBe(200);
+      await vi.waitFor(() => expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ country: 'US', path: '/v1/instructions' }), 200,
+        { source: 'upstream', action: 'allow', reason: 'foreign_country_exempt' }));
+    } finally {
+      await gateway.close();
+      await filter.stop();
       await new Promise<void>(resolve => origin.close(() => resolve()));
     }
   });
