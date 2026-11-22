@@ -136,12 +136,15 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
   const sources = new Map<string, FragmentSource>();
   const failedRoots: string[] = [];
   const issues: FragmentIssue[] = [];
+  const seenDirectories = new Set<string>();
+  let everyRootRead = true;
 
   for (const root of configuredFragmentRoots()) {
     let children: Dirent[];
     try {
       children = readdirSync(root, { withFileTypes: true });
     } catch (error) {
+      everyRootRead = false;
       failedRoots.push(root);
       issues.push({
         kind: 'root-read',
@@ -156,6 +159,7 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
       // Symlinks/junctions are intentionally outside the configured trust boundary.
       if (!child.isDirectory()) continue;
       const repositoryPath = normalizeAbsolute(join(root, child.name));
+      seenDirectories.add(repositoryPath);
       // git worktree は一時的な作業コピーであり、 本番 catalog の供給源にしない。
       // 未マージブランチのサービス定義が混ざるうえ、 本体リポと同じ code を二重供給して
       // マージ順で勝敗が決まる不安定な状態を生む (2026-07-26 実測: ARS_ROOT 直下の
@@ -186,6 +190,9 @@ function discoverFragmentSources(resolveTrust = false): FragmentDiscovery {
     }
   }
 
+  // root が 1 つでも読めなかった回は、消えたのか読めなかったのか区別できないので忘れない。
+  if (everyRootRead) forgetVanishedWorktrees(seenDirectories);
+
   // root が読めなくなった間の retention 用に、解決できた trust を source ごとに控える。
   if (resolveTrust) {
     for (const source of sources.values()) trustCache.set(source.path, source.trusted);
@@ -211,10 +218,30 @@ export function fragmentFiles(): string[] {
  * 親リポの一部として fragment を提供するもの) は従来どおり対象に残す。
  */
 function isGitWorktree(directory: string): boolean {
+  if (knownWorktrees.has(directory)) return true;
   try {
-    return statSync(join(directory, '.git')).isFile();
+    const worktree = statSync(join(directory, '.git')).isFile();
+    if (worktree) knownWorktrees.add(directory);
+    return worktree;
   } catch {
     return false;
+  }
+}
+
+/**
+ * worktree と判定したディレクトリ (SPEC-EX-CATALOG-POLL-COST)。
+ *
+ * ARS_ROOT 直下には worktree が 1,000 件以上並び (2026-11-22 実測 2,088 件中 1,260 件)、 定期確認の
+ * たびに `.git` を同期 stat で調べ直すと主スレッドを止めていた。 worktree の `.git` はファイルの
+ * まま変わらないので「worktree である」ことだけを覚える。 「worktree でない」ことは覚えない —
+ * `git worktree add` の途中 (ディレクトリだけ先にできた瞬間) を通常リポと覚えると、 その worktree の
+ * fragment を以後取り込んでしまうため。 一覧から消えたディレクトリは探索のたびに忘れる。
+ */
+const knownWorktrees = new Set<string>();
+
+function forgetVanishedWorktrees(seen: ReadonlySet<string>): void {
+  for (const directory of knownWorktrees) {
+    if (!seen.has(directory)) knownWorktrees.delete(directory);
   }
 }
 
@@ -377,5 +404,6 @@ export function readFragmentServicesRaw(): FragmentAggregate {
 export function clearFragmentCache(): void {
   fileCache.clear();
   trustCache.clear();
+  knownWorktrees.clear();
   aggregateCache = null;
 }

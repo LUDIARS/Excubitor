@@ -352,6 +352,7 @@ describe('Excubitor backend controller', () => {
         currentToken = token;
         return child;
       });
+      const onError = vi.fn();
       const controller = new ExcubitorBackendController({
         rootDir: process.cwd(),
         spawnBackend,
@@ -362,6 +363,7 @@ describe('Excubitor backend controller', () => {
         healthMonitorIntervalMs: 10,
         healthFailureThreshold: 2,
         restartBaseDelayMs: 1,
+        onError,
       });
       await controller.start();
 
@@ -370,6 +372,7 @@ describe('Excubitor backend controller', () => {
       healthMatches = true;
       await vi.advanceTimersByTimeAsync(10);
       expect(spawnBackend).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
 
       healthMatches = false;
       await vi.advanceTimersByTimeAsync(20);
@@ -377,6 +380,10 @@ describe('Excubitor backend controller', () => {
       await vi.advanceTimersByTimeAsync(2);
 
       expect(first.kill).toHaveBeenCalledWith('SIGTERM');
+      // 健康監視で殺した理由と pid が supervisor ログ (onError) に残る。
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining('health identity failed 2 consecutive checks; terminating pid=3001'),
+      }));
       expect(spawnBackend).toHaveBeenCalledTimes(2);
       expect(controller.status()).toMatchObject({ state: 'running', pid: 3002 });
       await controller.stop();

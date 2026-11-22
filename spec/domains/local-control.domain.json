@@ -40,6 +40,7 @@
   ],
   "cardTemplate": "Summarise the \"local-control\" domain: Versioned IPC, the persistent supervisor, excubitorctl client, and state persistence — the owner of service lifecycle outside the backend.",
   "specRefs": [
+    "spec/feature/main-thread-stall-budget.md",
     "構成 / src/local-control/",
     "起動と制御",
     "README.md ローカル制御モデル"

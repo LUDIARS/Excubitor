@@ -80,7 +80,9 @@ export function watchFragments(
   options: FragmentWatcherOptions = {},
 ): CatalogWatcherHandle {
   const debounceMs = options.debounceMs ?? 500;
-  const pollIntervalMs = options.pollIntervalMs ?? 5_000;
+  // 定期確認は ARS_ROOT 直下 (2,000 件超) を同期で調べ直す。 既存 fragment の変更は個別 watcher が
+  // 即時に拾うので、 追加・削除と通知欠落の救済には 15 秒で足りる (SPEC-EX-CATALOG-POLL-COST)。
+  const pollIntervalMs = options.pollIntervalMs ?? 15_000;
   let watchers: FSWatcher[] = [];
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;

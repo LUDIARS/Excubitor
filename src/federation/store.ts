@@ -9,6 +9,10 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { sealSecret, openSecret, openSecretDetailed } from './secret-box.js';
+import { createOpenedSecretCache } from './opened-secret-cache.js';
+
+/** 定期の listPeers() が毎回 scrypt で開き直さないよう、保存値ごとに開いた結果を覚える (SPEC-EX-PEER-SECRET-CACHE)。 */
+const peerSecrets = createOpenedSecretCache(openSecret);
 
 export interface RemotePeer {
   id: string;
@@ -67,9 +71,9 @@ function rowToPeer(r: Record<string, unknown>): RemotePeer {
     id: r.id as string,
     name: r.name as string,
     base_url: r.base_url as string,
-    token: openSecret(r.token as string | null) ?? '',
+    token: peerSecrets.open(r.token as string | null) ?? '',
     cf_access_id: (r.cf_access_id as string | null) ?? null,
-    cf_access_secret: openSecret(r.cf_access_secret as string | null),
+    cf_access_secret: peerSecrets.open(r.cf_access_secret as string | null),
     enabled: Number(r.enabled) === 1,
     last_ok_at: r.last_ok_at == null ? null : Number(r.last_ok_at),
     last_error: (r.last_error as string | null) ?? null,

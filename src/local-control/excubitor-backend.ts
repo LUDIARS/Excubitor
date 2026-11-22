@@ -656,6 +656,9 @@ export class ExcubitorBackendController {
       if (this.child !== child || this.instanceToken !== token || this.desiredState !== 'running') return;
       this.state = 'crashed';
       this.lastError = `Excubitor backend health identity failed ${failures} consecutive checks`;
+      // 健康監視で殺す経路は、起動し直すと lastError が消えて何も残らなかった (2026-11-22、約 20 時間で
+      // 90 回の再起動が supervisor ログに 1 行も無かった)。 殺す前に supervisor ログへ理由と pid を出す。
+      this.options.onError?.(new Error(`${this.lastError}; terminating pid=${String(child.pid ?? 'unknown')}`));
       await this.emitStatus();
       try {
         await this.terminateChild(child);

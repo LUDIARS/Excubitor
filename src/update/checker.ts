@@ -220,7 +220,10 @@ export async function checkAllUpdates(catalog: Catalog, fetch = false): Promise<
   const byRepo = new Map<string, UpdateStatus>();
   const results: UpdateStatus[] = [];
   const queue = [...catalog.services];
-  const CONCURRENCY = 6;
+  // 1 サービスで git を 3〜4 本起動し、Windows では起動のたびに主スレッドが数十 ms 止まる。
+  // 6 本並べると起動が連続して health 確認 (1 秒) を落としていた (2026-11-22 のプロファイルで
+  // 60 秒中 4.5 秒)。 2 本に絞って、起動の合間に要求を捌けるようにする。
+  const CONCURRENCY = 2;
 
   async function worker(): Promise<void> {
     for (;;) {

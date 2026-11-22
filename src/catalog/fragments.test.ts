@@ -79,6 +79,39 @@ describe('catalog fragments', () => {
     expect(fragmentFiles().some((path) => path.includes('WorkTree'))).toBe(false);
   });
 
+  // SPEC-EX-CATALOG-POLL-COST: worktree であることだけを覚え、通常リポとは覚えない。
+  it('keeps excluding a worktree whose .git file appears after the directory was first seen', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-wt-late-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+
+    // `git worktree add` の途中: ディレクトリだけ先にでき、fragment も .git もまだ無い。
+    mkdirSync(join(root, 'LateWorkTree'), { recursive: true });
+    expect(fragmentFiles()).toEqual([]);
+
+    makeRepoFragment(root, 'LateWorkTree', 'services:\n  - code: late\n    name: Late\n    runtime: node\n');
+    writeFileSync(join(root, 'LateWorkTree', '.git'), 'gitdir: /elsewhere/.git/worktrees/LateWorkTree\n', 'utf8');
+    expect(fragmentFiles()).toEqual([]);
+    expect(readFragmentServicesRaw().services).toEqual([]);
+  });
+
+  it('forgets a removed worktree so a real repository recreated under the same name is read', () => {
+    const root = mkdtempSync(join(tmpdir(), 'excubitor-frag-wt-gone-'));
+    tempDirs.push(root);
+    process.env.EXCUBITOR_ARS_ROOT = root;
+
+    makeRepoFragment(root, 'Reused', 'services:\n  - code: reused\n    name: Reused\n    runtime: node\n');
+    writeFileSync(join(root, 'Reused', '.git'), 'gitdir: /elsewhere/.git/worktrees/Reused\n', 'utf8');
+    expect(fragmentFiles()).toEqual([]);
+
+    rmSync(join(root, 'Reused'), { recursive: true, force: true });
+    expect(fragmentFiles()).toEqual([]);
+
+    makeRepoFragment(root, 'Reused', 'services:\n  - code: reused\n    name: Reused\n    runtime: node\n');
+    mkdirSync(join(root, 'Reused', '.git'), { recursive: true });
+    expect(fragmentFiles()).toHaveLength(1);
+  });
+
   // 所有 catalog は service definition 専用。Excubitor 固有 policy (retention 等) を混ぜた
   // ファイルは黙って一部無視せず、その source ごと弾いて観測可能にする。
   it('rejects a fragment that declares top-level keys other than services', () => {

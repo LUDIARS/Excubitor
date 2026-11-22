@@ -43,6 +43,7 @@
   ],
   "cardTemplate": "Summarise the \"federation\" domain: Cross-node peering: stores remote peers, aggregates local + peer service/host state, and proxies remote control/update under agent-token auth.",
   "specRefs": [
+    "spec/feature/main-thread-stall-budget.md",
     "構成 / src/federation/",
     "注意 (federation)",
     "spec/feature/aws-site.md"

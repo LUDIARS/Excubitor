@@ -15,7 +15,9 @@ import { acquireRedisLock, readRedisJson, redisCacheKey, writeRedisJson } from '
 import { checkAllUpdates, checkUpdate, recentCommits, branchStatus, repoDirOf, type UpdateStatus } from './checker.js';
 import { applyUpdate } from './apply.js';
 
-const UPDATE_CACHE_MS = readPositiveIntEnv('EXCUBITOR_UPDATE_CACHE_MS', 60_000);
+// 一覧の全件確認は全リポジトリで git を数百本起動する。 1 分ごとに回すと主スレッドが詰まるので
+// 既定は 5 分にする (明示の fetch=1 と単一サービスの確認は従来どおりその場で取りに行く)。
+const UPDATE_CACHE_MS = readPositiveIntEnv('EXCUBITOR_UPDATE_CACHE_MS', 300_000);
 const UPDATE_REDIS_REPOPULATE_MS = Math.min(UPDATE_CACHE_MS, 2_000);
 const UPDATE_REDIS_TTL_MS = cacheStorageTtl(UPDATE_CACHE_MS);
 const UPDATE_CACHE_KEY = redisCacheKey('updates:v1');

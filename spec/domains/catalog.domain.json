@@ -28,6 +28,7 @@
   ],
   "cardTemplate": "Summarise the \"catalog\" domain: Aggregates service definitions owned by each repository (excubitor.catalog.yaml), reads Excubitor-only runtime policy (excubitor.config.yaml), syncs to the DB, watches files, and resolves tier/env for each service.",
   "specRefs": [
+    "spec/feature/main-thread-stall-budget.md",
     "構成 / src/catalog/",
     "catalog/FRAGMENTS.md",
     "tier"

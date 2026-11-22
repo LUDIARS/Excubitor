@@ -25,6 +25,7 @@
   ],
   "cardTemplate": "Summarise the \"update\" domain: Git pull/status workflows and scheduled package update, vulnerability, and release-note auditing.",
   "specRefs": [
+    "spec/feature/main-thread-stall-budget.md",
     "構成 / src/update/",
     "Package update audit"
   ],

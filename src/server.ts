@@ -1,4 +1,5 @@
 import { writeDiagnostic } from './shared/diagnostic-log.js';
+import { installBeforeExitReport } from './shared/before-exit-report.js';
 import { runStartupNpmInstallAndAudit } from './startup/npm-install.js';
 
 const port = Number(process.env.EXCUBITOR_PORT ?? 17332);
@@ -60,7 +61,8 @@ process.on('unhandledRejection', (reason) => {
   writeDiagnostic('unhandledRejection', { err });
 });
 
-process.on('beforeExit', (code) => {
+// 1 回だけ記録する。 記録の非同期書き込みが次の beforeExit を呼び、無限に繰り返していた (before-exit-report.ts)。
+installBeforeExitReport(process, (code) => {
   logger.warn({ code }, 'process beforeExit');
   writeDiagnostic('process.beforeExit', { code });
 });
