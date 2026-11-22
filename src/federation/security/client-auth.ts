@@ -2,7 +2,7 @@ import type { RemotePeer } from '../store.js';
 import { signatureHeaders } from '../request-signature.js';
 import { getOrCreateMeshToken } from '../mesh-token.js';
 import { localNodeName } from '../node-snapshot.js';
-import { requiredCredential } from './config.js';
+import { localPrivateKey } from './config.js';
 import { allowsLegacyMonitorPeer, isLegacyMonitorRequest } from './legacy-monitor.js';
 import { readMeshAuthPolicy } from './legacy-monitor-store.js';
 import { issueWorkloadToken } from './authority.js';
@@ -23,7 +23,7 @@ export async function meshRequestHeaders(peer: RemotePeer, method: string, path:
     const target = new URL(peer.base_url);
     if (target.protocol !== 'https:' || target.username || target.password || target.search || target.hash) throw new Error('mesh_https_required');
     const token = await issueWorkloadToken(config, policy.audience, action, resource === 'node:self' ? `node:${policy.audience}` : resource);
-    headers = meshProofHeaders({ privateKey: requiredCredential(config.local.privateKeyEnv), subject: config.local.subject,
+    headers = meshProofHeaders({ privateKey: localPrivateKey(config), subject: config.local.subject,
       audience: policy.audience, token, method, path, body });
   }
   return { ...headers,

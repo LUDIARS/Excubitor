@@ -1,4 +1,4 @@
-import { requiredCredential } from './config.js';
+import { localPrivateKey } from './config.js';
 import { issueWorkloadToken } from './authority.js';
 import { meshProofHeaders } from './proof.js';
 import { readMeshAuthPolicy } from './legacy-monitor-store.js';
@@ -18,7 +18,7 @@ export async function issueReauthorizationHeaders(peerId: string, scope: Reautho
   if (peer?.mode !== 'cr-v1') throw new Error('peer_auth_not_configured');
   const token = await issueWorkloadToken(config, peer.audience, scope.action, scope.resource);
   return meshProofHeaders({
-    privateKey: requiredCredential(config.local.privateKeyEnv),
+    privateKey: localPrivateKey(config),
     subject: config.local.subject,
     audience: peer.audience,
     token,

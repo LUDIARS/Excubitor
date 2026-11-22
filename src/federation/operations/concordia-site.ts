@@ -14,7 +14,7 @@
 import { z } from 'zod';
 import type { Service } from '../../catalog/loader.js';
 import { failed, succeeded, type ExecutionOutcome, type OperationContext } from './context.js';
-import { readMeshSecurityConfig, requiredCredential, type MeshSecurityConfig } from '../security/config.js';
+import { localPrivateKey, readMeshSecurityConfig, type requiredCredential, type MeshSecurityConfig } from '../security/config.js';
 import { issueWorkloadToken } from '../security/authority.js';
 import { meshProofHeaders } from '../security/proof.js';
 
@@ -96,7 +96,7 @@ export async function runConcordiaSiteOperation(
     if (!audience || !audience.endsWith('/concordia')) throw new Error('concordia_workload_not_configured');
     const accessToken = await (deps.issueToken ?? issueWorkloadToken)(config, audience, 'hq-config', 'service:concordia');
     headers = meshProofHeaders({
-      privateKey: (deps.credential ?? requiredCredential)(config.local.privateKeyEnv),
+      privateKey: localPrivateKey(config, deps.credential),
       subject: config.local.subject, audience, token: accessToken, method: 'PUT',
       path: '/v1/federation/site', body,
     });

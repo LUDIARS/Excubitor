@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { WorkloadId } from './claims.js';
 
@@ -16,8 +17,13 @@ export const MeshSecuritySchema = z.object({
   version: z.literal(1),
   local: z.object({
     subject: WorkloadId,
-    clientIdEnv: EnvName, clientSecretEnv: EnvName, privateKeyEnv: EnvName,
-  }).strict(),
+    clientIdEnv: EnvName, clientSecretEnv: EnvName,
+    // Exactly one source: a single-line env var, or an owner-only PEM file for hosts
+    // whose service manager cannot carry a multi-line value (systemd EnvironmentFile).
+    privateKeyEnv: EnvName.optional(),
+    privateKeyFile: z.string().min(1).refine(isAbsolute, 'absolute path required').optional(),
+  }).strict().refine(local => (local.privateKeyEnv === undefined) !== (local.privateKeyFile === undefined),
+    'exactly one of privateKeyEnv or privateKeyFile is required'),
   authority: z.object({ tokenUrl: HttpsUrl, introspectionUrl: HttpsUrl }).strict(),
   // Recipient for local Ex -> Cc provisioning; never infer it from an Ex peer.
   concordia: z.object({ audience: WorkloadId.refine(value => value.endsWith('/concordia')) }).strict().optional(),
@@ -45,5 +51,25 @@ export function readMeshSecurityConfig(): MeshSecurityConfig {
 export function requiredCredential(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error('mesh_credential_not_configured');
+  return value;
+}
+
+/** PEM for the local workload proof key, from the configured file or env var. */
+export function localPrivateKey(
+  config: MeshSecurityConfig,
+  credential: (name: string) => string = requiredCredential,
+): string {
+  const { privateKeyEnv, privateKeyFile } = config.local;
+  if (privateKeyEnv) return credential(privateKeyEnv);
+  if (!privateKeyFile) throw new Error('mesh_credential_not_configured');
+  let mode: number;
+  try {
+    mode = statSync(privateKeyFile).mode;
+  } catch {
+    throw new Error('mesh_credential_not_configured');
+  }
+  if (process.platform !== 'win32' && (mode & 0o077) !== 0) throw new Error('mesh_private_key_file_permissions');
+  const value = readFileSync(privateKeyFile, 'utf8');
+  if (!value.trim()) throw new Error('mesh_credential_not_configured');
   return value;
 }

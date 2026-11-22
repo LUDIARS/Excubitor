@@ -10,6 +10,8 @@
 
 設定は管理者が配備する `EXCUBITOR_MESH_SECURITY_FILE` の JSON。peer UUID ごとに `disabled` / `legacy-monitor` / `cr-v1` を固定する。未設定の peer は拒否する (この設定ファイル自体が未配備の移行期間だけは、下の「移行用 legacy-monitor」を明示的に有効にした場合に限り、登録済み peer を legacy-monitor として扱う)。legacy は health/node の読み取りだけで、Vault、bundle、operation は拒否する。Cr の失敗は legacy に戻さない。既存 remote_peers は接続・表示に再利用し、新認証の秘密鍵を peer DB に保存しない。
 
+自拠点の client_id・client_secret・秘密鍵は Vault ではなく Excubitor supervisor の OS 環境変数から読む (`local.clientIdEnv` / `clientSecretEnv` / `privateKeyEnv` に変数名を書く)。秘密鍵は複数行の PEM なので、改行を値に持てない起動設定 (systemd の `EnvironmentFile` など) の拠点では、`privateKeyEnv` の代わりに `local.privateKeyFile` に PEM ファイルの絶対パスを書く。`privateKeyEnv` と `privateKeyFile` はどちらか一方だけ指定する。POSIX ではファイルが持ち主以外に読める (mode に group/other ビットがある) と `mesh_private_key_file_permissions` で拒否し、無い・空なら `mesh_credential_not_configured` になる。
+
 Cr の現行 project PASETO を workload token として流用しない。Ex の adapter は HTTPS の token/introspection endpoint を明示設定し、redirect を禁止する。受信側は自身の workload credentials で Cr に毎回 introspection を行い、`active:true` と厳密な workload claims を検査する。認可結果はキャッシュしない。Cr 障害時は mesh 要求を拒否し、既存のローカルサービスを停止しない。これは公開鍵による offline 検証とは別の、オンライン失効確認方式である。Cr 側 endpoint の実装・登録が揃うまで `cr-v1` を稼働有効化しない。
 
 ## adapter wire contract（Cr 側との突合が移行条件）
